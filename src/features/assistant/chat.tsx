@@ -191,6 +191,9 @@ export function Chat({
   }, []);
 
   const lastIsUser = messages.at(-1)?.role === "user";
+  const lastUserId = messages.findLast((m) => m.role === "user")?.id ?? null;
+  // A saved message with no reply (e.g. the page was reloaded after an error).
+  const unanswered = lastIsUser && !busy && !failure && !messages.at(-1)!.id.startsWith("pending-");
   const empty = messages.length === 0 && !busy;
   const tooLong = draft.length > CHAT_MESSAGE_MAX;
 
@@ -231,7 +234,7 @@ export function Chat({
                   <ProposalGroup
                     messageId={proposalSource.id}
                     proposals={proposalSource.proposals}
-                    clarifications={proposalSource.clarifications}
+                    clarifications={proposalSource.id === lastUserId ? proposalSource.clarifications : []}
                     extractionError={proposalSource.extractionError}
                     onProposalsChange={onProposalsChange}
                     onAnswer={answer}
@@ -248,6 +251,22 @@ export function Chat({
           )}
           {busy && !streaming && (
             <ThinkingState label={mode === "onboarding" && messages.length === 0 ? "Getting ready" : "Thinking"} />
+          )}
+
+          {unanswered && aiConfigured && (
+            <SystemNotice
+              action={
+                <button
+                  type="button"
+                  onClick={() => void run({ retry: true })}
+                  className={buttonClasses("secondary", "sm", "-my-1 h-7 px-2.5 text-[12px]")}
+                >
+                  <RotateCcw className="size-3.5" /> Get a reply
+                </button>
+              }
+            >
+              This message doesn&apos;t have a reply yet.
+            </SystemNotice>
           )}
 
           {failure && (
