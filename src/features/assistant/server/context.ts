@@ -64,13 +64,13 @@ export function toKnownFacts(ctx: UserContext): KnownFact[] {
   const tz = ctx.profile.timezone;
   const facts: KnownFact[] = [];
   for (const c of [...ctx.commitments.fixed, ...ctx.commitments.flexible]) {
-    facts.push({ category: "commitment", title: c.title, area: c.area, detail: commitmentDetail(c, tz) });
+    facts.push({ category: "commitment", title: c.title, area: c.area ?? "personal", detail: commitmentDetail(c, tz) });
   }
   for (const g of ctx.goals) {
     const detail = [g.horizon === "long_term" ? "long term" : g.horizon === "short_term" ? "short term" : null, g.targetDate ? `by ${g.targetDate}` : null, g.description]
       .filter(Boolean)
       .join(", ");
-    facts.push({ category: "goal", title: g.title, area: g.area, detail: detail || null });
+    facts.push({ category: "goal", title: g.title, area: g.area ?? "personal", detail: detail || null });
   }
   for (const items of Object.values(ctx.facts)) {
     for (const item of items) {

@@ -128,7 +128,8 @@ export function weeklyDaysFromRule(rule: string | null | undefined): Weekday[] |
 /** Editable shape of a commitment in the user's time zone. */
 export type CommitmentDraft = {
   title: string;
-  area: Commitment["area"];
+  /** A life area id, or "" for none. */
+  lifeAreaId: string;
   kind: Commitment["kind"];
   /** Fixed: weekly days. Empty means a one-time event on `date`. */
   days: Weekday[];
@@ -147,7 +148,7 @@ export function commitmentToDraft(c: Commitment, timeZone: string): CommitmentDr
   const end = c.endsAt ? toZoned(c.endsAt, timeZone) : null;
   return {
     title: c.title,
-    area: c.area,
+    lifeAreaId: c.lifeAreaId ?? "",
     kind: c.kind,
     days: weeklyDaysFromRule(c.recurrenceRule) ?? [],
     date: start?.dateKey ?? "",

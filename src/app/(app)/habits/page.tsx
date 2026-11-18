@@ -1,8 +1,7 @@
-import { Button, PageHeader } from "@/components/ui";
-import { GoalList } from "@/features/habits/goal-list";
-import { HabitList } from "@/features/habits/habit-list";
-import { Plus } from "lucide-react";
+import { PageHeader, Skeleton } from "@/components/ui";
+import { HabitsContent } from "@/features/habits/habits-content";
 import type { Metadata } from "next";
+import { Suspense } from "react";
 
 export const metadata: Metadata = { title: "Habits & Goals" };
 
@@ -12,15 +11,17 @@ export default function HabitsPage() {
       <PageHeader
         title="Habits & Goals"
         description="Consistency over intensity. Track what you repeat and where it leads."
-        actions={
-          <>
-            <Button variant="secondary" size="sm" disabled><Plus className="size-3.5" /> Habit</Button>
-            <Button size="sm" disabled><Plus className="size-3.5" /> Goal</Button>
-          </>
-        }
       />
-      <HabitList />
-      <GoalList />
+      <Suspense
+        fallback={
+          <div className="space-y-8">
+            <Skeleton className="h-72 rounded-2xl" />
+            <Skeleton className="h-56 rounded-2xl" />
+          </div>
+        }
+      >
+        <HabitsContent />
+      </Suspense>
     </div>
   );
 }

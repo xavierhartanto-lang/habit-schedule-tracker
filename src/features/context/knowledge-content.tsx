@@ -2,8 +2,9 @@ import { getSessionUser } from "@/lib/auth/session";
 import { listCommitments } from "@/lib/db/commitments";
 import { listContextItems } from "@/lib/db/context-items";
 import { listGoals } from "@/lib/db/goals";
+import { listLifeAreas } from "@/lib/db/life-areas";
 import { getPreferences, getProfile } from "@/lib/db/profiles";
-import type { Commitment, ContextCategory, ContextItem, Goal } from "@/lib/domain/types";
+import type { Commitment, ContextCategory, ContextItem, Goal, LifeAreaRecord } from "@/lib/domain/types";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { DEFAULT_PREFERENCES, DEFAULT_PROFILE } from "@/features/settings/defaults";
 import { ShieldCheck } from "lucide-react";
@@ -11,6 +12,7 @@ import Link from "next/link";
 import { CATEGORY_COPY } from "./categories";
 import { formatTimeRange } from "./format";
 import { CommitmentSection, ContextItemSection, GoalSection } from "./sections";
+import { LifeAreasProvider } from "./life-areas-context";
 
 type Loaded = {
   commitments: Commitment[];
@@ -48,16 +50,19 @@ export async function KnowledgeContent() {
   let loadError = false;
   let timeZone = DEFAULT_PROFILE.timezone;
   let prefs = DEFAULT_PREFERENCES;
+  let areas: LifeAreaRecord[] = [];
 
   if (user) {
     try {
-      const [commitments, goals, items, profile, preferences] = await Promise.all([
+      const [commitments, goals, items, profile, preferences, lifeAreas] = await Promise.all([
         listCommitments(user.id),
         listGoals(user.id),
         listContextItems(user.id),
         getProfile(user.id),
         getPreferences(user.id),
+        listLifeAreas(user.id),
       ]);
+      areas = lifeAreas;
       data = { commitments, goals, items };
       timeZone = profile?.timezone ?? timeZone;
       prefs = preferences ?? prefs;
@@ -80,6 +85,7 @@ export async function KnowledgeContent() {
   );
 
   return (
+    <LifeAreasProvider areas={areas}>
     <div className="space-y-6">
       {!user && (
         <Notice>
@@ -157,5 +163,6 @@ export async function KnowledgeContent() {
         );
       })}
     </div>
+    </LifeAreasProvider>
   );
 }
