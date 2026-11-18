@@ -474,12 +474,12 @@ function PlanRow({
         {!locked && (open || (item.status === "applied" && item.canUndo)) && (
           <div className="-ml-2 mt-1.5 flex flex-wrap items-center gap-0.5">
             {canRetime && (
-              <button type="button" onClick={onEdit} className={buttonClasses("ghost", "sm", "h-7 px-2 text-[12px]")}>
-                <Pencil className="size-3" /> Edit time
+              <button type="button" onClick={onEdit} className={buttonClasses("ghost", "sm", "h-7 px-2 text-[12px] text-ink-3")}>
+                <Pencil className="size-3" /> Edit
               </button>
             )}
             {canAlternate && (
-              <button type="button" onClick={onAlternative} className={buttonClasses("ghost", "sm", "h-7 px-2 text-[12px]")}>
+              <button type="button" onClick={onAlternative} className={buttonClasses("ghost", "sm", "h-7 px-2 text-[12px] text-ink-3")}>
                 <RefreshCw className="size-3" /> Other times
               </button>
             )}
@@ -488,13 +488,13 @@ function PlanRow({
                 type="button"
                 onClick={onReject}
                 aria-label={`Reject ${item.title}`}
-                className={buttonClasses("ghost", "sm", "h-7 px-2 text-[12px] hover:text-danger")}
+                className={buttonClasses("ghost", "sm", "h-7 px-2 text-[12px] text-ink-3 hover:text-danger")}
               >
                 <X className="size-3" /> Reject
               </button>
             )}
             {item.status === "applied" && item.canUndo && (
-              <button type="button" onClick={onUndo} className={buttonClasses("ghost", "sm", "h-7 px-2 text-[12px]")}>
+              <button type="button" onClick={onUndo} className={buttonClasses("ghost", "sm", "h-7 px-2 text-[12px] text-ink-3")}>
                 <Undo2 className="size-3" /> Undo
               </button>
             )}

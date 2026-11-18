@@ -37,6 +37,9 @@ export default function HomePage(props: PageProps<"/">) {
       </div>
 
       <aside aria-label="Your schedule at a glance" className="min-w-0 space-y-4 lg:pt-[76px]">
+        <Suspense fallback={null}>
+          <WeekGlance />
+        </Suspense>
         <Suspense fallback={<TodayScheduleSkeleton />}>
           <TodaySchedule />
         </Suspense>
@@ -45,9 +48,6 @@ export default function HomePage(props: PageProps<"/">) {
         </Suspense>
         <Suspense fallback={<SectionSkeleton title="Tasks" />}>
           <PriorityTasks />
-        </Suspense>
-        <Suspense fallback={null}>
-          <WeekGlance />
         </Suspense>
       </aside>
     </div>

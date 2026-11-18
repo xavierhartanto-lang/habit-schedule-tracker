@@ -9,7 +9,26 @@ import { AssistantMessage, SystemNotice, ThinkingState, UserMessage } from "./me
 import { ProposalGroup } from "./proposal-cards";
 import { RichText } from "./rich-text";
 import { streamChat } from "./stream";
-import { CHAT_MESSAGE_MAX, type ChatMessage, type ClientAiError, type Proposal } from "./types";
+import { PlanCard, type PlanCardActions } from "./plan-card";
+import { approvePlanItems, editPlanItem, rejectPlanItems, requestAlternatives, undoPlanItem } from "./plan-actions";
+import type { Clarify, PlanView } from "./plan-types";
+import { CHAT_MESSAGE_MAX, type ChatMessage as BaseChatMessage, type ClientAiError, type Proposal } from "./types";
+
+/** Phase 4 adds `plan` and `clarify` to assistant messages (see assistant-api.md). */
+type ChatMessage = BaseChatMessage & { plan?: PlanView | null; clarify?: Clarify | null };
+
+/** Stream events added in Phase 4. Typed here too so this file reads them either way. */
+type Phase4Event =
+  | { type: "plan"; messageId: string; plan: PlanView }
+  | { type: "clarify"; messageId: string; clarify: Clarify };
+
+const PLAN_ACTIONS: PlanCardActions = {
+  approve: approvePlanItems,
+  reject: rejectPlanItems,
+  edit: editPlanItem,
+  alternatives: requestAlternatives,
+  undo: undoPlanItem,
+};
 
 /**
  * The live conversation: persisted history, streaming replies, proposal
@@ -24,7 +43,7 @@ export type ChatStarter = { label: string; prompt: string; checkIn?: "daily" | "
 type Props = {
   mode: Mode;
   conversationId: string | null;
-  initialMessages: ChatMessage[];
+  initialMessages: BaseChatMessage[];
   aiConfigured: boolean;
   /** Onboarding: the assistant opens the conversation when it is empty. */
   autoStart?: boolean;
@@ -118,6 +137,16 @@ export function Chat({
         { mode, conversationId, message: request.message, retry: request.retry, checkIn: request.checkIn, opening: sendOpening },
         controller.signal,
       )) {
+        const e4 = event as unknown as Phase4Event | { type: string };
+        if (e4.type === "plan" || e4.type === "clarify") {
+          const ev = e4 as Phase4Event;
+          setMessages((m) =>
+            m.map((x) =>
+              x.id === ev.messageId ? (ev.type === "plan" ? { ...x, plan: ev.plan } : { ...x, clarify: ev.clarify }) : x,
+            ),
+          );
+          continue;
+        }
         switch (event.type) {
           case "http_error":
             if (tempId && !userSaved) {
@@ -284,6 +313,25 @@ export function Chat({
                   <AssistantMessage>
                     <RichText text={m.content} />
                   </AssistantMessage>
+                )}
+                {m.role === "assistant" && m.plan && (
+                  <div className="sm:pl-10">
+                    <PlanCard key={`${m.plan.id}:${m.plan.version}`} plan={m.plan} actions={PLAN_ACTIONS} disabled={busy} />
+                  </div>
+                )}
+                {m.role === "assistant" && m.clarify && i === messages.length - 1 && !busy && aiConfigured && m.clarify.choices.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 pl-10">
+                    {m.clarify.choices.map((c) => (
+                      <button
+                        key={c}
+                        type="button"
+                        onClick={() => void run({ message: c })}
+                        className="rounded-full border border-border bg-surface px-3 py-1.5 text-[12.5px] text-ink-2 transition-colors hover:border-accent/40 hover:bg-accent-soft hover:text-accent-ink"
+                      >
+                        {c}
+                      </button>
+                    ))}
+                  </div>
                 )}
                 {proposalSource && (
                   <ProposalGroup

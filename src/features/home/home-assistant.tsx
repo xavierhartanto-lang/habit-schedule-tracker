@@ -12,7 +12,7 @@ import { loadHomeAssistant } from "./assistant-data";
  */
 
 const PANEL = "flex flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-card";
-const PANEL_HEIGHT = "h-[min(640px,calc(100dvh-15rem))] min-h-[460px]";
+const PANEL_HEIGHT = "h-[min(600px,calc(100dvh-14rem))] min-h-[440px]";
 
 function Title({ greeting, sub }: { greeting: string; sub: string }) {
   return (
@@ -153,7 +153,7 @@ export async function HomeAssistant({ fresh }: { fresh: boolean }) {
             aiConfigured={data.aiConfigured}
             opening={resumed ? null : data.opening.message}
             starters={data.opening.starters}
-            placeholder="Tell me about a deadline, a practice, or a change…"
+            placeholder="Tell me what’s coming up…"
           />
         </div>
       </section>
