@@ -27,7 +27,7 @@ npm run dev                  # http://localhost:3000
 Without Supabase keys the app runs in **preview mode**: every page renders with
 sample data, sign-in is disabled, and settings can't be saved.
 
-Other scripts: `npm run build`, `npm run start`, `npm run lint`.
+Other scripts: `npm run build`, `npm run start`, `npm run lint`, `npm test` (unit tests, no network).
 
 ## Supabase setup
 
@@ -49,6 +49,8 @@ The signup trigger creates a `profiles` row and a `user_preferences` row for eve
 | `NEXT_PUBLIC_SUPABASE_URL` | for auth | yes | Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | for auth | yes | Publishable key (or use `NEXT_PUBLIC_SUPABASE_ANON_KEY` on older projects) |
 | `NEXT_PUBLIC_SITE_URL` | recommended | yes | Base URL for email confirmation links |
+| `ANTHROPIC_API_KEY` | for AI | **no** | Server-side key for the assistant. Without it the app shows an "AI not configured" state. |
+| `WHITESPACE_AI_MODEL` | no | **no** | Model override. Defaults to `claude-opus-5-5`. |
 
 The service-role / secret key is **not used** and must never be given a `NEXT_PUBLIC_` prefix.
 
