@@ -22,6 +22,7 @@ function toContextItem(row: ContextItemRow): ContextItem {
     title: row.title,
     details: row.details,
     area: row.area,
+    lifeAreaId: row.life_area_id,
     attributes: normalizeContextAttributes(row.attributes),
     source: row.source,
     sourceMessageId: row.source_message_id,
@@ -63,7 +64,7 @@ export async function createContextItem(userId: string, input: unknown): Promise
       category: v.category,
       title: v.title,
       details: v.details ?? null,
-      area: v.area ?? null,
+      ...(v.lifeAreaId !== undefined ? { life_area_id: v.lifeAreaId } : { area: v.area ?? null }),
       attributes: v.attributes ?? {},
       source: v.source ?? "manual",
       source_message_id: v.sourceMessageId ?? null,
@@ -91,7 +92,9 @@ export async function updateContextItem(
       ...(v.category !== undefined && { category: v.category }),
       ...(v.title !== undefined && { title: v.title }),
       ...(v.details !== undefined && { details: v.details }),
-      ...(v.area !== undefined && { area: v.area }),
+      ...(v.lifeAreaId !== undefined
+        ? { life_area_id: v.lifeAreaId }
+        : v.area !== undefined && { area: v.area }),
       ...(v.attributes !== undefined && { attributes: v.attributes }),
     })
     .eq("user_id", userId)

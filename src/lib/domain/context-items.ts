@@ -23,6 +23,8 @@ export type ContextItemInput = {
   title: string;
   details?: string | null;
   area?: LifeArea | null;
+  /** Present only when the caller chose a life area explicitly (null = uncategorized). */
+  lifeAreaId?: string | null;
   attributes?: ContextAttributes;
   source?: DataSource;
   sourceMessageId?: string | null;
@@ -105,6 +107,9 @@ export function validateContextItemInput(raw: unknown): ValidationResult<Context
   const title = cleanText(input.title, CONTEXT_TITLE_MAX);
   if (!title) return { ok: false, error: "A title is required." };
   if (input.area != null && !isLifeArea(input.area)) return { ok: false, error: "Unknown life area." };
+  if (input.lifeAreaId != null && input.lifeAreaId !== "" && !isUuid(input.lifeAreaId)) {
+    return { ok: false, error: "Unknown life area." };
+  }
   if (input.source != null && input.source !== "conversation" && input.source !== "manual") {
     return { ok: false, error: "Unknown source." };
   }
@@ -112,18 +117,17 @@ export function validateContextItemInput(raw: unknown): ValidationResult<Context
     return { ok: false, error: "Invalid source message." };
   }
 
-  return {
-    ok: true,
-    value: {
-      category: input.category,
-      title,
-      details: cleanText(input.details, CONTEXT_DETAILS_MAX),
-      area: (input.area as LifeArea | null | undefined) ?? null,
-      attributes: normalizeContextAttributes(input.attributes),
-      source: (input.source as DataSource | undefined) ?? "manual",
-      sourceMessageId: (input.sourceMessageId as string | null | undefined) ?? null,
-    },
+  const value: ContextItemInput = {
+    category: input.category,
+    title,
+    details: cleanText(input.details, CONTEXT_DETAILS_MAX),
+    area: (input.area as LifeArea | null | undefined) ?? null,
+    attributes: normalizeContextAttributes(input.attributes),
+    source: (input.source as DataSource | undefined) ?? "manual",
+    sourceMessageId: (input.sourceMessageId as string | null | undefined) ?? null,
   };
+  if ("lifeAreaId" in input) value.lifeAreaId = (input.lifeAreaId as string | null) || null;
+  return { ok: true, value };
 }
 
 /** Same rules for a partial update. Only provided fields are checked and returned. */
@@ -147,6 +151,12 @@ export function validateContextItemPatch(
   if ("area" in input) {
     if (input.area != null && !isLifeArea(input.area)) return { ok: false, error: "Unknown life area." };
     out.area = (input.area as LifeArea | null) ?? null;
+  }
+  if ("lifeAreaId" in input) {
+    if (input.lifeAreaId != null && input.lifeAreaId !== "" && !isUuid(input.lifeAreaId)) {
+      return { ok: false, error: "Unknown life area." };
+    }
+    out.lifeAreaId = (input.lifeAreaId as string | null) || null;
   }
   if ("attributes" in input) out.attributes = normalizeContextAttributes(input.attributes);
 

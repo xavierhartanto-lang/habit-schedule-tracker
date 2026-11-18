@@ -1,5 +1,5 @@
 /**
- * Hand-written to match supabase/migrations (initial schema + personal understanding).
+ * Hand-written to match supabase/migrations (initial schema, personal understanding, core planning).
  * Once a Supabase project is linked, replace with generated types:
  *   npx supabase gen types typescript --linked > src/lib/db/database.types.ts
  */
@@ -50,11 +50,36 @@ export type PreferencesRow = Timestamps & {
   share_usage_analytics: boolean;
 };
 
+export type AreaColorEnum =
+  | "blue"
+  | "violet"
+  | "green"
+  | "amber"
+  | "pink"
+  | "slate"
+  | "teal"
+  | "orange"
+  | "cyan"
+  | "brown";
+
+export type LifeAreaRow = Timestamps & {
+  id: string;
+  user_id: string;
+  name: string;
+  color: AreaColorEnum;
+  position: number;
+  legacy_key: LifeAreaEnum | null;
+};
+
 export type CommitmentRow = Timestamps & {
   id: string;
   user_id: string;
   title: string;
-  area: LifeAreaEnum;
+  area: LifeAreaEnum | null;
+  life_area_id: string | null;
+  all_day: boolean;
+  timezone: string | null;
+  recurrence_exceptions: string[];
   kind: "fixed" | "flexible";
   starts_at: string | null;
   ends_at: string | null;
@@ -71,7 +96,9 @@ export type TaskRow = Timestamps & {
   commitment_id: string | null;
   goal_id: string | null;
   title: string;
-  area: LifeAreaEnum;
+  description: string | null;
+  area: LifeAreaEnum | null;
+  life_area_id: string | null;
   priority: "high" | "medium" | "low";
   status: "todo" | "in_progress" | "done";
   due_at: string | null;
@@ -83,9 +110,13 @@ export type HabitRow = Timestamps & {
   id: string;
   user_id: string;
   title: string;
-  area: LifeAreaEnum;
-  cadence: "daily" | "weekly";
+  description: string | null;
+  area: LifeAreaEnum | null;
+  life_area_id: string | null;
+  cadence: "daily" | "weekly" | "specific_days";
   times_per_week: number | null;
+  /** ISO weekdays, 1 = Monday … 7 = Sunday. */
+  weekdays: number[] | null;
   archived_at: string | null;
 };
 
@@ -102,7 +133,9 @@ export type GoalRow = Timestamps & {
   user_id: string;
   title: string;
   description: string | null;
-  area: LifeAreaEnum;
+  area: LifeAreaEnum | null;
+  life_area_id: string | null;
+  progress: number;
   target_date: string | null;
   status: "active" | "paused" | "completed";
   horizon: GoalHorizonEnum | null;
@@ -143,6 +176,7 @@ export type ContextItemRow = Timestamps & {
   title: string;
   details: string | null;
   area: LifeAreaEnum | null;
+  life_area_id: string | null;
   attributes: Json;
 } & Provenance;
 
@@ -151,18 +185,24 @@ export type Database = {
     Tables: {
       profiles: Table<ProfileRow, "id">;
       user_preferences: Table<PreferencesRow, "user_id">;
-      commitments: Table<CommitmentRow, "user_id" | "title" | "area" | "kind">;
-      tasks: Table<TaskRow, "user_id" | "title" | "area">;
-      habits: Table<HabitRow, "user_id" | "title" | "area" | "cadence">;
+      life_areas: Table<LifeAreaRow, "user_id" | "name">;
+      commitments: Table<CommitmentRow, "user_id" | "title" | "kind">;
+      tasks: Table<TaskRow, "user_id" | "title">;
+      habits: Table<HabitRow, "user_id" | "title" | "cadence">;
       habit_logs: Table<HabitLogRow, "user_id" | "habit_id" | "logged_on">;
-      goals: Table<GoalRow, "user_id" | "title" | "area">;
+      goals: Table<GoalRow, "user_id" | "title">;
       goal_milestones: Table<GoalMilestoneRow, "user_id" | "goal_id" | "title">;
       conversations: Table<ConversationRow, "user_id">;
       messages: Table<MessageRow, "user_id" | "conversation_id" | "role" | "content">;
       context_items: Table<ContextItemRow, "user_id" | "category" | "title">;
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: {
+      delete_life_area: {
+        Args: { p_area_id: string; p_reassign_to?: string | null };
+        Returns: undefined;
+      };
+    };
     Enums: {
       life_area: LifeAreaEnum;
       data_source: DataSourceEnum;

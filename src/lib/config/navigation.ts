@@ -1,6 +1,8 @@
 import {
   CalendarDays,
+  CircleCheck,
   Home,
+  Shapes,
   LineChart,
   type LucideIcon,
   Settings,
@@ -21,9 +23,11 @@ export type NavItem = {
 export const NAV_ITEMS: NavItem[] = [
   { href: "/", label: "Home", icon: Home, mobile: true },
   { href: "/calendar", label: "Calendar", icon: CalendarDays, mobile: true },
-  { href: "/assistant", label: "AI Assistant", shortLabel: "Assistant", icon: Sparkles, mobile: true },
+  { href: "/tasks", label: "Tasks", icon: CircleCheck, mobile: true },
   { href: "/habits", label: "Habits & Goals", shortLabel: "Habits", icon: Target, mobile: true },
-  { href: "/insights", label: "Insights", icon: LineChart, mobile: true },
+  { href: "/assistant", label: "AI Assistant", shortLabel: "Assistant", icon: Sparkles, mobile: true },
+  { href: "/insights", label: "Insights", icon: LineChart, mobile: false },
+  { href: "/areas", label: "Life areas", icon: Shapes, mobile: false },
   { href: "/about-you", label: "What Whitespace knows", shortLabel: "About you", icon: UserRound, mobile: false },
   { href: "/settings", label: "Settings", icon: Settings, mobile: false },
 ];

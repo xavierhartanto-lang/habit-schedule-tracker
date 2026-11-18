@@ -1,7 +1,7 @@
 import "server-only";
 
 import { validateCommitmentInput } from "@/lib/domain/commitments";
-import type { Commitment, CommitmentKind, DataSource } from "@/lib/domain/types";
+import type { Commitment, CommitmentKind, DataSource, LifeArea } from "@/lib/domain/types";
 import { DataValidationError, NotFoundError, dbError, requireDb } from "./client";
 import type { CommitmentRow } from "./database.types";
 
@@ -11,11 +11,15 @@ import type { CommitmentRow } from "./database.types";
  * It never places or moves anything on the calendar by itself.
  */
 
-function toCommitment(row: CommitmentRow): Commitment {
+export function toCommitment(row: CommitmentRow): Commitment {
   return {
     id: row.id,
     title: row.title,
     area: row.area,
+    lifeAreaId: row.life_area_id,
+    allDay: row.all_day,
+    timezone: row.timezone,
+    recurrenceExceptions: row.recurrence_exceptions ?? [],
     kind: row.kind,
     startsAt: row.starts_at,
     endsAt: row.ends_at,
@@ -26,6 +30,14 @@ function toCommitment(row: CommitmentRow): Commitment {
     notes: row.notes,
     source: row.source,
   };
+}
+
+/**
+ * Explicit life area wins; otherwise the legacy enum is written and the
+ * database maps it to the user's matching life area.
+ */
+function areaColumns(v: { area: LifeArea | null; lifeAreaId?: string | null }) {
+  return v.lifeAreaId !== undefined ? { life_area_id: v.lifeAreaId } : { area: v.area };
 }
 
 export async function listCommitments(
@@ -99,7 +111,7 @@ export async function createCommitment(userId: string, input: unknown): Promise<
     .insert({
       user_id: userId,
       title: v.title,
-      area: v.area,
+      ...areaColumns(v),
       kind: v.kind,
       starts_at: v.startsAt ?? null,
       ends_at: v.endsAt ?? null,
@@ -132,7 +144,7 @@ export async function updateCommitment(
     .from("commitments")
     .update({
       title: v.title,
-      area: v.area,
+      ...areaColumns(v),
       kind: v.kind,
       starts_at: v.startsAt ?? null,
       ends_at: v.endsAt ?? null,

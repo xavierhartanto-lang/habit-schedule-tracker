@@ -1,4 +1,5 @@
 import { isLifeArea, isTimeOfDay, isUuid, normalizeContextAttributes, type ValidationResult } from "./context-items";
+import { isValidTimeZone, zonedToUtc } from "@/lib/scheduling/zoned";
 import { WEEKDAYS, type CommitmentKind, type DataSource, type LifeArea } from "./types";
 
 /**
@@ -8,7 +9,9 @@ import { WEEKDAYS, type CommitmentKind, type DataSource, type LifeArea } from ".
 
 export type CommitmentInput = {
   title: string;
-  area: LifeArea;
+  area: LifeArea | null;
+  /** Present only when the caller chose a life area explicitly (null = uncategorized). */
+  lifeAreaId?: string | null;
   kind: CommitmentKind;
   startsAt?: string | null;
   endsAt?: string | null;
@@ -43,7 +46,12 @@ export function validateCommitmentInput(raw: unknown): ValidationResult<Commitme
 
   const title = optionalText(input.title, 200);
   if (!title) return { ok: false, error: "A title is required." };
-  if (!isLifeArea(input.area)) return { ok: false, error: "Unknown life area." };
+  const hasAreaId = "lifeAreaId" in input;
+  if (hasAreaId && input.lifeAreaId != null && input.lifeAreaId !== "" && !isUuid(input.lifeAreaId)) {
+    return { ok: false, error: "Unknown life area." };
+  }
+  if (!hasAreaId && !isLifeArea(input.area)) return { ok: false, error: "Unknown life area." };
+  if (hasAreaId && input.area != null && !isLifeArea(input.area)) return { ok: false, error: "Unknown life area." };
   if (input.kind !== "fixed" && input.kind !== "flexible") return { ok: false, error: "Unknown kind." };
 
   for (const key of ["startsAt", "endsAt", "dueAt"] as const) {
@@ -73,11 +81,9 @@ export function validateCommitmentInput(raw: unknown): ValidationResult<Commitme
     return { ok: false, error: "Invalid source message." };
   }
 
-  return {
-    ok: true,
-    value: {
+  const value: CommitmentInput = {
       title,
-      area: input.area,
+      area: isLifeArea(input.area) ? input.area : null,
       kind: input.kind,
       startsAt,
       endsAt,
@@ -85,60 +91,15 @@ export function validateCommitmentInput(raw: unknown): ValidationResult<Commitme
       estimatedMinutes: (minutes as number | null | undefined) ?? null,
       dueAt: (input.dueAt as string | null | undefined) ?? null,
       location: optionalText(input.location, 200),
-      notes: optionalText(input.notes, 1000),
+      notes: optionalText(input.notes, 2000),
       source: (input.source as DataSource | undefined) ?? "manual",
       sourceMessageId: (input.sourceMessageId as string | null | undefined) ?? null,
-    },
   };
+  if (hasAreaId) value.lifeAreaId = (input.lifeAreaId as string | null) || null;
+  return { ok: true, value };
 }
 
 // ---------- Weekly schedules ----------
-
-/** UTC offset of `timeZone` at `at`, in ms (local = utc + offset). */
-function timeZoneOffset(at: Date, timeZone: string): number {
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat("en-US", {
-      timeZone,
-      hourCycle: "h23",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    })
-      .formatToParts(at)
-      .map((p) => [p.type, p.value]),
-  );
-  const asUtc = Date.UTC(
-    Number(parts.year),
-    Number(parts.month) - 1,
-    Number(parts.day),
-    Number(parts.hour),
-    Number(parts.minute),
-    Number(parts.second),
-  );
-  return asUtc - Math.floor(at.getTime() / 1000) * 1000;
-}
-
-/** Converts a wall-clock date and time in `timeZone` to a UTC instant. */
-function zonedToUtc(dateKey: string, time: string, timeZone: string): Date {
-  const [y, m, d] = dateKey.split("-").map(Number);
-  const [hh, mm] = time.split(":").map(Number);
-  const guess = Date.UTC(y, m - 1, d, hh, mm);
-  const first = guess - timeZoneOffset(new Date(guess), timeZone);
-  // Second pass corrects for a DST change between the guess and the answer.
-  return new Date(guess - timeZoneOffset(new Date(first), timeZone));
-}
-
-function isValidTimeZone(timeZone: string): boolean {
-  try {
-    new Intl.DateTimeFormat("en-US", { timeZone });
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 /**
  * Turns "Mon/Wed 4:00 to 6:00 PM" into the fields a repeating fixed

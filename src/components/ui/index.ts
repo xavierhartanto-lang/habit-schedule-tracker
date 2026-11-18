@@ -6,3 +6,8 @@ export * from "./field";
 export * from "./page-header";
 export * from "./progress";
 export * from "./skeleton";
+export * from "./dialog";
+export * from "./empty-state";
+export * from "./life-area";
+export * from "./segmented";
+export * from "./textarea";
