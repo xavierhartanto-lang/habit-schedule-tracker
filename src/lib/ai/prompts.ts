@@ -118,6 +118,22 @@ const ASSISTANT_GUIDE = `You are the user's ongoing assistant. Help them think t
 - If you need a fact you don't have, ask for it.
 - If they mention something new about their commitments, goals, routines or preferences, acknowledge it naturally; Whitespace will offer to save it.`;
 
+// Phase 4: the assistant can act, through the server. Replaces the
+// "cannot schedule" rule above for assistant conversations.
+const ACTIONS_RULES = `Ground rules:
+- Only state facts about the user that they told you or that appear under "What Whitespace knows" or <whitespace_actions>. Never invent commitments, times, goals or preferences.
+- Whitespace's server turns what the user says into actions. <whitespace_actions> lists exactly what it did for this message. Describe only those results. Never claim something was saved, scheduled, moved or deleted unless it is listed as already done.
+- Calendar changes always wait for the user's approval on a card shown under your message. Say "here's what I'd suggest" and point to the card; do not repeat every time, the card shows them. Mention reasons, trade-offs and anything that did not fit, honestly.
+- Never calculate free time or pick time slots yourself. Only the scheduler does that.
+- If <whitespace_actions> gives a follow-up question, ask only that one question, at the end. Do not ask other questions in the same message.
+- Fixed commitments are never moved or deleted by Whitespace.
+- If the user shares something about their safety or wellbeing that worries you, respond with care and encourage them to talk to a trusted adult or a local helpline.`;
+
+const CHECKIN_GUIDE: Record<"daily" | "weekly", string> = {
+  daily: `This is a daily planning check-in the user opened. Using only <check_in> data: greet them in one short line, summarize today's commitments and the most important deadline in at most three short lines, then ask what they want to get done today. Never list anything that is not in <check_in>. If the day is empty, say so plainly.`,
+  weekly: `This is a weekly planning check-in the user opened. Using only <check_in> data: briefly review this week's recurring commitments and upcoming deadlines (at most five short lines), mention roughly how much free time there is, then ask what's coming up or what matters most this week. Never list anything that is not in <check_in>.`,
+};
+
 function formatFacts(facts: KnownFact[]): string {
   if (facts.length === 0) return "Nothing saved yet.";
   const order: ContextCategory[] = ["commitment", "activity", "interest", "goal", "routine", "working_time", "preference"];
@@ -162,10 +178,22 @@ function formatProfile(ctx: PromptContext): string {
  * per-user context last, so the instruction block is cacheable.
  * Returns two blocks: [stable, userSpecific].
  */
-export function buildSystemPrompt(mode: ConversationMode, ctx: PromptContext): [string, string] {
-  const stable = [PRODUCT, VOICE, GROUND_RULES, mode === "onboarding" ? ONBOARDING_GUIDE : ASSISTANT_GUIDE].join(
-    "\n\n",
-  );
+export type ReplyExtras = {
+  /** Phase 4: what the server did for this message (see lib/assistant/planner-prompt). */
+  actions?: string | null;
+  /** Phase 4: check-in data, when the user opened a daily or weekly check-in. */
+  checkIn?: { kind: "daily" | "weekly"; data: string } | null;
+};
+
+export function buildSystemPrompt(mode: ConversationMode, ctx: PromptContext, extras: ReplyExtras = {}): [string, string] {
+  const phase4 = mode === "assistant" && (extras.actions !== undefined || extras.checkIn !== undefined);
+  const stable = [
+    PRODUCT,
+    VOICE,
+    phase4 ? ACTIONS_RULES : GROUND_RULES,
+    mode === "onboarding" ? ONBOARDING_GUIDE : ASSISTANT_GUIDE,
+    ...(phase4 && extras.checkIn ? [CHECKIN_GUIDE[extras.checkIn.kind]] : []),
+  ].join("\n\n");
 
   const sections = [`<profile>\n${formatProfile(ctx)}\n</profile>`];
 
@@ -185,11 +213,18 @@ export function buildSystemPrompt(mode: ConversationMode, ctx: PromptContext): [
     );
   }
 
+  if (phase4) {
+    if (extras.checkIn) sections.push(`<check_in>\n${extras.checkIn.data}\n</check_in>`);
+    sections.push(`<whitespace_actions>\n${extras.actions ?? "No actions for this message."}\n</whitespace_actions>`);
+  }
+
   return [stable, sections.join("\n\n")];
 }
 
 /** User turn used to start a conversation when the assistant speaks first. */
-export function openingTurn(mode: ConversationMode): string {
+export function openingTurn(mode: ConversationMode, checkIn?: "daily" | "weekly" | null): string {
+  if (checkIn === "daily") return "[The user opened a daily planning check-in.]";
+  if (checkIn === "weekly") return "[The user opened a weekly planning check-in.]";
   return mode === "onboarding"
     ? "[The user just opened Whitespace setup. Greet them in one sentence and ask your first question.]"
     : "[The user opened a new conversation. Greet them briefly and ask what they want help with.]";
@@ -200,7 +235,7 @@ export function openingTurn(mode: ConversationMode): string {
  * drops empty turns, merges consecutive same-role turns, and makes sure
  * the first turn is from the user.
  */
-export function toApiTurns(history: ChatTurn[], mode: ConversationMode): ChatTurn[] {
+export function toApiTurns(history: ChatTurn[], mode: ConversationMode, checkIn?: "daily" | "weekly" | null): ChatTurn[] {
   const turns: ChatTurn[] = [];
   for (const turn of history) {
     const content = turn.content.trim();
@@ -213,7 +248,7 @@ export function toApiTurns(history: ChatTurn[], mode: ConversationMode): ChatTur
     }
   }
   if (turns.length === 0 || turns[0].role !== "user") {
-    turns.unshift({ role: "user", content: openingTurn(mode) });
+    turns.unshift({ role: "user", content: openingTurn(mode, checkIn) });
   }
   return turns;
 }

@@ -11,16 +11,7 @@ import { RichText } from "./rich-text";
 import { streamChat } from "./stream";
 import { PlanCard, type PlanCardActions } from "./plan-card";
 import { approvePlanItems, editPlanItem, rejectPlanItems, requestAlternatives, undoPlanItem } from "./plan-actions";
-import type { Clarify, PlanView } from "./plan-types";
-import { CHAT_MESSAGE_MAX, type ChatMessage as BaseChatMessage, type ClientAiError, type Proposal } from "./types";
-
-/** Phase 4 adds `plan` and `clarify` to assistant messages (see assistant-api.md). */
-type ChatMessage = BaseChatMessage & { plan?: PlanView | null; clarify?: Clarify | null };
-
-/** Stream events added in Phase 4. Typed here too so this file reads them either way. */
-type Phase4Event =
-  | { type: "plan"; messageId: string; plan: PlanView }
-  | { type: "clarify"; messageId: string; clarify: Clarify };
+import { CHAT_MESSAGE_MAX, type ChatMessage, type ClientAiError, type Proposal } from "./types";
 
 const PLAN_ACTIONS: PlanCardActions = {
   approve: approvePlanItems,
@@ -43,7 +34,7 @@ export type ChatStarter = { label: string; prompt: string; checkIn?: "daily" | "
 type Props = {
   mode: Mode;
   conversationId: string | null;
-  initialMessages: BaseChatMessage[];
+  initialMessages: ChatMessage[];
   aiConfigured: boolean;
   /** Onboarding: the assistant opens the conversation when it is empty. */
   autoStart?: boolean;
@@ -121,6 +112,8 @@ export function Chat({
             proposals: [],
             clarifications: [],
             extractionError: null,
+            plan: null,
+            clarify: null,
           },
         ]);
       }
@@ -137,17 +130,13 @@ export function Chat({
         { mode, conversationId, message: request.message, retry: request.retry, checkIn: request.checkIn, opening: sendOpening },
         controller.signal,
       )) {
-        const e4 = event as unknown as Phase4Event | { type: string };
-        if (e4.type === "plan" || e4.type === "clarify") {
-          const ev = e4 as Phase4Event;
-          setMessages((m) =>
-            m.map((x) =>
-              x.id === ev.messageId ? (ev.type === "plan" ? { ...x, plan: ev.plan } : { ...x, clarify: ev.clarify }) : x,
-            ),
-          );
-          continue;
-        }
         switch (event.type) {
+          case "plan":
+            setMessages((m) => m.map((x) => (x.id === event.messageId ? { ...x, plan: event.plan } : x)));
+            break;
+          case "clarify":
+            setMessages((m) => m.map((x) => (x.id === event.messageId ? { ...x, clarify: event.clarify } : x)));
+            break;
           case "http_error":
             if (tempId && !userSaved) {
               setMessages((m) => m.filter((x) => x.id !== tempId));

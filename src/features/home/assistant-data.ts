@@ -3,6 +3,7 @@ import "server-only";
 import { isAiConfigured } from "@/lib/ai/config";
 import { listConversations } from "@/lib/db/conversations";
 import { listMessages } from "@/lib/db/messages";
+import { listPlansForConversation, toPlanView } from "@/lib/db/plans";
 import { getProfile } from "@/lib/db/profiles";
 import { expandEvents } from "@/lib/scheduling/recurrence";
 import {
@@ -131,7 +132,14 @@ export async function loadHomeAssistant(): Promise<HomeAssistantData> {
   const latest = conversations[0];
   if (latest && dateKeyInZone(new Date(latest.lastMessageAt), tz) === today) {
     try {
-      messages = (await listMessages(ctx.userId, latest.id, { limit: RESUME_MESSAGES })).map(toChatMessage);
+      const [rows, plans] = await Promise.all([
+        listMessages(ctx.userId, latest.id, { limit: RESUME_MESSAGES }),
+        listPlansForConversation(ctx.userId, latest.id),
+      ]);
+      messages = rows.map((m) => {
+        const plan = plans.get(m.id);
+        return toChatMessage(m, plan ? toPlanView(plan) : null);
+      });
       conversationId = latest.id;
     } catch {
       messages = [];

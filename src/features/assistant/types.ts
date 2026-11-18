@@ -1,6 +1,7 @@
 import type { Clarification, ExtractedItem } from "@/lib/ai/extraction";
 import type { AiErrorCode } from "@/lib/ai/errors";
 import type { ConversationKind, Message, MessageMetadata } from "@/lib/domain/types";
+import type { CheckInKind, Clarify, ClarifyField, PlanView } from "./plan-types";
 
 /**
  * Client-safe types for the conversation UI and the /api/chat stream.
@@ -34,6 +35,10 @@ export type ChatMessage = {
   proposals: Proposal[];
   clarifications: Clarification[];
   extractionError: AiErrorCode | null;
+  /** Phase 4: the plan this assistant message presented (filled by the page loader). */
+  plan: PlanView | null;
+  /** Phase 4: the follow-up question this assistant message asked. */
+  clarify: Clarify | null;
 };
 
 export type ClientAiError = { code: AiErrorCode | "not_signed_in" | "storage_unavailable" | "bad_input"; message: string; retryable: boolean };
@@ -51,6 +56,8 @@ export type ChatStreamEvent =
       clarifications: Clarification[];
       extractionError: AiErrorCode | null;
     }
+  | { type: "plan"; messageId: string; plan: PlanView }
+  | { type: "clarify"; messageId: string; clarify: Clarify }
   | { type: "error"; error: ClientAiError }
   | { type: "done" };
 
@@ -61,7 +68,32 @@ export type ChatRequestBody = {
   message?: string;
   /** Regenerate the reply to the last user message (after an error). */
   retry?: boolean;
+  /** Phase 4: open a planning check-in. Send with no message and no conversationId. */
+  checkIn?: CheckInKind;
+  /**
+   * Phase 4: the opening line Home showed (built from real data). Saved as the
+   * first assistant message of a new conversation so the model sees it.
+   * Only honored with a message and no conversationId. Max 300 characters.
+   */
+  opening?: string;
 };
+
+export const OPENING_MAX = 300;
+
+const CLARIFY_FIELDS: readonly ClarifyField[] = ["date", "time", "duration", "recurrence", "days", "deadline", "amount", "target", "other"];
+
+/** Reads the follow-up question stored on an assistant message. */
+export function readClarify(metadata: MessageMetadata | unknown): Clarify | null {
+  const meta = isRecord(metadata) ? metadata : {};
+  const c = meta.clarify;
+  if (!isRecord(c) || typeof c.question !== "string" || typeof c.about !== "string") return null;
+  return {
+    question: c.question,
+    about: c.about,
+    field: CLARIFY_FIELDS.includes(c.field as ClarifyField) ? (c.field as ClarifyField) : "other",
+    choices: Array.isArray(c.choices) ? c.choices.filter((x): x is string => typeof x === "string").slice(0, 4) : [],
+  };
+}
 
 export const CHAT_MESSAGE_MAX = 4000;
 
@@ -94,9 +126,11 @@ export function readUserMessageMeta(metadata: MessageMetadata | unknown): Requir
   return { proposals, clarifications, extractionError };
 }
 
-export function toChatMessage(message: Message): ChatMessage {
+export function toChatMessage(message: Message, plan: PlanView | null = null): ChatMessage {
   const meta = message.role === "user" ? readUserMessageMeta(message.metadata) : null;
   return {
+    plan: message.role === "assistant" ? plan : null,
+    clarify: message.role === "assistant" ? readClarify(message.metadata) : null,
     id: message.id,
     role: message.role,
     content: message.content,

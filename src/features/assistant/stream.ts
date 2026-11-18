@@ -28,11 +28,8 @@ export function parseNdjsonLines(buffer: string): { events: ChatStreamEvent[]; r
   return { events, rest };
 }
 
-/** Fields the Home screen may add. The server ignores what it doesn't support. */
-type ChatRequestExtras = { opening?: string; checkIn?: "daily" | "weekly" };
-
 export async function* streamChat(
-  body: ChatRequestBody & ChatRequestExtras,
+  body: ChatRequestBody,
   signal?: AbortSignal,
 ): AsyncGenerator<ChatStreamEvent | { type: "http_error"; status: number; error: ClientAiError }> {
   let response: Response;

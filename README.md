@@ -73,7 +73,7 @@ src/
   lib/
     config/                 App name, navigation
     domain/                 Domain types and pure business logic
-    scheduling/             Calendar math + scheduling engine contract (no LLM)
+    scheduling/             Calendar math, recurrence, and the scheduling engine (planner/, no LLM)
     ai/                     AI context contract (not implemented)
     auth/                   Session lookup and auth server actions
     db/                     Data access (server-only) + database types
@@ -90,6 +90,9 @@ supabase/migrations/        SQL migrations
 - **Auth** lives in `lib/auth`. `getSessionUser()` is the one way to ask who is signed in.
 - **Business logic** lives in `lib/domain` as pure functions.
 - **Scheduling** lives in `lib/scheduling` and is deterministic. It never calls an LLM.
+  The engine (`lib/scheduling/planner`) takes events, preferences and requests and returns
+  proposed sessions with reasons, or an honest "doesn't fit". `checkPlacements` re-checks
+  sessions against the current calendar right before anything is saved.
 - **AI** lives in `lib/ai`. It will read a structured `UserContext` and call the scheduling engine, never place events itself.
 - **Placeholder data** lives only in `lib/placeholder` and must render with `<SampleDataBadge />`.
 
