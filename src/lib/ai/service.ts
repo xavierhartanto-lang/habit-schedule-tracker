@@ -19,7 +19,10 @@ import {
   type ChatTurn,
   type ConversationMode,
   type PromptContext,
+  type ReplyExtras,
 } from "./prompts";
+import { PlannerWireSchema, validatePlannerOutput, type Draft, type PlannerResult } from "@/lib/assistant/intents";
+import { PLANNER_SYSTEM_PROMPT } from "@/lib/assistant/planner-prompt";
 
 /**
  * Entry points Chunk C calls from route handlers / server actions.
@@ -38,6 +41,8 @@ export type StreamReplyInput = {
   mode: ConversationMode;
   context: PromptContext;
   history: ChatTurn[];
+  /** Phase 4 extras: server actions summary and check-in data. */
+  extras?: ReplyExtras;
   signal?: AbortSignal;
 };
 
@@ -50,8 +55,8 @@ export type ReplyStream = AsyncGenerator<string, { text: string; model: string }
  */
 export async function* streamReply(input: StreamReplyInput): ReplyStream {
   const { client, model } = getAiClient();
-  const [stable, userSpecific] = buildSystemPrompt(input.mode, input.context);
-  const turns = toApiTurns(input.history.slice(-MAX_HISTORY_TURNS), input.mode);
+  const [stable, userSpecific] = buildSystemPrompt(input.mode, input.context, input.extras);
+  const turns = toApiTurns(input.history.slice(-MAX_HISTORY_TURNS), input.mode, input.extras?.checkIn?.kind ?? null);
 
   let text = "";
   try {
@@ -146,6 +151,56 @@ export async function extractFacts(input: ExtractFactsInput): Promise<Extraction
 
   try {
     return validateExtraction(response.parsed_output, { userText: input.userMessage, known: input.known });
+  } catch (error) {
+    throw new AiError("invalid_output", { cause: error });
+  }
+}
+
+export type InterpretInput = {
+  /** The user's latest message. Evidence is checked against this text. */
+  userMessage: string;
+  /** Built by buildPlannerUserPrompt (context, refs, drafts, recent turns). */
+  prompt: string;
+  drafts: Draft[];
+  signal?: AbortSignal;
+};
+
+/**
+ * Phase 4: turn the user's message into validated intents (structured
+ * outputs). Never writes anything: the plan service validates, asks
+ * follow-ups and builds proposals from the result.
+ */
+export async function interpretMessage(input: InterpretInput): Promise<PlannerResult> {
+  const empty: PlannerResult = { intents: [], consumedDrafts: [], question: null, dropped: [] };
+  if (!input.userMessage.trim()) return empty;
+  const { client, model } = getAiClient();
+
+  let response;
+  try {
+    response = await client.beta.messages.parse(
+      {
+        model,
+        max_tokens: 16_000,
+        output_config: { effort: "medium", format: zodOutputFormat(PlannerWireSchema) },
+        system: [{ type: "text", text: PLANNER_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
+        messages: [{ role: "user", content: input.prompt }],
+        ...fallbackParams(model),
+      },
+      { signal: input.signal },
+    );
+  } catch (error) {
+    if (error instanceof Anthropic.AnthropicError && !(error instanceof Anthropic.APIError)) {
+      throw new AiError("invalid_output", { cause: error });
+    }
+    throw toAiError(error);
+  }
+
+  if (response.stop_reason === "refusal") throw new AiError("refused");
+  if (response.stop_reason === "max_tokens" || response.parsed_output == null) {
+    throw new AiError("invalid_output", { message: `Planner unusable (stop_reason=${response.stop_reason})` });
+  }
+  try {
+    return validatePlannerOutput(response.parsed_output, { userText: input.userMessage, drafts: input.drafts });
   } catch (error) {
     throw new AiError("invalid_output", { cause: error });
   }

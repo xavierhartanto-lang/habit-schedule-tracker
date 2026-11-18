@@ -11,8 +11,14 @@ import { appendMessage, listMessages, updateMessageMetadata } from "@/lib/db/mes
 import type { Conversation, Message, MessageMetadata } from "@/lib/domain/types";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { loadChatContext } from "@/features/assistant/server/context";
+import { checkInText, loadCheckIn } from "@/features/assistant/server/checkin";
+import { planTurn } from "@/features/assistant/server/plan-service";
+import type { Clarify, PlanView } from "@/features/assistant/plan-types";
+import { plannerResultBlock } from "@/lib/assistant/planner-prompt";
+import { getPlan, setPlanMessage, toPlanView } from "@/lib/db/plans";
 import {
   CHAT_MESSAGE_MAX,
+  OPENING_MAX,
   readUserMessageMeta,
   toChatMessage,
   type ChatRequestBody,
@@ -31,6 +37,13 @@ import {
  *
  * Without ANTHROPIC_API_KEY it refuses before saving anything, so the UI
  * can show the configuration state instead of a fake reply.
+ *
+ * Phase 4 (assistant mode): before replying, the planner turns the message
+ * into validated intents. The server asks one follow-up at a time, builds a
+ * plan with the scheduling engine and stores it (calendar items wait for
+ * approval). The reply model is told exactly what happened. The plan and
+ * the follow-up question are streamed as "plan" / "clarify" events.
+ * Onboarding keeps the Phase 2 fact extraction.
  */
 
 const HISTORY_LIMIT = 60;
@@ -51,13 +64,20 @@ function parseBody(raw: unknown): ChatRequestBody | null {
   if (b.mode !== "onboarding" && b.mode !== "assistant") return null;
   if (b.conversationId != null && typeof b.conversationId !== "string") return null;
   if (b.message != null && typeof b.message !== "string") return null;
+  const checkIn = b.checkIn === "daily" || b.checkIn === "weekly" ? b.checkIn : undefined;
+  const opening =
+    typeof b.opening === "string" && b.opening.trim() ? b.opening.replace(/\s+/g, " ").trim().slice(0, OPENING_MAX) : undefined;
   return {
     mode: b.mode,
     conversationId: (b.conversationId as string | null | undefined) ?? null,
     message: typeof b.message === "string" ? b.message.trim() : undefined,
     retry: b.retry === true,
+    checkIn: b.mode === "assistant" ? checkIn : undefined,
+    opening: b.mode === "assistant" ? opening : undefined,
   };
 }
+
+const CHECKIN_TITLE = { daily: "Daily check-in", weekly: "Weekly check-in" } as const;
 
 const toTurn = (m: Message): ChatTurn => ({ role: m.role, content: m.content });
 
@@ -102,14 +122,31 @@ export async function POST(request: Request) {
       conversation = found;
       history = await listMessages(user.id, conversation.id, { limit: HISTORY_LIMIT });
     } else {
-      if (body.mode === "assistant" && !body.message) {
+      if (body.mode === "assistant" && !body.message && !body.checkIn) {
         return jsonError(400, { code: "bad_input", message: "Type a message first.", retryable: false });
       }
       conversation = await createConversation(user.id, {
         kind: body.mode,
-        title: body.mode === "onboarding" ? ONBOARDING_TITLE : titleFrom(body.message ?? ""),
+        title:
+          body.mode === "onboarding"
+            ? ONBOARDING_TITLE
+            : body.message
+              ? titleFrom(body.message)
+              : CHECKIN_TITLE[body.checkIn ?? "daily"],
       });
       created = true;
+      // Home's opening line (built from real data) becomes the first assistant
+      // message, so a reply like "yes" has context.
+      if (body.opening && body.message) {
+        history.push(
+          await appendMessage(user.id, {
+            conversationId: conversation.id,
+            role: "assistant",
+            content: body.opening,
+            metadata: { source: "home_opening" },
+          }),
+        );
+      }
     }
 
     if (body.retry) {
@@ -129,8 +166,8 @@ export async function POST(request: Request) {
       if (!conversation.title && body.mode === "assistant") {
         conversation = await updateConversation(user.id, conversation.id, { title: titleFrom(body.message) });
       }
-    } else if (history.length > 0) {
-      // Opening turn (onboarding greeting) only applies to an empty conversation.
+    } else if (history.length > 0 || (body.mode === "assistant" && !body.checkIn)) {
+      // Opening turn (onboarding greeting, check-in) only applies to an empty conversation.
       return jsonError(409, { code: "bad_input", message: "This conversation already started.", retryable: false });
     }
   } catch (error) {
@@ -182,7 +219,9 @@ export async function POST(request: Request) {
         // Fact extraction runs alongside the reply. It only proposes; it never saves.
         const existingMeta = userMessage ? readUserMessageMeta(userMessage.metadata) : null;
         const shouldExtract =
-          userMessage !== null && (createdUserMessage || (existingMeta?.proposals.length === 0 && !existingMeta.clarifications.length));
+          body.mode === "onboarding" &&
+          userMessage !== null &&
+          (createdUserMessage || (existingMeta?.proposals.length === 0 && !existingMeta.clarifications.length));
 
         let extraction: Promise<{
           proposals: Proposal[];
@@ -218,9 +257,20 @@ export async function POST(request: Request) {
             });
         }
 
+        // Phase 4: plan before replying, so the reply describes real results.
+        let plan: PlanView | null = null;
+        let clarify: Clarify | null = null;
+        let extras: Parameters<typeof streamReply>[0]["extras"];
+        if (body.mode === "assistant") {
+          const phase4 = await runPhase4(user.id, conversation.id, userMessage, turns, body, createdUserMessage, signal);
+          plan = phase4.plan;
+          clarify = phase4.clarify;
+          extras = phase4.extras;
+        }
+
         // Reply
         try {
-          const reply = streamReply({ mode: body.mode, context: chatContext.prompt, history: turns, signal });
+          const reply = streamReply({ mode: body.mode, context: chatContext.prompt, history: turns, extras, signal });
           let result = await reply.next();
           while (!result.done) {
             send({ type: "delta", text: result.value });
@@ -230,9 +280,19 @@ export async function POST(request: Request) {
             conversationId: conversation.id,
             role: "assistant",
             content: result.value.text,
-            metadata: { model: result.value.model },
+            metadata: {
+              model: result.value.model,
+              ...(plan ? { planId: plan.id } : {}),
+              ...(clarify ? { clarify: clarify as unknown as MessageMetadata[string] } : {}),
+            },
           });
-          send({ type: "assistant_message", message: toChatMessage(saved) });
+          if (plan) {
+            await setPlanMessage(user.id, plan.id, saved.id).catch((error) => console.error("[chat] could not link plan", error));
+            plan = { ...plan, messageId: saved.id };
+          }
+          send({ type: "assistant_message", message: toChatMessage(saved, plan) });
+          if (plan) send({ type: "plan", messageId: saved.id, plan });
+          if (clarify) send({ type: "clarify", messageId: saved.id, clarify });
         } catch (error) {
           const aiError = toAiError(error);
           if (aiError.code !== "aborted") console.error("[chat] reply failed", aiError.code, aiError.cause ?? error);
@@ -283,4 +343,68 @@ export async function POST(request: Request) {
       "X-Content-Type-Options": "nosniff",
     },
   });
+}
+
+/**
+ * Runs the planner for a new user message (or reuses the plan already made
+ * for it on retry), and builds the reply extras. Planner failures never
+ * block the reply: the model is told nothing was changed.
+ */
+async function runPhase4(
+  userId: string,
+  conversationId: string,
+  userMessage: Message | null,
+  turns: ChatTurn[],
+  body: ChatRequestBody,
+  isNew: boolean,
+  signal: AbortSignal,
+): Promise<{ plan: PlanView | null; clarify: Clarify | null; extras: Parameters<typeof streamReply>[0]["extras"] }> {
+  if (!userMessage) {
+    if (!body.checkIn) return { plan: null, clarify: null, extras: undefined };
+    try {
+      const checkIn = await loadCheckIn(userId, body.checkIn);
+      return { plan: null, clarify: null, extras: { checkIn: { kind: body.checkIn, data: checkInText(checkIn) }, actions: null } };
+    } catch (error) {
+      console.error("[chat] check-in data failed", error);
+      return {
+        plan: null,
+        clarify: null,
+        extras: { checkIn: { kind: body.checkIn, data: "Could not load the user's schedule right now. Say so briefly and ask what they want to plan." }, actions: null },
+      };
+    }
+  }
+
+  const meta = userMessage.metadata as Record<string, unknown>;
+  if (!isNew && typeof meta.planId === "string") {
+    // Retry: never plan the same message twice.
+    try {
+      const view = toPlanView(await getPlan(userId, meta.planId));
+      return { plan: view, clarify: null, extras: { actions: plannerResultBlock({ plan: view, question: null, notes: [], failed: null }) } };
+    } catch {
+      return { plan: null, clarify: null, extras: { actions: null } };
+    }
+  }
+  if (!isNew && meta.planned === true) return { plan: null, clarify: null, extras: { actions: null } };
+
+  try {
+    const result = await planTurn({
+      userId,
+      conversationId,
+      userMessageId: userMessage.id,
+      userText: userMessage.content,
+      history: turns.slice(0, -1),
+      signal,
+    });
+    await updateMessageMetadata(userId, userMessage.id, {
+      ...userMessage.metadata,
+      planned: true,
+      ...(result.plan ? { planId: result.plan.id } : {}),
+    }).catch((error) => console.error("[chat] could not mark message planned", error));
+    return { plan: result.plan, clarify: result.clarify, extras: { actions: result.actions } };
+  } catch (error) {
+    const aiError = toAiError(error);
+    if (aiError.code !== "aborted") console.error("[chat] planning failed", aiError.code, aiError.cause ?? error);
+    const failed = error instanceof Error && error.name === "DatabaseError" ? "a storage error" : aiError.userMessage;
+    return { plan: null, clarify: null, extras: { actions: plannerResultBlock({ plan: null, question: null, notes: [], failed }) } };
+  }
 }

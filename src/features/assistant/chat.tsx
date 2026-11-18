@@ -85,6 +85,8 @@ export function Chat({
             proposals: [],
             clarifications: [],
             extractionError: null,
+            plan: null,
+            clarify: null,
           },
         ]);
       }
