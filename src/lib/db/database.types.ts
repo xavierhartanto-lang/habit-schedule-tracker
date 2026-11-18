@@ -1,5 +1,6 @@
 /**
- * Hand-written to match supabase/migrations (initial schema, personal understanding, core planning).
+ * Hand-written to match supabase/migrations (initial schema, personal understanding, core planning,
+ * scheduling preferences).
  * Once a Supabase project is linked, replace with generated types:
  *   npx supabase gen types typescript --linked > src/lib/db/database.types.ts
  */
@@ -180,6 +181,17 @@ export type ContextItemRow = Timestamps & {
   attributes: Json;
 } & Provenance;
 
+export type SchedulingPreferencesRow = Timestamps & {
+  user_id: string;
+  working_hours: Json;
+  protected_times: Json;
+  min_session_minutes: number;
+  max_session_minutes: number;
+  buffer_minutes: number;
+  daily_cap_minutes: number;
+  keep_free_percent: number;
+};
+
 export type Database = {
   public: {
     Tables: {
@@ -195,6 +207,7 @@ export type Database = {
       conversations: Table<ConversationRow, "user_id">;
       messages: Table<MessageRow, "user_id" | "conversation_id" | "role" | "content">;
       context_items: Table<ContextItemRow, "user_id" | "category" | "title">;
+      scheduling_preferences: Table<SchedulingPreferencesRow, "user_id">;
     };
     Views: Record<string, never>;
     Functions: {
