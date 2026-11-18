@@ -80,7 +80,7 @@ export function Chat({
   const abortRef = useRef<AbortController | null>(null);
   const started = useRef(false);
   // Keep showing the opening line once the conversation it started is under way.
-  const [showOpening] = useState(() => Boolean(opening) && initialMessages.length === 0);
+  const [showOpening, setShowOpening] = useState(() => Boolean(opening) && initialMessages.length === 0);
   const stickToBottom = useRef(true);
 
   // Keep the newest content in view unless the user scrolled up to read.
@@ -218,7 +218,11 @@ export function Chat({
       return;
     }
     // A check-in opens a fresh planning conversation where the assistant speaks first.
-    if (s.checkIn && !conversationId) void run({ checkIn: s.checkIn });
+    if (s.checkIn && !conversationId) {
+      // The check-in opens with its own message from the assistant, so the Home line steps aside.
+      setShowOpening(false);
+      void run({ checkIn: s.checkIn });
+    }
     else void run({ message: s.prompt });
   };
 
@@ -458,7 +462,7 @@ export function Chat({
                   }}
                   rows={1}
                   placeholder={answering ?? placeholder}
-                  className="max-h-40 min-h-9 flex-1 resize-none bg-transparent px-2 py-2 text-sm text-ink placeholder:text-ink-3 focus:outline-none"
+                  className="max-h-40 min-h-9 flex-1 resize-none bg-transparent px-2 py-2 text-sm text-ink placeholder:text-ink-3 focus:outline-none focus-visible:outline-none"
                 />
                 {busy ? (
                   <button
