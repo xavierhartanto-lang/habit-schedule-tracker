@@ -7,3 +7,11 @@ This version has breaking changes — APIs, conventions, and file structure may 
 This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
 
 <!-- END:nextjs-agent-rules -->
+
+## Project rules
+
+Read `README.md` → "Architecture rules" before changing code. In short:
+UI never queries Supabase directly; `lib/db` is server-only; scheduling is
+deterministic and LLM-free; placeholder data lives only in `lib/placeholder`
+and must render with `<SampleDataBadge />`. No gamification (XP, coins,
+streak flames, leaderboards). Use the design tokens in `globals.css`.
