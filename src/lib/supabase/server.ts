@@ -2,6 +2,7 @@ import "server-only";
 
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { connection } from "next/server";
 import type { Database } from "@/lib/db/database.types";
 import { getSupabaseEnv } from "./env";
 
@@ -13,6 +14,8 @@ export async function createSupabaseServerClient() {
   const env = getSupabaseEnv();
   if (!env) return null;
 
+  // Auth checks read the clock (token expiry), so always run per request.
+  await connection();
   const cookieStore = await cookies();
   return createServerClient<Database>(env.url, env.key, {
     cookies: {
