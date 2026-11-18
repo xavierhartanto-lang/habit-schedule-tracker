@@ -63,6 +63,7 @@ export const PAYLOAD_SCHEMAS = {
     requestId: z.string().max(80).nullish(),
   }),
   remove_block: z.object({ commitmentId: zUuid }),
+  remove_event: z.object({ commitmentId: zUuid }),
   skip_occurrence: z.object({ commitmentId: zUuid, date: zDateKey }),
   create_task: z.object({
     title: zText(300),
@@ -193,6 +194,11 @@ export function toOp(item: { id: string; action: PlanItemAction; payload: unknow
       const p = parsePayload("remove_block", item.payload);
       if (!p.ok) return p;
       return { ok: true, op: { ...base, op: "delete_block", id: p.value.commitmentId } };
+    }
+    case "remove_event": {
+      const p = parsePayload("remove_event", item.payload);
+      if (!p.ok) return p;
+      return { ok: true, op: { ...base, op: "delete_event", id: p.value.commitmentId } };
     }
     case "skip_occurrence": {
       const p = parsePayload("skip_occurrence", item.payload);

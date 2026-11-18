@@ -33,6 +33,7 @@ export const INTENT_TYPES = [
   "update_preferences", // working hours, session length, protected time
   "save_fact", // Phase 2 context item: activity, interest, routine, working time, preference
   "plan_time", // find time for work: "3 hours to study this week", "piano twice"
+  "remove_event", // "cancel all math tutoring": remove an event (whole series) for good
   "cant_make", // "I can't study Wednesday anymore"
   "finished_early", // "I finished my coding project early"
   "not_enough_time", // "I don't think I'll have enough time this week"
@@ -115,6 +116,110 @@ export const PlannerWireSchema = z.object({
     .describe("One short question only if the message is genuinely ambiguous in a way the fields cannot express."),
 });
 export type PlannerWire = z.infer<typeof PlannerWireSchema>;
+
+// ---------------------------------------------------------------------------
+// API schema (what is actually sent as the structured-output format).
+//
+// The API compiles output schemas into a grammar and allows at most 16
+// union-typed fields (a nullable field is a union) and 24 optional fields
+// across a request. PlannerWireSchema above has 30 nullable fields, so the
+// model is asked for this union-free twin instead: every field is required
+// and "not stated" is written as "" (text), -1 (numbers) or "none" (choices).
+// `fromApiWire` turns those back into nulls before validation.
+// ---------------------------------------------------------------------------
+
+const NONE = "none" as const;
+const apiEnum = <T extends readonly [string, ...string[]]>(values: T) => z.enum([...values, NONE] as [T[number] | typeof NONE, ...(T[number] | typeof NONE)[]]);
+const apiText = (d?: string) => z.string().describe(`${d ? `${d} ` : ""}Empty string if not stated.`);
+const apiInt = (d?: string) => z.number().int().describe(`${d ? `${d} ` : ""}-1 if not stated.`);
+
+const ApiDate = z
+  .object({
+    iso_date: apiText('"YYYY-MM-DD" only if the user named a calendar date.'),
+    weekday: apiEnum(WEEKDAYS as unknown as [Weekday, ...Weekday[]]).describe("Weekday the user named, e.g. 'fr' for Friday. \"none\" if not named."),
+    week: apiEnum(["this", "next"] as const).describe('"next" only if the user said "next <weekday>" or "next week". "none" otherwise.'),
+    day_offset: apiInt("0 = today, 1 = tomorrow. Only for those words."),
+  })
+  .describe('A day reference. Copy what the user said; never compute dates yourself. All fields empty / "none" / -1 when no day was given.');
+
+const ApiIntent = z.object({
+  type: z.enum(INTENT_TYPES),
+  draft_id: apiText("Id from <pending_drafts> when this message answers or corrects it."),
+  explicit: z.boolean().describe('True only if the user directly asked Whitespace to do this now ("add a task…", "mark … done", "cancel …").'),
+  title: apiText("Short name in the user's words, e.g. 'Volleyball practice'."),
+  evidence: z.string().describe("Exact words from the user's NEW message that state this. Copied verbatim."),
+  area: apiText("One of the user's life area names, if clear."),
+  target_ref: apiText("Ref of an existing record from <current_plan> (t1, e2, b3, h1, g2) this is about."),
+  date: ApiDate.describe("When it happens (events) or the day affected (cant_make)."),
+  start_time: apiText('24h "HH:MM" if stated. "at 6" for a practice usually means 18:00.'),
+  end_time: apiText('24h "HH:MM".'),
+  duration_minutes: apiInt('Only if stated ("2 hours" = 120).'),
+  recurrence: apiEnum(RECURRENCES).describe('"none" if the user has not said whether it repeats.'),
+  days: z.array(zDay).describe("Days it repeats on. Empty if not stated."),
+  deadline: ApiDate.describe("Due date / deadline day, if stated."),
+  deadline_time: apiText('24h "HH:MM".'),
+  amount_kind: apiEnum(AMOUNT_KINDS).describe("plan_time: total = split as needed; sessions = N times; single = one block."),
+  amount_minutes: apiInt("plan_time: total minutes, or minutes of the single block."),
+  session_count: apiInt("plan_time with sessions: how many times."),
+  session_minutes: apiInt("plan_time with sessions: minutes each, only if stated."),
+  window: apiEnum(WINDOWS).describe("plan_time / not_enough_time: which period."),
+  priority: apiEnum(PRIORITIES),
+  cadence: apiEnum(CADENCES).describe("Habits: how often."),
+  times_per_week: apiInt(),
+  progress: apiInt("Goals: 0-100 if the user gave it."),
+  target_date: ApiDate.describe("Goals: target date."),
+  location: apiText(),
+  fact_category: apiEnum(FACT_CATEGORIES).describe("save_fact only."),
+  details: apiText("One short sentence of extra specifics the user gave."),
+  pref_day_start: apiText('update_preferences: earliest time for work "HH:MM".'),
+  pref_day_end: apiText('update_preferences: latest time for work "HH:MM".'),
+  pref_max_session_minutes: apiInt(),
+  pref_buffer_minutes: apiInt(),
+  pref_protected_label: apiText("update_preferences: protected time name, e.g. 'Family dinner'."),
+});
+
+export const PlannerApiSchema = z.object({
+  intents: z.array(ApiIntent),
+  question: apiText("One short question only if the message is genuinely ambiguous in a way the fields cannot express."),
+});
+export type PlannerApi = z.infer<typeof PlannerApiSchema>;
+
+/** Keys whose values are never "not stated" markers. */
+const KEEP_AS_IS = new Set(["type", "evidence", "explicit", "days"]);
+const DATE_KEYS = new Set(["date", "deadline", "target_date"]);
+
+function unmark(value: unknown): unknown {
+  if (value === "" || value === NONE || value === -1) return null;
+  return value;
+}
+
+function unmarkDate(value: unknown): unknown {
+  if (!value || typeof value !== "object") return null;
+  const out = Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, unmark(typeof v === "string" ? v.trim() : v)]));
+  return Object.values(out).every((v) => v === null) ? null : out;
+}
+
+/**
+ * Converts the union-free API output back into the nullable wire shape.
+ * Anything malformed is passed through for `validatePlannerOutput` to reject.
+ */
+export function fromApiWire(payload: unknown): unknown {
+  if (!payload || typeof payload !== "object") return payload;
+  const p = payload as { intents?: unknown; question?: unknown };
+  const intents = Array.isArray(p.intents)
+    ? p.intents.map((raw) => {
+        if (!raw || typeof raw !== "object") return raw;
+        return Object.fromEntries(
+          Object.entries(raw as Record<string, unknown>).map(([k, v]) => {
+            if (KEEP_AS_IS.has(k)) return [k, v];
+            if (DATE_KEYS.has(k)) return [k, unmarkDate(v)];
+            return [k, unmark(typeof v === "string" ? v.trim() : v)];
+          }),
+        );
+      })
+    : p.intents;
+  return { intents, question: unmark(typeof p.question === "string" ? p.question.trim() : p.question) };
+}
 type WireIntentT = z.infer<typeof WireIntent>;
 
 // ---------------------------------------------------------------------------

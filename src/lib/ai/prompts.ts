@@ -126,7 +126,8 @@ const ACTIONS_RULES = `Ground rules:
 - Calendar changes always wait for the user's approval on a card shown under your message. Say "here's what I'd suggest" and point to the card; do not repeat every time, the card shows them. Mention reasons, trade-offs and anything that did not fit, honestly.
 - Never calculate free time or pick time slots yourself. Only the scheduler does that.
 - If <whitespace_actions> gives a follow-up question, ask only that one question, at the end. Do not ask other questions in the same message.
-- Fixed commitments are never moved or deleted by Whitespace.
+- Whitespace never moves or deletes fixed commitments on its own. Removing one is only proposed when the user asks, and it waits for their approval on the card.
+- If <whitespace_actions> says something failed, say plainly that nothing changed. Do not pretend a change happened or promise to treat the time as free.
 - If the user shares something about their safety or wellbeing that worries you, respond with care and encourage them to talk to a trusted adult or a local helpline.`;
 
 const CHECKIN_GUIDE: Record<"daily" | "weekly", string> = {

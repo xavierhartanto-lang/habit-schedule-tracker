@@ -21,7 +21,7 @@ import {
   type PromptContext,
   type ReplyExtras,
 } from "./prompts";
-import { PlannerWireSchema, validatePlannerOutput, type Draft, type PlannerResult } from "@/lib/assistant/intents";
+import { PlannerApiSchema, fromApiWire, validatePlannerOutput, type Draft, type PlannerResult } from "@/lib/assistant/intents";
 import { PLANNER_SYSTEM_PROMPT } from "@/lib/assistant/planner-prompt";
 
 /**
@@ -181,7 +181,7 @@ export async function interpretMessage(input: InterpretInput): Promise<PlannerRe
       {
         model,
         max_tokens: 16_000,
-        output_config: { effort: "medium", format: zodOutputFormat(PlannerWireSchema) },
+        output_config: { effort: "medium", format: zodOutputFormat(PlannerApiSchema) },
         system: [{ type: "text", text: PLANNER_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
         messages: [{ role: "user", content: input.prompt }],
         ...fallbackParams(model),
@@ -200,7 +200,7 @@ export async function interpretMessage(input: InterpretInput): Promise<PlannerRe
     throw new AiError("invalid_output", { message: `Planner unusable (stop_reason=${response.stop_reason})` });
   }
   try {
-    return validatePlannerOutput(response.parsed_output, { userText: input.userMessage, drafts: input.drafts });
+    return validatePlannerOutput(fromApiWire(response.parsed_output), { userText: input.userMessage, drafts: input.drafts });
   } catch (error) {
     throw new AiError("invalid_output", { cause: error });
   }

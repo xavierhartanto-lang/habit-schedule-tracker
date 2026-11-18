@@ -17,6 +17,7 @@ export const PLAN_ITEM_ACTIONS = [
   "schedule_block",
   "move_block",
   "remove_block",
+  "remove_event",
   "skip_occurrence",
   "create_task",
   "update_task",
@@ -38,6 +39,7 @@ export const CALENDAR_ACTIONS: ReadonlySet<PlanItemAction> = new Set([
   "schedule_block",
   "move_block",
   "remove_block",
+  "remove_event",
   "skip_occurrence",
 ]);
 
