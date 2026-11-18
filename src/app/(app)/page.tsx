@@ -4,11 +4,15 @@ import { Greeting } from "@/features/home/greeting";
 import { PriorityTasks } from "@/features/home/priority-tasks";
 import { TodaySchedule } from "@/features/home/today-schedule";
 import { Upcoming } from "@/features/home/upcoming";
+import { OnboardingRedirect } from "@/features/onboarding/onboarding-redirect";
 import { Suspense } from "react";
 
 export default function HomePage() {
   return (
     <div className="space-y-6">
+      <Suspense fallback={null}>
+        <OnboardingRedirect />
+      </Suspense>
       <Greeting
         name={
           <Suspense fallback={null}>
