@@ -82,3 +82,27 @@ export async function updatePreferences(userId: string, input: Preferences) {
     .eq("user_id", userId);
   if (error) throw error;
 }
+
+/** When the user finished onboarding, or null if they have not. */
+export async function getOnboardedAt(userId: string): Promise<string | null> {
+  const supabase = await createSupabaseServerClient();
+  if (!supabase) return null;
+  const { data } = await supabase
+    .from("profiles")
+    .select("onboarded_at")
+    .eq("id", userId)
+    .maybeSingle();
+  return data?.onboarded_at ?? null;
+}
+
+/** Marks onboarding as finished. Keeps the first completion time. */
+export async function markOnboarded(userId: string): Promise<void> {
+  const supabase = await createSupabaseServerClient();
+  if (!supabase) throw new Error("Supabase is not configured.");
+  const { error } = await supabase
+    .from("profiles")
+    .update({ onboarded_at: new Date().toISOString() })
+    .eq("id", userId)
+    .is("onboarded_at", null);
+  if (error) throw error;
+}

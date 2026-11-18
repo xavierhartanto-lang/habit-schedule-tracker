@@ -1,5 +1,5 @@
 /**
- * Hand-written to match supabase/migrations/0001_initial_schema.sql.
+ * Hand-written to match supabase/migrations (initial schema + personal understanding).
  * Once a Supabase project is linked, replace with generated types:
  *   npx supabase gen types typescript --linked > src/lib/db/database.types.ts
  */
@@ -20,6 +20,16 @@ export type LifeAreaEnum =
   | "creative"
   | "personal"
   | "rest";
+
+export type GoalHorizonEnum = "short_term" | "long_term";
+export type DataSourceEnum = "conversation" | "manual";
+export type ConversationKindEnum = "onboarding" | "assistant";
+export type MessageRoleEnum = "user" | "assistant";
+export type ContextCategoryEnum = "activity" | "interest" | "routine" | "working_time" | "preference";
+
+export type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+
+type Provenance = { source: DataSourceEnum; source_message_id: string | null };
 
 export type ProfileRow = Timestamps & {
   id: string;
@@ -53,7 +63,7 @@ export type CommitmentRow = Timestamps & {
   due_at: string | null;
   location: string | null;
   notes: string | null;
-};
+} & Provenance;
 
 export type TaskRow = Timestamps & {
   id: string;
@@ -95,7 +105,8 @@ export type GoalRow = Timestamps & {
   area: LifeAreaEnum;
   target_date: string | null;
   status: "active" | "paused" | "completed";
-};
+  horizon: GoalHorizonEnum | null;
+} & Provenance;
 
 export type GoalMilestoneRow = Timestamps & {
   id: string;
@@ -105,6 +116,35 @@ export type GoalMilestoneRow = Timestamps & {
   position: number;
   done_at: string | null;
 };
+
+export type ConversationRow = Timestamps & {
+  id: string;
+  user_id: string;
+  kind: ConversationKindEnum;
+  title: string | null;
+  summary: string | null;
+  last_message_at: string;
+};
+
+export type MessageRow = {
+  id: string;
+  user_id: string;
+  conversation_id: string;
+  role: MessageRoleEnum;
+  content: string;
+  metadata: Json;
+  created_at: string;
+};
+
+export type ContextItemRow = Timestamps & {
+  id: string;
+  user_id: string;
+  category: ContextCategoryEnum;
+  title: string;
+  details: string | null;
+  area: LifeAreaEnum | null;
+  attributes: Json;
+} & Provenance;
 
 export type Database = {
   public: {
@@ -117,11 +157,19 @@ export type Database = {
       habit_logs: Table<HabitLogRow, "user_id" | "habit_id" | "logged_on">;
       goals: Table<GoalRow, "user_id" | "title" | "area">;
       goal_milestones: Table<GoalMilestoneRow, "user_id" | "goal_id" | "title">;
+      conversations: Table<ConversationRow, "user_id">;
+      messages: Table<MessageRow, "user_id" | "conversation_id" | "role" | "content">;
+      context_items: Table<ContextItemRow, "user_id" | "category" | "title">;
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;
     Enums: {
       life_area: LifeAreaEnum;
+      data_source: DataSourceEnum;
+      goal_horizon: GoalHorizonEnum;
+      conversation_kind: ConversationKindEnum;
+      message_role: MessageRoleEnum;
+      context_category: ContextCategoryEnum;
     };
     CompositeTypes: Record<string, never>;
   };
