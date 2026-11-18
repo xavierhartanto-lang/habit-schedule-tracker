@@ -95,14 +95,14 @@ function ContextItemForm({
       </div>
 
       {showTiming ? (
-        <div className="space-y-4 rounded-lg border border-border bg-surface p-3.5">
+        <div className="space-y-4 rounded-lg border border-border bg-surface p-3 sm:p-3.5">
           <DayPicker label="Days" value={days} onChange={setDays} />
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <Field label="From">
-              <Input type="time" name="startTime" defaultValue={a.startTime ?? ""} />
+              <Input type="time" className="px-2.5" name="startTime" defaultValue={a.startTime ?? ""} />
             </Field>
             <Field label="Until">
-              <Input type="time" name="endTime" defaultValue={a.endTime ?? ""} />
+              <Input type="time" className="px-2.5" name="endTime" defaultValue={a.endTime ?? ""} />
             </Field>
             <Field label="Times a week">
               <Input type="number" name="timesPerWeek" min={1} max={21} defaultValue={a.timesPerWeek ?? ""} />
@@ -252,7 +252,7 @@ function CommitmentForm({
       </div>
 
       {draft.kind === "fixed" ? (
-        <div className="space-y-4 rounded-lg border border-border bg-surface p-3.5">
+        <div className="space-y-4 rounded-lg border border-border bg-surface p-3 sm:p-3.5">
           <DayPicker label="Repeats on" value={draft.days} onChange={(days) => set("days", days)} />
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             {draft.days.length === 0 && (
@@ -263,16 +263,16 @@ function CommitmentForm({
               </div>
             )}
             <Field label="Starts">
-              <Input type="time" required value={draft.startTime} onChange={(e) => set("startTime", e.target.value)} />
+              <Input type="time" className="px-2.5" required value={draft.startTime} onChange={(e) => set("startTime", e.target.value)} />
             </Field>
             <Field label="Ends">
-              <Input type="time" required value={draft.endTime} onChange={(e) => set("endTime", e.target.value)} />
+              <Input type="time" className="px-2.5" required value={draft.endTime} onChange={(e) => set("endTime", e.target.value)} />
             </Field>
           </div>
           <p className="text-[12px] text-ink-3">Times are in {timeZone.replaceAll("_", " ")}.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-3 rounded-lg border border-border bg-surface p-3.5">
+        <div className="grid grid-cols-2 gap-3 rounded-lg border border-border bg-surface p-3 sm:p-3.5">
           <Field label="Time needed (min)">
             <Input
               type="number"

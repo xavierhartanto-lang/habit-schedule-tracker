@@ -213,7 +213,7 @@ export function EditableList<T extends { id: string }>({
       />
       <div className="px-5 pb-3 pt-2">
         {editing?.id === null && (
-          <div className="mb-2 mt-2 rounded-xl border border-border bg-surface-2/60 p-4 animate-fade-up">
+          <div className="mb-2 mt-2 rounded-xl border border-border bg-surface-2/60 p-3 sm:p-4 animate-fade-up">
             {renderForm(null, close)}
           </div>
         )}
@@ -227,7 +227,7 @@ export function EditableList<T extends { id: string }>({
             if (editing?.id === item.id) {
               return (
                 <li key={item.id} className="py-3">
-                  <div className="rounded-xl border border-border bg-surface-2/60 p-4 animate-fade-up">
+                  <div className="rounded-xl border border-border bg-surface-2/60 p-3 sm:p-4 animate-fade-up">
                     {renderForm(item, close)}
                   </div>
                 </li>
