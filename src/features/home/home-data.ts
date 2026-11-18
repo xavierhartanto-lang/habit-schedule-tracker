@@ -8,10 +8,12 @@ import { addDaysToKey, startOfDayInZone } from "@/lib/scheduling/zoned";
 import { loadPlanningContext, type PlanningContext } from "@/features/shared/planning-context";
 
 export const HOME_DAYS_AHEAD = 7;
+/** The assistant's opening line can mention an exam up to two weeks out. */
+export const LOOKAHEAD_DAYS = 14;
 
 export type HomeData = {
   ctx: PlanningContext;
-  /** Events that can occur from today through the next week (expand on render). */
+  /** Events that can occur from today through the next two weeks (expand on render). */
   events: Commitment[];
   openTasks: Task[];
   error: boolean;
@@ -33,7 +35,7 @@ export const loadHomeData = cache(async (): Promise<HomeData> => {
   if (ctx.state !== "ready") return { ctx, events: [], openTasks: [], error: false };
   try {
     const from = startOfDayInZone(addDaysToKey(ctx.todayKey, -1), ctx.timeZone).toISOString();
-    const to = startOfDayInZone(addDaysToKey(ctx.todayKey, HOME_DAYS_AHEAD + 1), ctx.timeZone).toISOString();
+    const to = startOfDayInZone(addDaysToKey(ctx.todayKey, LOOKAHEAD_DAYS + 1), ctx.timeZone).toISOString();
     const [{ events }, openTasks] = await Promise.all([
       listEventsForRange(ctx.userId, { from, to }),
       listOpenTasks(ctx.userId, { limit: 200 }),

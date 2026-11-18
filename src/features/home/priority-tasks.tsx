@@ -18,23 +18,22 @@ const PRIORITY_STYLE: Record<TaskPriority, string> = {
 /** Open tasks, highest priority first. Render inside <Suspense>. */
 export async function PriorityTasks() {
   const { ctx, openTasks, error } = await loadHomeData();
-  const tasks = sortPriorityTasks(openTasks).slice(0, 6);
+  const tasks = sortPriorityTasks(openTasks).slice(0, 4);
   return (
     <Card>
       <CardHeader
-        title="Priorities"
-        description="What deserves your focus first."
+        title="Tasks"
         action={
           <Link href="/tasks" className="text-[12px] font-medium text-accent-ink hover:underline">
-            All tasks
+            All
           </Link>
         }
       />
       <CardBody className="pt-3">
         {error ? (
-          <p className="rounded-xl bg-surface-2 px-4 py-6 text-center text-sm text-danger">Could not load tasks.</p>
+          <p className="rounded-xl bg-surface-2 px-4 py-5 text-center text-[13px] text-danger">Could not load tasks.</p>
         ) : tasks.length === 0 ? (
-          <p className="rounded-xl bg-surface-2 px-4 py-6 text-center text-sm text-ink-3">
+          <p className="rounded-xl bg-surface-2 px-4 py-5 text-center text-[13px] text-ink-3">
             {ctx.state === "ready" ? (
               <>
                 No open tasks.{" "}
@@ -47,15 +46,15 @@ export async function PriorityTasks() {
             )}
           </p>
         ) : (
-          <ul className="space-y-1">
+          <ul className="-mx-2 space-y-0.5">
             {tasks.map((t) => {
               const due = formatDue(t.dueAt, ctx.timeZone, ctx.todayKey);
               return (
-                <li key={t.id} className="flex items-center gap-3 rounded-xl px-2 py-2.5 transition-colors hover:bg-surface-2">
+                <li key={t.id} className="flex items-center gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-surface-2">
                   <TaskCheck id={t.id} title={t.title} inProgress={t.status === "in_progress"} />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm text-ink">{t.title}</p>
-                    <div className="mt-0.5 flex flex-wrap items-center gap-x-3">
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2.5">
                       <LifeAreaLabel area={findArea(ctx.areas, t.lifeAreaId)} />
                       {due && <span className="text-[12px] text-ink-3">Due {due}</span>}
                       {t.estimatedMinutes ? (

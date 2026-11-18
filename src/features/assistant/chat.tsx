@@ -9,7 +9,17 @@ import { AssistantMessage, SystemNotice, ThinkingState, UserMessage } from "./me
 import { ProposalGroup } from "./proposal-cards";
 import { RichText } from "./rich-text";
 import { streamChat } from "./stream";
+import { PlanCard, type PlanCardActions } from "./plan-card";
+import { approvePlanItems, editPlanItem, rejectPlanItems, requestAlternatives, undoPlanItem } from "./plan-actions";
 import { CHAT_MESSAGE_MAX, type ChatMessage, type ClientAiError, type Proposal } from "./types";
+
+const PLAN_ACTIONS: PlanCardActions = {
+  approve: approvePlanItems,
+  reject: rejectPlanItems,
+  edit: editPlanItem,
+  alternatives: requestAlternatives,
+  undo: undoPlanItem,
+};
 
 /**
  * The live conversation: persisted history, streaming replies, proposal
@@ -17,6 +27,9 @@ import { CHAT_MESSAGE_MAX, type ChatMessage, type ClientAiError, type Proposal }
  */
 
 type Mode = "onboarding" | "assistant";
+
+/** A one-tap conversation starter. With `checkIn`, the assistant opens a planning check-in. */
+export type ChatStarter = { label: string; prompt: string; checkIn?: "daily" | "weekly" };
 
 type Props = {
   mode: Mode;
@@ -29,6 +42,14 @@ type Props = {
   emptyState?: ReactNode;
   suggestions?: string[];
   placeholder?: string;
+  /**
+   * "embedded" (Home): starters send right away and sit under the opening
+   * line, and the URL is left alone. "page" (/assistant): the full screen.
+   */
+  variant?: "page" | "embedded";
+  /** Opening line shown before the first message, built from real data (never an LLM guess). */
+  opening?: string | null;
+  starters?: ChatStarter[];
 };
 
 type Failure = { error: ClientAiError; canRetry: boolean };
@@ -42,7 +63,11 @@ export function Chat({
   emptyState,
   suggestions = [],
   placeholder = "Message Whitespace…",
+  variant = "page",
+  opening = null,
+  starters = [],
 }: Props) {
+  const embedded = variant === "embedded";
   const router = useRouter();
   const [conversationId, setConversationId] = useState(initialConversationId);
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
@@ -54,6 +79,8 @@ export function Chat({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const started = useRef(false);
+  // Keep showing the opening line once the conversation it started is under way.
+  const [showOpening, setShowOpening] = useState(() => Boolean(opening) && initialMessages.length === 0);
   const stickToBottom = useRef(true);
 
   // Keep the newest content in view unless the user scrolled up to read.
@@ -65,7 +92,7 @@ export function Chat({
   useEffect(() => () => abortRef.current?.abort(), []);
 
   const run = useCallback(
-    async (request: { message?: string; retry?: boolean }) => {
+    async (request: { message?: string; retry?: boolean; checkIn?: "daily" | "weekly" }) => {
       if (busy) return;
       setBusy(true);
       setFailure(null);
@@ -85,6 +112,8 @@ export function Chat({
             proposals: [],
             clarifications: [],
             extractionError: null,
+            plan: null,
+            clarify: null,
           },
         ]);
       }
@@ -93,11 +122,21 @@ export function Chat({
       let userSaved = !request.message;
       let gotReply = false;
 
+      // The opening line is shown before the conversation exists. Send it with
+      // the first message so the assistant knows what it "said".
+      const sendOpening = !conversationId && opening && request.message ? opening : undefined;
+
       for await (const event of streamChat(
-        { mode, conversationId, message: request.message, retry: request.retry },
+        { mode, conversationId, message: request.message, retry: request.retry, checkIn: request.checkIn, opening: sendOpening },
         controller.signal,
       )) {
         switch (event.type) {
+          case "plan":
+            setMessages((m) => m.map((x) => (x.id === event.messageId ? { ...x, plan: event.plan } : x)));
+            break;
+          case "clarify":
+            setMessages((m) => m.map((x) => (x.id === event.messageId ? { ...x, clarify: event.clarify } : x)));
+            break;
           case "http_error":
             if (tempId && !userSaved) {
               setMessages((m) => m.filter((x) => x.id !== tempId));
@@ -109,7 +148,7 @@ export function Chat({
             if (!conversationId) {
               createdConversation = true;
               setConversationId(event.conversation.id);
-              if (mode === "assistant") {
+              if (mode === "assistant" && !embedded) {
                 window.history.replaceState(null, "", `/assistant?c=${event.conversation.id}`);
               }
             }
@@ -161,7 +200,7 @@ export function Chat({
       // Pick up the new conversation in the history list.
       if (createdConversation) router.refresh();
     },
-    [busy, conversationId, mode, router],
+    [busy, conversationId, mode, router, embedded, opening],
   );
 
   // Onboarding: let the assistant say hello first.
@@ -170,6 +209,22 @@ export function Chat({
     started.current = true;
     void run({});
   }, [autoStart, aiConfigured, initialMessages.length, run]);
+
+  const startWith = (s: ChatStarter) => {
+    if (busy || !aiConfigured) return;
+    if (!embedded && !s.checkIn) {
+      setDraft(s.prompt);
+      inputRef.current?.focus();
+      return;
+    }
+    // A check-in opens a fresh planning conversation where the assistant speaks first.
+    if (s.checkIn && !conversationId) {
+      // The check-in opens with its own message from the assistant, so the Home line steps aside.
+      setShowOpening(false);
+      void run({ checkIn: s.checkIn });
+    }
+    else void run({ message: s.prompt });
+  };
 
   const send = () => {
     const text = draft.trim();
@@ -209,8 +264,30 @@ export function Chat({
         aria-live="polite"
         aria-busy={busy}
       >
-        <div className="mx-auto w-full max-w-3xl space-y-6 px-4 py-6 sm:px-8">
-          {empty && emptyState}
+        <div className={cn("mx-auto w-full max-w-3xl space-y-6 px-4 py-6", embedded ? "sm:px-6" : "sm:px-8")}>
+          {empty && !showOpening && emptyState}
+
+          {showOpening && opening && (
+            <div className="space-y-3">
+              <AssistantMessage>
+                <p>{opening}</p>
+              </AssistantMessage>
+              {empty && aiConfigured && starters.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 pl-10">
+                  {starters.map((s) => (
+                    <button
+                      key={s.label}
+                      type="button"
+                      onClick={() => startWith(s)}
+                      className="rounded-full border border-border bg-surface px-3 py-1.5 text-[12.5px] text-ink-2 transition-colors hover:border-accent/40 hover:bg-accent-soft hover:text-accent-ink"
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {messages.map((m, i) => {
             const next = messages[i + 1];
@@ -229,6 +306,25 @@ export function Chat({
                   <AssistantMessage>
                     <RichText text={m.content} />
                   </AssistantMessage>
+                )}
+                {m.role === "assistant" && m.plan && (
+                  <div className="sm:pl-10">
+                    <PlanCard key={`${m.plan.id}:${m.plan.version}`} plan={m.plan} actions={PLAN_ACTIONS} disabled={busy} />
+                  </div>
+                )}
+                {m.role === "assistant" && m.clarify && i === messages.length - 1 && !busy && aiConfigured && m.clarify.choices.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 pl-10">
+                    {m.clarify.choices.map((c) => (
+                      <button
+                        key={c}
+                        type="button"
+                        onClick={() => void run({ message: c })}
+                        className="rounded-full border border-border bg-surface px-3 py-1.5 text-[12.5px] text-ink-2 transition-colors hover:border-accent/40 hover:bg-accent-soft hover:text-accent-ink"
+                      >
+                        {c}
+                      </button>
+                    ))}
+                  </div>
                 )}
                 {proposalSource && (
                   <ProposalGroup
@@ -299,12 +395,26 @@ export function Chat({
       </div>
 
       <div className="border-t border-border bg-surface/80 backdrop-blur">
-        <div className="mx-auto w-full max-w-3xl px-4 pb-4 pt-3 sm:px-8">
+        <div className={cn("mx-auto w-full max-w-3xl px-4 pb-4 pt-3", embedded ? "sm:px-6" : "sm:px-8")}>
           {!aiConfigured ? (
             <NotConfigured />
           ) : (
             <>
-              {empty && suggestions.length > 0 && (
+              {empty && !showOpening && starters.length > 0 && (
+                <div className="mb-3 flex gap-1.5 overflow-x-auto pb-1">
+                  {starters.map((s) => (
+                    <button
+                      key={s.label}
+                      type="button"
+                      onClick={() => startWith(s)}
+                      className="shrink-0 rounded-full border border-border bg-surface px-3 py-1.5 text-[12px] text-ink-2 transition-colors hover:border-border-strong hover:text-ink"
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {empty && !showOpening && suggestions.length > 0 && (
                 <div className="mb-3 flex gap-1.5 overflow-x-auto pb-1">
                   {suggestions.map((p) => (
                     <button
@@ -352,7 +462,7 @@ export function Chat({
                   }}
                   rows={1}
                   placeholder={answering ?? placeholder}
-                  className="max-h-40 min-h-9 flex-1 resize-none bg-transparent px-2 py-2 text-sm text-ink placeholder:text-ink-3 focus:outline-none"
+                  className="max-h-40 min-h-9 flex-1 resize-none bg-transparent px-2 py-2 text-sm text-ink placeholder:text-ink-3 composer-input"
                 />
                 {busy ? (
                   <button
@@ -377,7 +487,7 @@ export function Chat({
               <p className={cn("mt-2 text-center text-[11px]", tooLong ? "text-danger" : "text-ink-3")}>
                 {tooLong
                   ? `That's ${draft.length.toLocaleString()} characters. Keep it under ${CHAT_MESSAGE_MAX.toLocaleString()}.`
-                  : "Suggestions only save when you tap Save. Whitespace never changes your calendar on its own."}
+                  : "Calendar changes always wait for your approval."}
               </p>
             </>
           )}

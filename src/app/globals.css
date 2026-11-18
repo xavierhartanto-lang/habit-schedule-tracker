@@ -176,6 +176,11 @@ body {
   border-radius: 6px;
 }
 
+/* The chat composer shows focus on its whole box (focus-within ring), not on the bare textarea. */
+.composer-input:focus-visible {
+  outline: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;

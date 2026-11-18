@@ -1,10 +1,9 @@
 import { Card, CardBody, CardHeader, Skeleton } from "@/components/ui";
-import { AssistantQuickAccess } from "@/features/home/assistant-quick-access";
-import { FirstName } from "@/features/home/first-name";
-import { Greeting } from "@/features/home/greeting";
+import { HomeAssistant, HomeAssistantSkeleton } from "@/features/home/home-assistant";
 import { PriorityTasks } from "@/features/home/priority-tasks";
 import { TodaySchedule, TodayScheduleSkeleton } from "@/features/home/today-schedule";
 import { Upcoming } from "@/features/home/upcoming";
+import { WeekGlance } from "@/features/home/week-glance";
 import { OnboardingRedirect } from "@/features/onboarding/onboarding-redirect";
 import { Suspense } from "react";
 
@@ -13,44 +12,49 @@ function SectionSkeleton({ title }: { title: string }) {
     <Card>
       <CardHeader title={title} />
       <CardBody className="space-y-2">
-        <Skeleton className="h-10" />
-        <Skeleton className="h-10" />
+        <Skeleton className="h-9" />
+        <Skeleton className="h-9" />
       </CardBody>
     </Card>
   );
 }
 
-export default function HomePage() {
+/**
+ * Home is the assistant. The conversation sits at the center; a light
+ * overview of today, what's coming up and open tasks sits beside it.
+ */
+export default function HomePage(props: PageProps<"/">) {
   return (
-    <div className="space-y-6">
+    <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px] xl:gap-8">
       <Suspense fallback={null}>
         <OnboardingRedirect />
       </Suspense>
-      <Greeting
-        name={
-          <Suspense fallback={null}>
-            <FirstName />
-          </Suspense>
-        }
-      />
 
-      <div className="grid items-start gap-6 lg:grid-cols-3">
-        <div className="min-w-0 lg:col-span-2">
-          <Suspense fallback={<TodayScheduleSkeleton />}>
-            <TodaySchedule />
-          </Suspense>
-        </div>
-        <div className="min-w-0 space-y-6">
-          <AssistantQuickAccess />
-          <Suspense fallback={<SectionSkeleton title="Coming up" />}>
-            <Upcoming />
-          </Suspense>
-        </div>
+      <div className="min-w-0">
+        <Suspense fallback={<HomeAssistantSkeleton />}>
+          <HomeAssistantFromParams searchParams={props.searchParams} />
+        </Suspense>
       </div>
 
-      <Suspense fallback={<SectionSkeleton title="Priorities" />}>
-        <PriorityTasks />
-      </Suspense>
+      <aside aria-label="Your schedule at a glance" className="min-w-0 space-y-4 lg:pt-[76px]">
+        <Suspense fallback={null}>
+          <WeekGlance />
+        </Suspense>
+        <Suspense fallback={<TodayScheduleSkeleton />}>
+          <TodaySchedule />
+        </Suspense>
+        <Suspense fallback={<SectionSkeleton title="Coming up" />}>
+          <Upcoming />
+        </Suspense>
+        <Suspense fallback={<SectionSkeleton title="Tasks" />}>
+          <PriorityTasks />
+        </Suspense>
+      </aside>
     </div>
   );
+}
+
+async function HomeAssistantFromParams({ searchParams }: { searchParams: PageProps<"/">["searchParams"] }) {
+  const { new: fresh } = await searchParams;
+  return <HomeAssistant fresh={fresh === "1"} />;
 }

@@ -89,6 +89,8 @@ export type CommitmentRow = Timestamps & {
   due_at: string | null;
   location: string | null;
   notes: string | null;
+  task_id: string | null;
+  plan_item_id: string | null;
 } & Provenance;
 
 export type TaskRow = Timestamps & {
@@ -158,6 +160,7 @@ export type ConversationRow = Timestamps & {
   title: string | null;
   summary: string | null;
   last_message_at: string;
+  planning_state: Json;
 };
 
 export type MessageRow = {
@@ -192,6 +195,51 @@ export type SchedulingPreferencesRow = Timestamps & {
   keep_free_percent: number;
 };
 
+export type PlanKindEnum = "actions" | "schedule" | "reschedule";
+export type PlanStatusEnum = "pending" | "partially_applied" | "applied" | "rejected" | "stale";
+export type PlanItemStatusEnum = "pending" | "applied" | "rejected" | "conflict" | "failed" | "undone";
+
+export type PlanProposalRow = Timestamps & {
+  id: string;
+  user_id: string;
+  conversation_id: string | null;
+  message_id: string | null;
+  source_message_id: string | null;
+  kind: PlanKindEnum;
+  status: PlanStatusEnum;
+  summary: string | null;
+  unscheduled: Json;
+  context: Json;
+  version: number;
+  expires_at: string;
+};
+
+export type PlanItemRow = Timestamps & {
+  id: string;
+  user_id: string;
+  proposal_id: string;
+  position: number;
+  action: string;
+  status: PlanItemStatusEnum;
+  auto_applied: boolean;
+  title: string;
+  payload: Json;
+  display: Json;
+  target_id: string | null;
+  result_id: string | null;
+  undo: Json | null;
+  error: string | null;
+  applied_at: string | null;
+};
+
+export type PlanApprovalRow = {
+  user_id: string;
+  request_id: string;
+  proposal_id: string;
+  result: Json;
+  created_at: string;
+};
+
 export type Database = {
   public: {
     Tables: {
@@ -208,11 +256,22 @@ export type Database = {
       messages: Table<MessageRow, "user_id" | "conversation_id" | "role" | "content">;
       context_items: Table<ContextItemRow, "user_id" | "category" | "title">;
       scheduling_preferences: Table<SchedulingPreferencesRow, "user_id">;
+      plan_proposals: Table<PlanProposalRow, "user_id" | "kind">;
+      plan_items: Table<PlanItemRow, "user_id" | "proposal_id" | "position" | "action" | "title">;
+      plan_approvals: Table<PlanApprovalRow, "user_id" | "request_id" | "proposal_id">;
     };
     Views: Record<string, never>;
     Functions: {
       delete_life_area: {
         Args: { p_area_id: string; p_reassign_to?: string | null };
+        Returns: undefined;
+      };
+      apply_plan_items: {
+        Args: { p_proposal_id: string; p_request_id: string; p_ops: Json };
+        Returns: Json;
+      };
+      undo_plan_item: {
+        Args: { p_item_id: string };
         Returns: undefined;
       };
     };

@@ -69,6 +69,10 @@ export type Commitment = {
   timezone?: string | null;
   /** Local dates (YYYY-MM-DD) removed from a recurring series. */
   recurrenceExceptions?: string[];
+  /** Assistant-scheduled work sessions: the task it is for. */
+  taskId?: string | null;
+  /** Set when the assistant created this row from an approved plan. */
+  planItemId?: string | null;
 };
 
 export type TaskPriority = "high" | "medium" | "low";

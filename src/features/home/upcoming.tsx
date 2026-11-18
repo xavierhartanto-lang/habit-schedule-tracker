@@ -2,33 +2,35 @@ import { Card, CardBody, CardHeader, LifeAreaDot } from "@/components/ui";
 import { findArea } from "@/lib/domain/life-areas";
 import { dueParts } from "@/lib/domain/tasks";
 import { expandEvents } from "@/lib/scheduling/recurrence";
-import { addDaysToKey, dateKeyInZone, daysBetweenKeys, formatTimeInZone, startOfDayInZone } from "@/lib/scheduling/zoned";
+import { addDaysToKey, dateKeyInZone, daysBetweenKeys, formatDateKey, formatTimeInZone, startOfDayInZone } from "@/lib/scheduling/zoned";
 import { CalendarDays, CircleCheck } from "lucide-react";
-import { HOME_DAYS_AHEAD, loadHomeData } from "./home-data";
+import { LOOKAHEAD_DAYS, loadHomeData } from "./home-data";
 
-function relativeDay(n: number) {
+function relativeDay(n: number, key: string) {
   if (n === 0) return "Today";
   if (n === 1) return "Tomorrow";
-  return `In ${n} days`;
+  if (n < 7) return formatDateKey(key, { weekday: "long" });
+  return formatDateKey(key, { weekday: "short", month: "short", day: "numeric" });
 }
 
 type Item = { id: string; title: string; when: string; sort: number; areaId: string | null; kind: "event" | "task" };
 
-/** Next week's fixed commitments and task due dates. Render inside <Suspense>. */
+/** One-off fixed commitments and task due dates in the next two weeks. Weekly routines are left out. Render inside <Suspense>. */
 export async function Upcoming() {
   const { ctx, events, openTasks } = await loadHomeData();
   const tz = ctx.timeZone;
   const from = startOfDayInZone(addDaysToKey(ctx.todayKey, 1), tz);
-  const to = startOfDayInZone(addDaysToKey(ctx.todayKey, HOME_DAYS_AHEAD + 1), tz);
+  const to = startOfDayInZone(addDaysToKey(ctx.todayKey, LOOKAHEAD_DAYS + 1), tz);
 
   const items: Item[] = [];
   for (const o of expandEvents(events, from, to, tz)) {
-    if (o.event.kind !== "fixed") continue;
-    const days = daysBetweenKeys(ctx.todayKey, dateKeyInZone(o.start, tz));
+    if (o.event.kind !== "fixed" || o.event.recurrenceRule) continue;
+    const key = dateKeyInZone(o.start, tz);
+    const days = daysBetweenKeys(ctx.todayKey, key);
     items.push({
       id: o.key,
       title: o.event.title,
-      when: `${relativeDay(days)} · ${o.allDay ? "All day" : formatTimeInZone(o.start, tz)}`,
+      when: `${relativeDay(days, key)} · ${o.allDay ? "All day" : formatTimeInZone(o.start, tz)}`,
       sort: o.start.getTime(),
       areaId: o.event.lifeAreaId ?? null,
       kind: "event",
@@ -38,26 +40,26 @@ export async function Upcoming() {
     const due = dueParts(t.dueAt, tz);
     if (!due) continue;
     const days = daysBetweenKeys(ctx.todayKey, due.date);
-    if (days < 0 || days > HOME_DAYS_AHEAD) continue;
+    if (days < 0 || days > LOOKAHEAD_DAYS) continue;
     items.push({
       id: t.id,
       title: t.title,
-      when: `Due ${relativeDay(days).toLowerCase()}`,
+      when: `Due ${days < 2 ? relativeDay(days, due.date).toLowerCase() : relativeDay(days, due.date)}`,
       sort: Date.parse(t.dueAt!),
       areaId: t.lifeAreaId ?? null,
       kind: "task",
     });
   }
   items.sort((a, b) => a.sort - b.sort);
-  const shown = items.slice(0, 6);
+  const shown = items.slice(0, 5);
 
   return (
     <Card>
-      <CardHeader title="Coming up" description="Commitments and due dates this week." />
+      <CardHeader title="Coming up" description="Next 2 weeks" />
       <CardBody className="pt-3">
         {shown.length === 0 ? (
           <p className="rounded-xl bg-surface-2 px-4 py-5 text-center text-[13px] text-ink-3">
-            {ctx.state === "ready" ? "Nothing scheduled in the next 7 days." : "Sign in to see what's coming up."}
+            {ctx.state === "ready" ? "No deadlines or one-off events in the next two weeks." : "Sign in to see what's coming up."}
           </p>
         ) : (
           <ul className="divide-y divide-border">
