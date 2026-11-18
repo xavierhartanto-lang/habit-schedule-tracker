@@ -204,14 +204,33 @@ function windowFor(
   return { start, end };
 }
 
+/** Why this slot. Session numbering lives in the title, so the engine's "spread" note is left out. */
 function sessionReason(s: ProposedSession): string {
-  const base = s.reasons.map((r) => r.text).join(" ");
-  const part = s.count > 1 ? `Session ${s.index + 1} of ${s.count}. ` : "";
-  return `${part}${base}`.trim() || "Free time inside your working hours.";
+  return s.reasons.filter((r) => r.code !== "spread").map((r) => r.text).join(" ").trim() || "Free time inside your working hours.";
 }
 
-function blockItem(s: ProposedSession, request: PlanRequest, timeZone: string, sourceMessageId: string | null): NewPlanItem {
-  const title = s.count > 1 ? `${s.title} (${s.index + 1} of ${s.count})` : s.title;
+/** "(1 of 3)" numbering in calendar order per request. */
+function sessionNumbers(sessions: ProposedSession[]): Map<string, { n: number; of: number }> {
+  const byRequest = new Map<string, ProposedSession[]>();
+  for (const s of sessions) byRequest.set(s.requestId, [...(byRequest.get(s.requestId) ?? []), s]);
+  const out = new Map<string, { n: number; of: number }>();
+  for (const list of byRequest.values()) {
+    list
+      .slice()
+      .sort((a, b) => Date.parse(a.start) - Date.parse(b.start))
+      .forEach((s, i) => out.set(s.id, { n: i + 1, of: list.length }));
+  }
+  return out;
+}
+
+function blockItem(
+  s: ProposedSession,
+  numbering: { n: number; of: number } | undefined,
+  request: PlanRequest,
+  timeZone: string,
+  sourceMessageId: string | null,
+): NewPlanItem {
+  const title = numbering && numbering.of > 1 ? `${s.title} (${numbering.n} of ${numbering.of})` : s.title;
   return {
     action: "schedule_block",
     title,
@@ -670,6 +689,7 @@ export function buildPlan(input: BuildInput): BuiltPlan {
     });
     summary = result.summary;
     const byId = new Map(ctx.requests.map((r) => [r.id, r]));
+    const numbers = sessionNumbers(result.sessions);
 
     for (const s of result.sessions) {
       const move = ctx.moves.get(s.requestId);
@@ -699,7 +719,7 @@ export function buildPlan(input: BuildInput): BuiltPlan {
           },
         });
       } else {
-        ctx.items.push(blockItem(s, request, tz, input.sourceMessageId));
+        ctx.items.push(blockItem(s, numbers.get(s.id), request, tz, input.sourceMessageId));
       }
     }
 
