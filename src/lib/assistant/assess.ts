@@ -111,6 +111,8 @@ export type ActionSpec =
       lifeAreaId: string | null;
     }
   | { kind: "cant_make"; date: string | null; blocks: Commitment[]; event: Commitment | null; title: string }
+  /** Every matching event goes (a repeating event goes as a whole series). Empty when nothing matched. */
+  | { kind: "remove_event"; events: Commitment[]; title: string }
   | { kind: "finished_early"; task: Task | null; title: string }
   | { kind: "not_enough_time"; window: PlanWindow };
 
@@ -481,6 +483,20 @@ export function assessIntent(intent: Intent, world: World): Assessment {
     case "plan_time":
       return assessPlanTime(intent, world);
 
+    case "remove_event": {
+      const byRef = intent.targetRef ? refs.events.get(intent.targetRef) ?? refs.blocks.get(intent.targetRef) ?? null : null;
+      const title = intent.title ?? byRef?.title ?? null;
+      if (byRef) return { status: "ready", intent, spec: { kind: "remove_event", events: [byRef], title: byRef.title } };
+      if (!title) {
+        return needs(intent, "target", "Event", "Which event should I remove?", [...refs.events.values()].slice(0, 3).map((e) => e.title));
+      }
+      const matches = matchEvents([...refs.events.values(), ...refs.blocks.values()], title);
+      const names = [...new Set(matches.map((m) => m.title))];
+      const distinct = new Set(matches.map((m) => normalizeText(m.title)));
+      if (distinct.size > 1) return needs(intent, "target", title, "Which one should I remove?", names.slice(0, 4));
+      return { status: "ready", intent, spec: { kind: "remove_event", events: matches, title: matches[0]?.title ?? title } };
+    }
+
     case "cant_make": {
       const date = resolveDateRef(intent.date, world.todayKey, world.weekStartsOn);
       const block = intent.targetRef ? refs.blocks.get(intent.targetRef) ?? null : null;
@@ -512,6 +528,21 @@ export function assessIntent(intent: Intent, world: World): Assessment {
     case "cancel_draft":
       return { status: "skip", intent, reason: "Cancelled." };
   }
+}
+
+/** Events whose title matches: exact first, else containment, else shared words. */
+function matchEvents(events: Commitment[], title: string): Commitment[] {
+  const n = normalizeText(title);
+  const unique = [...new Map(events.map((e) => [e.id, e])).values()];
+  const exact = unique.filter((e) => normalizeText(e.title) === n);
+  if (exact.length) return exact;
+  const contains = unique.filter((e) => {
+    const t = normalizeText(e.title);
+    return t.includes(n) || n.includes(t);
+  });
+  if (contains.length) return contains;
+  const words = n.split(" ").filter((w) => w.length > 3);
+  return words.length ? unique.filter((e) => words.every((w) => normalizeText(e.title).includes(w))) : [];
 }
 
 function localDate(iso: string, timeZone: string): string {

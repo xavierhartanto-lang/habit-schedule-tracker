@@ -204,6 +204,35 @@ describe("adaptive rescheduling", () => {
     expect(plan.items[0]).toMatchObject({ action: "skip_occurrence", targetId: volleyball.id, payload: { date: "2026-11-19" } });
   });
 
+  it("\"cancel all math tutoring\" proposes removing the whole series, never automatically", () => {
+    const tutoring = event({ title: "Math tutoring", date: "2026-09-02", start: "18:00", end: "19:00", recurrenceRule: "FREQ=WEEKLY;BYDAY=WE" });
+    const w = world();
+    weekCalendar().forEach((e, n) => w.refs.events.set(`e${n + 1}`, e));
+    w.refs.events.set("e3", tutoring);
+    const i = intent({ type: "remove_event", title: "math tutoring", evidence: "cancel all math tutoring", explicit: true });
+    const plan = buildPlan(input({ world: w, events: [...weekCalendar(), tutoring], specs: [specOf(i, w)] }));
+    expect(plan.items).toHaveLength(1);
+    expect(plan.items[0]).toMatchObject({ action: "remove_event", targetId: tutoring.id, autoApply: false, payload: { commitmentId: tutoring.id } });
+    expect(plan.items[0].display.detail).toBe("Every week on Wed, 6 PM-7 PM");
+    expect(toOp({ id: uuid(), action: "remove_event", payload: plan.items[0].payload })).toMatchObject({ ok: true, op: { op: "delete_event", id: tutoring.id } });
+  });
+
+  it("removing something that isn't on the calendar changes nothing and says so", () => {
+    const i = intent({ type: "remove_event", title: "Chess club", evidence: "cancel chess club" });
+    const plan = buildPlan(input({ specs: [specOf(i)] }));
+    expect(plan.items).toHaveLength(0);
+    expect(plan.notes.join(" ")).toContain("Chess club");
+  });
+
+  it("asks which event when the name matches different events", () => {
+    const w = world();
+    w.refs.events.set("e1", event({ title: "Math tutoring", date: "2026-11-18", start: "18:00", end: "19:00" }));
+    w.refs.events.set("e2", event({ title: "Math club", date: "2026-11-19", start: "15:00", end: "16:00" }));
+    const a = assessIntent(intent({ type: "remove_event", title: "math", evidence: "cancel math" }), w);
+    expect(a.status).toBe("needs");
+    if (a.status === "needs") expect(a.clarify.choices).toEqual(["Math tutoring", "Math club"]);
+  });
+
   it("\"not enough time this week\" re-plans open work and reports what doesn't fit", () => {
     const big = task({ title: "Science fair", estimatedMinutes: 900, dueAt: zonedToUtc("2026-11-20", "23:59", TZ).toISOString(), priority: "high" });
     const small = task({ title: "Spanish vocab", estimatedMinutes: 30, dueAt: zonedToUtc("2026-11-21", "23:59", TZ).toISOString() });

@@ -1,5 +1,6 @@
 -- =============================================================
--- Checks for 20261122000000_assistant_plans.sql.
+-- Checks for 20261122000000_assistant_plans.sql and
+-- 20261123000000_assistant_remove_event.sql.
 --
 -- Run against a database with all migrations applied (local Supabase or
 -- a scratch project), as a role that can insert into auth.users:
@@ -163,6 +164,33 @@ select public.apply_plan_items(
 select pg_temp.expect((select completed_at from public.tasks where id = 'b0000000-0000-0000-0000-000000000001') = '2026-11-01 00:00+00',
   'completing an already-done task keeps its original completion time');
 
+-- ---------- Remove a whole repeating event when asked, then undo ----------
+insert into public.commitments (id, title, kind, starts_at, ends_at, timezone, recurrence_rule, recurrence_exceptions, location) values
+  ('c0000000-0000-0000-0000-000000000003', 'Math tutoring', 'fixed', '2026-11-18 18:00+00', '2026-11-18 19:00+00', 'UTC',
+   'FREQ=WEEKLY;BYDAY=WE', '{2026-12-02}', 'Library');
+insert into public.tasks (id, title, commitment_id) values
+  ('b0000000-0000-0000-0000-000000000002', 'Tutoring worksheet', 'c0000000-0000-0000-0000-000000000003');
+insert into public.plan_items (id, proposal_id, position, action, title) values
+  ('a1000000-0000-0000-0000-000000000009', 'a0000000-0000-0000-0000-000000000001', 8, 'remove_event', 'Math tutoring');
+select pg_temp.expect(
+  (select r ->> 'outcome' from jsonb_array_elements(public.apply_plan_items(
+    'a0000000-0000-0000-0000-000000000001', 'f0000000-0000-0000-0000-000000000008',
+    '[{"item_id":"a1000000-0000-0000-0000-000000000009","op":"delete_event","id":"c0000000-0000-0000-0000-000000000003"}]'::jsonb)) r)
+  = 'applied',
+  'an approved removal applies');
+select pg_temp.expect(not exists (select 1 from public.commitments where id = 'c0000000-0000-0000-0000-000000000003'),
+  'the whole series is gone');
+select pg_temp.expect((select commitment_id from public.tasks where id = 'b0000000-0000-0000-0000-000000000002') is null,
+  'linked task stays, unlinked');
+select public.undo_plan_item('a1000000-0000-0000-0000-000000000009');
+select pg_temp.expect(
+  (select recurrence_rule = 'FREQ=WEEKLY;BYDAY=WE' and recurrence_exceptions = '{2026-12-02}' and location = 'Library'
+          and kind = 'fixed' and starts_at = '2026-11-18 18:00+00'
+     from public.commitments where id = 'c0000000-0000-0000-0000-000000000003'),
+  'undo brings the series back exactly');
+select pg_temp.expect((select commitment_id from public.tasks where id = 'b0000000-0000-0000-0000-000000000002') = 'c0000000-0000-0000-0000-000000000003',
+  'undo relinks the task');
+
 -- ---------- User data isolation ----------
 reset role;
 select pg_temp.act_as('00000000-0000-0000-0000-0000000000b1');
@@ -188,11 +216,20 @@ select pg_temp.expect(
     '[{"item_id":"b1000000-0000-0000-0000-000000000001","op":"update_task","id":"b0000000-0000-0000-0000-000000000001","patch":{"title":"hacked"}}]'::jsonb)) r)
   = 'failed',
   'B cannot change A''s task through B''s own plan');
+insert into public.plan_items (id, proposal_id, position, action, title) values
+  ('b1000000-0000-0000-0000-000000000002', 'b0000000-0000-0000-0000-0000000000f1', 1, 'remove_event', 'Steal');
+select pg_temp.expect(
+  (select r ->> 'outcome' from jsonb_array_elements(public.apply_plan_items(
+    'b0000000-0000-0000-0000-0000000000f1', 'f0000000-0000-0000-0000-0000000000b3',
+    '[{"item_id":"b1000000-0000-0000-0000-000000000002","op":"delete_event","id":"c0000000-0000-0000-0000-000000000003"}]'::jsonb)) r)
+  = 'failed',
+  'B cannot remove A''s event through B''s own plan');
 select pg_temp.expect_error(
   $$insert into public.commitments (title, kind, starts_at, ends_at, plan_item_id) values ('x', 'flexible', now(), now() + interval '1 hour', 'a1000000-0000-0000-0000-000000000001')$$,
   'B cannot link a commitment to A''s plan item');
 
 reset role;
 select pg_temp.expect((select title from public.tasks where id = 'b0000000-0000-0000-0000-000000000001') = 'Old essay', 'A''s task is untouched');
+select pg_temp.expect(exists (select 1 from public.commitments where id = 'c0000000-0000-0000-0000-000000000003'), 'A''s event is untouched');
 
 rollback;

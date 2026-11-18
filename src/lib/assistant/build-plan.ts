@@ -1,7 +1,7 @@
 import type { PlanConflict, PlanItemAction, PlanKind, PlanTiming } from "@/features/assistant/plan-types";
 import { cadenceLabel } from "@/lib/domain/habits";
 import type { Commitment, HabitCadence, Task } from "@/lib/domain/types";
-import { expandEvent, expandEvents, overlapping } from "@/lib/scheduling/recurrence";
+import { describeRecurrence, expandEvent, expandEvents, overlapping, parseRRule } from "@/lib/scheduling/recurrence";
 import {
   addDaysToKey,
   dateKeyInZone,
@@ -572,6 +572,35 @@ export function buildPlan(input: BuildInput): BuiltPlan {
           lifeAreaId: spec.lifeAreaId,
           taskId: spec.taskId,
         });
+        break;
+      }
+      case "remove_event": {
+        ctx.adaptive = true;
+        if (!spec.events.length) {
+          ctx.notes.push(`Nothing called "${spec.title}" is on the calendar, so nothing was removed.`);
+          break;
+        }
+        for (const event of spec.events) {
+          const rule = parseRRule(event.recurrenceRule);
+          const tz = event.timezone ?? input.world.timeZone;
+          const time = event.startsAt && event.endsAt
+            ? `${clockLabel(timeKeyInZone(new Date(event.startsAt), tz))}-${clockLabel(timeKeyInZone(new Date(event.endsAt), tz))}`
+            : null;
+          const when = rule ? describeRecurrence(rule) : event.startsAt ? shortDate(dateKeyInZone(new Date(event.startsAt), tz)) : null;
+          ctx.items.push({
+            action: "remove_event",
+            title: event.title,
+            targetId: event.id,
+            // Removing a commitment always waits for approval, even when asked directly.
+            autoApply: false,
+            payload: { commitmentId: event.id },
+            display: {
+              ...EMPTY_DISPLAY,
+              detail: [when, time].filter(Boolean).join(", ") || null,
+              reason: rule ? "You asked to remove it. Every repeat goes; Undo brings it back." : "You asked to remove it. Undo brings it back.",
+            },
+          });
+        }
         break;
       }
       case "cant_make": {

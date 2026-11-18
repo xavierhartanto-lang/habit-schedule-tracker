@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import type { ChatTurn } from "@/lib/ai/prompts";
 import { interpretMessage } from "@/lib/ai/service";
 import { normalizeText } from "@/lib/ai/extraction";
-import { assessIntent, type Assessment, type RefTable, type World } from "@/lib/assistant/assess";
+import { assessIntent, type RefTable, type World } from "@/lib/assistant/assess";
 import { buildPlan, timingFor, type ItemDisplay } from "@/lib/assistant/build-plan";
 import { DRAFT_TTL_MS, nextDrafts } from "@/lib/assistant/drafts";
 import { dedupeIntents } from "@/lib/assistant/intents";
