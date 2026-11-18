@@ -152,6 +152,9 @@ alter table public.habits
     or (cardinality(weekdays) between 1 and 7 and weekdays <@ array[1,2,3,4,5,6,7]::smallint[])
   ),
   alter column area drop not null,
+  -- Phase 1 required times_per_week for anything but daily; only weekly needs it now.
+  drop constraint habits_weekly_needs_target,
+  add constraint habits_weekly_needs_target check (cadence::text <> 'weekly' or times_per_week is not null),
   add constraint habits_specific_days_need_weekdays check (cadence::text <> 'specific_days' or weekdays is not null);
 
 -- ---------- Goals ----------
