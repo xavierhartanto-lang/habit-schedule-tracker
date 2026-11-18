@@ -5,6 +5,7 @@ import {
   type LucideIcon,
   Settings,
   Sparkles,
+  UserRound,
   Target,
 } from "lucide-react";
 
@@ -23,6 +24,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/assistant", label: "AI Assistant", shortLabel: "Assistant", icon: Sparkles, mobile: true },
   { href: "/habits", label: "Habits & Goals", shortLabel: "Habits", icon: Target, mobile: true },
   { href: "/insights", label: "Insights", icon: LineChart, mobile: true },
+  { href: "/about-you", label: "What Whitespace knows", shortLabel: "About you", icon: UserRound, mobile: false },
   { href: "/settings", label: "Settings", icon: Settings, mobile: false },
 ];
 
