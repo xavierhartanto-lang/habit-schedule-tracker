@@ -117,7 +117,7 @@ export function CalendarView({
           <Legend />
           <div className="flex items-center gap-2">
             <Segmented label="Calendar view" value={view} options={VIEW_OPTIONS} onChange={(v) => go(v, date)} />
-            <Button size="sm" onClick={() => openNew(defaultNewDate)} disabled={disabled}>
+            <Button size="sm" onClick={() => openNew(defaultNewDate)} disabled={disabled} aria-label="New event">
               <Plus className="size-3.5" /> <span className="hidden sm:inline">Event</span>
             </Button>
           </div>
@@ -238,11 +238,11 @@ function Legend() {
   return (
     <div className="flex items-center gap-3 text-[12px] text-ink-3">
       <span className="flex items-center gap-1.5">
-        <span className="h-3 w-4 rounded-sm border-l-[3px] border-[var(--area-slate)] bg-[var(--area-slate-soft)]" />
+        <span className="inline-block h-3 w-4 rounded-sm border-l-[3px] border-[var(--area-slate)] bg-[var(--area-slate-soft)]" />
         <Lock className="size-3" /> Fixed
       </span>
       <span className="flex items-center gap-1.5">
-        <span className="h-3 w-4 rounded-sm border border-dashed border-[var(--area-slate)]" />
+        <span className="inline-block h-3 w-4 rounded-sm border border-dashed border-[var(--area-slate)]" />
         <MoveVertical className="size-3" /> Flexible
       </span>
       <span className="hidden items-center gap-1 sm:flex">
