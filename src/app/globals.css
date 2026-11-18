@@ -36,6 +36,30 @@
   --cat-rest: #6f7684;
   --cat-rest-soft: #eef0f3;
 
+  /* User-defined life area palette (lib/domain/life-areas AREA_COLORS) */
+  --area-blue: #3b74e6;
+  --area-blue-soft: #e8effd;
+  --area-violet: #7a5ae0;
+  --area-violet-soft: #f0ebfd;
+  --area-green: #2f9a6a;
+  --area-green-soft: #e5f5ed;
+  --area-amber: #d98a1c;
+  --area-amber-soft: #fcf1e1;
+  --area-pink: #d6547a;
+  --area-pink-soft: #fbe9ef;
+  --area-slate: #6f7684;
+  --area-slate-soft: #eef0f3;
+  --area-teal: #1f9aa6;
+  --area-teal-soft: #e2f4f5;
+  --area-orange: #e0663a;
+  --area-orange-soft: #fcebe4;
+  --area-cyan: #2a8fd0;
+  --area-cyan-soft: #e3f1fa;
+  --area-brown: #9a6b4b;
+  --area-brown-soft: #f4ece6;
+  --area-none: #a3a5ad;
+  --area-none-soft: #f1f1ee;
+
   --shadow-sm: 0 1px 2px rgb(22 23 27 / 0.04), 0 1px 1px rgb(22 23 27 / 0.03);
   --shadow-md: 0 4px 16px -4px rgb(22 23 27 / 0.08), 0 2px 4px rgb(22 23 27 / 0.04);
 }
@@ -70,6 +94,29 @@
     --cat-personal-soft: #3a1c27;
     --cat-rest: #9aa1ae;
     --cat-rest-soft: #23262c;
+
+    --area-blue: #6b9bf5;
+    --area-blue-soft: #1a2640;
+    --area-violet: #a088f2;
+    --area-violet-soft: #251e40;
+    --area-green: #4fc28f;
+    --area-green-soft: #15302a;
+    --area-amber: #eaa646;
+    --area-amber-soft: #352713;
+    --area-pink: #ec7c9d;
+    --area-pink-soft: #3a1c27;
+    --area-slate: #9aa1ae;
+    --area-slate-soft: #23262c;
+    --area-teal: #4cc3cc;
+    --area-teal-soft: #12302f;
+    --area-orange: #f08a62;
+    --area-orange-soft: #3a2118;
+    --area-cyan: #5db4ea;
+    --area-cyan-soft: #142a38;
+    --area-brown: #c49673;
+    --area-brown-soft: #30251d;
+    --area-none: #6b6e78;
+    --area-none-soft: #1d1e23;
 
     --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.3);
     --shadow-md: 0 6px 20px -6px rgb(0 0 0 / 0.5);

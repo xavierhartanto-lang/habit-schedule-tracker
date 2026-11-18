@@ -18,10 +18,38 @@ export type LifeArea =
  */
 export type CommitmentKind = "fixed" | "flexible";
 
+/** A user-defined life area (Academics, Sports…). See lib/domain/life-areas. */
+export type AreaColor =
+  | "blue"
+  | "violet"
+  | "green"
+  | "amber"
+  | "pink"
+  | "slate"
+  | "teal"
+  | "orange"
+  | "cyan"
+  | "brown";
+
+export type LifeAreaRecord = {
+  id: string;
+  name: string;
+  color: AreaColor;
+  position: number;
+  /** The old fixed category this area stands for, if any. */
+  legacyKey: LifeArea | null;
+};
+
+/**
+ * A calendar event. Stored in the `commitments` table.
+ * fixed = holds its time; flexible = an activity that could move.
+ */
 export type Commitment = {
   id: string;
   title: string;
-  area: LifeArea;
+  /** Legacy fixed category, mirrored from the life area. Prefer lifeAreaId. */
+  area: LifeArea | null;
+  lifeAreaId?: string | null;
   kind: CommitmentKind;
   /** ISO datetime. Flexible items may be unplaced (null) until scheduled. */
   startsAt: string | null;
@@ -33,8 +61,14 @@ export type Commitment = {
   location?: string | null;
   /** RFC 5545 RRULE for repeating commitments, e.g. FREQ=WEEKLY;BYDAY=MO,WE. */
   recurrenceRule?: string | null;
+  /** The event description. */
   notes?: string | null;
   source?: DataSource;
+  allDay?: boolean;
+  /** IANA zone the event repeats in. Null = the user's profile zone. */
+  timezone?: string | null;
+  /** Local dates (YYYY-MM-DD) removed from a recurring series. */
+  recurrenceExceptions?: string[];
 };
 
 export type TaskPriority = "high" | "medium" | "low";
@@ -43,22 +77,33 @@ export type TaskStatus = "todo" | "in_progress" | "done";
 export type Task = {
   id: string;
   title: string;
-  area: LifeArea;
+  area: LifeArea | null;
+  lifeAreaId?: string | null;
+  description?: string | null;
+  goalId?: string | null;
   priority: TaskPriority;
   status: TaskStatus;
   dueAt: string | null;
   estimatedMinutes: number | null;
+  completedAt?: string | null;
+  createdAt?: string;
 };
 
-export type HabitCadence = { type: "daily" } | { type: "weekly"; timesPerWeek: number };
+export type HabitCadence =
+  | { type: "daily" }
+  | { type: "weekly"; timesPerWeek: number }
+  | { type: "specific_days"; days: Weekday[] };
 
 export type Habit = {
   id: string;
   title: string;
-  area: LifeArea;
+  area: LifeArea | null;
+  lifeAreaId?: string | null;
+  description?: string | null;
   cadence: HabitCadence;
-  /** ISO dates (YYYY-MM-DD) the habit was completed in the current week. */
+  /** ISO dates (YYYY-MM-DD) the habit was completed in the loaded range. */
   completedOn: string[];
+  createdAt?: string;
 };
 
 export type GoalStatus = "active" | "paused" | "completed";
@@ -67,7 +112,10 @@ export type GoalHorizon = "short_term" | "long_term";
 export type Goal = {
   id: string;
   title: string;
-  area: LifeArea;
+  area: LifeArea | null;
+  lifeAreaId?: string | null;
+  /** Manual progress, 0-100. */
+  progress?: number;
   description: string | null;
   targetDate: string | null;
   status: GoalStatus;
@@ -141,6 +189,7 @@ export type ContextItem = {
   title: string;
   details: string | null;
   area: LifeArea | null;
+  lifeAreaId?: string | null;
   attributes: ContextAttributes;
   source: DataSource;
   sourceMessageId: string | null;

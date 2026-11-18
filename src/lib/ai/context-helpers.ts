@@ -64,7 +64,7 @@ export function computeCoverage(input: {
   const all = [...commitments.fixed, ...commitments.flexible];
   return {
     fixed_commitments: commitments.fixed.length > 0,
-    activities: facts.activity.length > 0 || all.some((c) => ACTIVITY_AREAS.has(c.area)),
+    activities: facts.activity.length > 0 || all.some((c) => c.area !== null && ACTIVITY_AREAS.has(c.area)),
     interests: facts.interest.length > 0,
     goals: goals.length > 0,
     routines: facts.routine.length > 0,

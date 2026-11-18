@@ -15,7 +15,7 @@ export function draftToCommitmentInput(
 ): { ok: true; value: Record<string, unknown> } | { ok: false; error: string } {
   const base = {
     title: draft.title,
-    area: draft.area,
+    lifeAreaId: draft.lifeAreaId || null,
     kind: draft.kind,
     location: draft.location,
     notes: draft.notes,

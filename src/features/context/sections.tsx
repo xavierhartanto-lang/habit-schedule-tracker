@@ -14,6 +14,8 @@ import {
   saveGoal,
 } from "./actions";
 import { CATEGORY_COPY } from "./categories";
+import { useLifeAreas } from "./life-areas-context";
+import { areaOf } from "@/lib/domain/life-areas";
 import { AreaOptions, DayPicker, EditableList, FormFooter, Textarea, useSave } from "./editable-list";
 import { commitmentToDraft, describeAttributes, describeCommitment, formatDate, type CommitmentDraft } from "./format";
 
@@ -28,6 +30,7 @@ function ContextItemForm({
   category: ContextCategory;
   close: () => void;
 }) {
+  const areas = useLifeAreas();
   const a = item?.attributes ?? {};
   const [days, setDays] = useState<Weekday[]>(a.days ?? []);
   const hasTiming = Boolean(a.days?.length || a.startTime || a.endTime || a.timesPerWeek || a.durationMinutes);
@@ -54,7 +57,7 @@ function ContextItemForm({
       category: f.get("category"),
       title: f.get("title"),
       details: f.get("details"),
-      area: f.get("area") || null,
+      lifeAreaId: f.get("area") || null,
       attributes,
     };
     save(() => saveContextItem(item?.id ?? null, input));
@@ -83,8 +86,8 @@ function ContextItemForm({
           </Select>
         </Field>
         <Field label="Life area">
-          <Select name="area" defaultValue={item?.area ?? ""}>
-            <AreaOptions allowNone />
+          <Select name="area" defaultValue={item ? (areaOf(areas, item)?.id ?? "") : ""}>
+            <AreaOptions />
           </Select>
         </Field>
         <div className="sm:col-span-2">
@@ -156,7 +159,7 @@ export function ContextItemSection({
       addLabel="Add"
       view={(i) => ({
         title: i.title,
-        area: i.area,
+        area: i,
         meta: describeAttributes(i.attributes),
         details: i.details,
         source: i.source,
@@ -171,7 +174,7 @@ export function ContextItemSection({
 
 const EMPTY_COMMITMENT: CommitmentDraft = {
   title: "",
-  area: "academics",
+  lifeAreaId: "",
   kind: "fixed",
   days: [],
   date: "",
@@ -220,7 +223,7 @@ function CommitmentForm({
           </Field>
         </div>
         <Field label="Life area">
-          <Select value={draft.area} onChange={(e) => set("area", e.target.value as CommitmentDraft["area"])}>
+          <Select value={draft.lifeAreaId} onChange={(e) => set("lifeAreaId", e.target.value)}>
             <AreaOptions />
           </Select>
         </Field>
@@ -323,7 +326,7 @@ export function CommitmentSection({
       addLabel="Add"
       view={(c) => ({
         title: c.title,
-        area: c.area,
+        area: c,
         meta: [describeCommitment(c, timeZone), c.location].filter(Boolean).join(" · ") || null,
         details: c.notes,
         source: c.source,
@@ -348,6 +351,7 @@ const HORIZON_LABEL = { short_term: "Short term", long_term: "Long term" } as co
 const STATUS_LABEL = { active: "Active", paused: "Paused", completed: "Done" } as const;
 
 function GoalForm({ item, close }: { item: Goal | null; close: () => void }) {
+  const areas = useLifeAreas();
   const { pending, error, save } = useSave(close);
 
   const onSubmit = (e: FormEvent<HTMLFormElement>) => {
@@ -355,7 +359,7 @@ function GoalForm({ item, close }: { item: Goal | null; close: () => void }) {
     const f = new FormData(e.currentTarget);
     const input = {
       title: f.get("title"),
-      area: f.get("area"),
+      lifeAreaId: f.get("area") || null,
       horizon: f.get("horizon") || null,
       status: f.get("status"),
       targetDate: f.get("targetDate") || null,
@@ -380,7 +384,7 @@ function GoalForm({ item, close }: { item: Goal | null; close: () => void }) {
           </Field>
         </div>
         <Field label="Life area">
-          <Select name="area" defaultValue={item?.area ?? "academics"}>
+          <Select name="area" defaultValue={item ? (areaOf(areas, item)?.id ?? "") : ""}>
             <AreaOptions />
           </Select>
         </Field>
@@ -425,7 +429,7 @@ export function GoalSection({ items, disabled }: { items: Goal[]; disabled: bool
       addLabel="Add"
       view={(g) => ({
         title: g.title,
-        area: g.area,
+        area: g,
         meta: g.targetDate ? `By ${formatDate(g.targetDate)}` : null,
         details: g.description,
         source: g.source,

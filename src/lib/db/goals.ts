@@ -1,17 +1,19 @@
 import "server-only";
 
-import { validateGoalInput } from "@/lib/domain/goals";
-import type { DataSource, Goal, GoalStatus } from "@/lib/domain/types";
+import { isProgress, validateGoalInput } from "@/lib/domain/goals";
+import type { DataSource, Goal, GoalStatus, LifeArea } from "@/lib/domain/types";
 import { DataValidationError, NotFoundError, dbError, requireDb } from "./client";
 import type { GoalMilestoneRow, GoalRow } from "./database.types";
 
-/** Goals and their milestones. Milestones are read here; editing them comes later. */
+/** Goals, their manual progress and milestones. Milestones are read here only. */
 
 function toGoal(row: GoalRow, milestones: GoalMilestoneRow[]): Goal {
   return {
     id: row.id,
     title: row.title,
     area: row.area,
+    lifeAreaId: row.life_area_id,
+    progress: row.progress,
     description: row.description,
     targetDate: row.target_date,
     status: row.status,
@@ -22,6 +24,25 @@ function toGoal(row: GoalRow, milestones: GoalMilestoneRow[]): Goal {
       .sort((a, b) => a.position - b.position)
       .map((m) => ({ id: m.id, title: m.title, done: m.done_at !== null })),
   };
+}
+
+function areaColumns(v: { area: LifeArea | null; lifeAreaId?: string | null }) {
+  return v.lifeAreaId !== undefined ? { life_area_id: v.lifeAreaId } : { area: v.area };
+}
+
+/** Sets only a goal's manual progress (0-100). */
+export async function setGoalProgress(userId: string, id: string, progress: number): Promise<void> {
+  if (!isProgress(progress)) throw new DataValidationError("Progress must be a whole number from 0 to 100.");
+  const supabase = await requireDb();
+  const { data, error } = await supabase
+    .from("goals")
+    .update({ progress, ...(progress === 100 ? { status: "completed" as const } : {}) })
+    .eq("user_id", userId)
+    .eq("id", id)
+    .select("id")
+    .maybeSingle();
+  if (error) throw dbError(error);
+  if (!data) throw new NotFoundError("Goal");
 }
 
 export async function listGoals(
@@ -62,7 +83,8 @@ export async function createGoal(userId: string, input: unknown): Promise<Goal> 
     .insert({
       user_id: userId,
       title: v.title,
-      area: v.area,
+      ...areaColumns(v),
+      ...(v.progress !== undefined ? { progress: v.progress } : {}),
       description: v.description ?? null,
       target_date: v.targetDate ?? null,
       status: v.status ?? "active",
@@ -87,7 +109,8 @@ export async function updateGoal(userId: string, id: string, input: unknown): Pr
     .from("goals")
     .update({
       title: v.title,
-      area: v.area,
+      ...areaColumns(v),
+      ...(v.progress !== undefined ? { progress: v.progress } : {}),
       description: v.description ?? null,
       target_date: v.targetDate ?? null,
       status: v.status ?? "active",

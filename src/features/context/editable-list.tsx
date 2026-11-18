@@ -1,12 +1,13 @@
 "use client";
 
 import { Badge, Button, Card, CardHeader } from "@/components/ui";
-import { LIFE_AREAS, LIFE_AREA_ORDER } from "@/lib/domain/life-areas";
+import { areaColors, areaOf } from "@/lib/domain/life-areas";
 import { WEEKDAYS, type DataSource, type LifeArea, type Weekday } from "@/lib/domain/types";
 import { cn } from "@/lib/utils/cn";
 import { MessageSquareText, PenLine, Plus, Trash2, type LucideIcon } from "lucide-react";
 import { useState, useTransition, type ReactNode, type TextareaHTMLAttributes } from "react";
 import type { ActionResult } from "./actions";
+import { useLifeAreas } from "./life-areas-context";
 import { WEEKDAY_LABELS } from "./format";
 
 // ---------- Small shared controls ----------
@@ -24,12 +25,14 @@ export function Textarea({ className, ...props }: TextareaHTMLAttributes<HTMLTex
   );
 }
 
-export function AreaOptions({ allowNone }: { allowNone?: boolean }) {
+/** Options for the user's own life areas. Value "" means no area. */
+export function AreaOptions() {
+  const areas = useLifeAreas();
   return (
     <>
-      {allowNone && <option value="">No area</option>}
-      {LIFE_AREA_ORDER.map((a) => (
-        <option key={a} value={a}>{LIFE_AREAS[a].label}</option>
+      <option value="">No area</option>
+      {areas.map((a) => (
+        <option key={a.id} value={a.id}>{a.name}</option>
       ))}
     </>
   );
@@ -138,7 +141,8 @@ export function useSave(onDone: () => void) {
 
 export type RowView = {
   title: string;
-  area: LifeArea | null;
+  /** The record's area link; resolved against the user's life areas. */
+  area: { lifeAreaId?: string | null; area?: LifeArea | null };
   meta?: string | null;
   details?: string | null;
   badges?: ReactNode;
@@ -172,6 +176,7 @@ export function EditableList<T extends { id: string }>({
   renderForm: (item: T | null, close: () => void) => ReactNode;
   onDelete: (id: string) => Promise<ActionResult>;
 }) {
+  const areas = useLifeAreas();
   const [editing, setEditing] = useState<Editing>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -234,20 +239,21 @@ export function EditableList<T extends { id: string }>({
               );
             }
             const v = view(item);
+            const area = areaOf(areas, v.area);
             const isConfirming = confirming === item.id;
             return (
               <li key={item.id} className="group flex items-start gap-3 py-3.5">
                 <span
                   aria-hidden
                   className="mt-[7px] inline-block size-2 shrink-0 rounded-full"
-                  style={{ background: v.area ? LIFE_AREAS[v.area].color : "var(--border-strong)" }}
+                  style={{ background: area ? areaColors(area).color : "var(--border-strong)" }}
                 />
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-ink">{v.title}</p>
                   {v.meta && <p className="mt-0.5 text-[13px] text-ink-2">{v.meta}</p>}
                   {v.details && <p className="mt-0.5 text-[13px] leading-relaxed text-ink-3">{v.details}</p>}
                   <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                    {v.area && <span className="mr-1 text-[12px] text-ink-3">{LIFE_AREAS[v.area].label}</span>}
+                    {area && <span className="mr-1 text-[12px] text-ink-3">{area.name}</span>}
                     {v.badges}
                     <SourceBadge source={v.source} />
                   </div>

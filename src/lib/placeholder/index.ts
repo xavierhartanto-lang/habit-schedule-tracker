@@ -5,9 +5,5 @@
  * before real persistence is wired in. Components that render it must show
  * a <SampleDataBadge />. Never mix these values with data from `lib/db`.
  */
-export * from "./week";
-export * from "./tasks";
-export * from "./habits";
-export * from "./goals";
 export * from "./insights";
 export * from "./assistant";
