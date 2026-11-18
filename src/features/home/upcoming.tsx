@@ -49,11 +49,11 @@ export async function Upcoming() {
     });
   }
   items.sort((a, b) => a.sort - b.sort);
-  const shown = items.slice(0, 6);
+  const shown = items.slice(0, 5);
 
   return (
     <Card>
-      <CardHeader title="Coming up" description="Commitments and due dates this week." />
+      <CardHeader title="Coming up" description="Next 7 days" />
       <CardBody className="pt-3">
         {shown.length === 0 ? (
           <p className="rounded-xl bg-surface-2 px-4 py-5 text-center text-[13px] text-ink-3">
