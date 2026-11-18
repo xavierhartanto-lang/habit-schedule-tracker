@@ -1,9 +1,9 @@
-# Cadence
+# Whitespace
 
 An AI-powered life manager for high-achieving high school students balancing
 academics, extracurriculars, athletics, creative work and rest.
 
-> "Cadence" is a working name. Change it in `src/lib/config/app.ts`.
+> The app name is set in `src/lib/config/app.ts`.
 
 **Status:** Phase 1 foundation. Design system, app shell, page skeletons,
 Supabase auth and schema. No AI functionality yet.
