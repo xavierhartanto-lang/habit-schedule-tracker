@@ -462,7 +462,7 @@ export function Chat({
                   }}
                   rows={1}
                   placeholder={answering ?? placeholder}
-                  className="max-h-40 min-h-9 flex-1 resize-none bg-transparent px-2 py-2 text-sm text-ink placeholder:text-ink-3 focus:outline-none focus-visible:outline-none"
+                  className="max-h-40 min-h-9 flex-1 resize-none bg-transparent px-2 py-2 text-sm text-ink placeholder:text-ink-3 composer-input"
                 />
                 {busy ? (
                   <button
