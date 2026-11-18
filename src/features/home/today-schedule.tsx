@@ -57,7 +57,7 @@ export function TodaySchedule() {
                   />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium text-ink">{c.title}</p>
-                    <p className="flex items-center gap-1.5 truncate text-[12px] text-ink-3">
+                    <p className="truncate text-[12px] text-ink-3">
                       {formatTime(start)} – {formatTime(end)}
                       {c.location && <> · {c.location}</>}
                     </p>

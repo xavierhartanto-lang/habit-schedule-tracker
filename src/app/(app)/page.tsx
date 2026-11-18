@@ -18,10 +18,10 @@ export default function HomePage() {
       />
 
       <div className="grid items-start gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2">
+        <div className="min-w-0 lg:col-span-2">
           <TodaySchedule />
         </div>
-        <div className="space-y-6">
+        <div className="min-w-0 space-y-6">
           <AssistantQuickAccess />
           <Upcoming />
         </div>
