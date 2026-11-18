@@ -7,7 +7,8 @@ import { interpretMessage } from "@/lib/ai/service";
 import { normalizeText } from "@/lib/ai/extraction";
 import { assessIntent, type Assessment, type RefTable, type World } from "@/lib/assistant/assess";
 import { buildPlan, timingFor, type ItemDisplay } from "@/lib/assistant/build-plan";
-import { dedupeIntents, MAX_DRAFTS, type Draft } from "@/lib/assistant/intents";
+import { DRAFT_TTL_MS, nextDrafts } from "@/lib/assistant/drafts";
+import { dedupeIntents } from "@/lib/assistant/intents";
 import { parsePayload, toOp, type Op } from "@/lib/assistant/ops";
 import { buildPlannerUserPrompt, plannerResultBlock } from "@/lib/assistant/planner-prompt";
 import { applyPreferenceChanges } from "@/lib/assistant/prefs";
@@ -50,8 +51,6 @@ import type { Clarify, PlanItemOutcome, PlanView } from "../plan-types";
  * writes data, and calendar items are never applied without approval.
  */
 
-const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
-const MAX_ASKS_PER_FIELD = 2;
 const REF_WINDOW_DAYS = 14;
 
 // ---------------------------------------------------------------------------
@@ -122,34 +121,6 @@ export type PlanTurnResult = {
   /** For the reply model: exactly what happened. */
   actions: string | null;
 };
-
-/** Picks the follow-up to ask (one at a time) and keeps the rest as drafts. */
-export function nextDrafts(
-  previous: Draft[],
-  consumed: string[],
-  assessments: Assessment[],
-  now: Date,
-): { drafts: Draft[]; clarify: Clarify | null; givenUp: string[] } {
-  const keep = previous.filter((d) => !consumed.includes(d.id) && now.getTime() - Date.parse(d.createdAt) < DRAFT_TTL_MS);
-  const byId = new Map(previous.map((d) => [d.id, d]));
-  const fresh: Draft[] = [];
-  const givenUp: string[] = [];
-  let clarify: Clarify | null = null;
-  for (const a of assessments) {
-    if (a.status !== "needs") continue;
-    const prior = a.intent.draftId ? byId.get(a.intent.draftId) : undefined;
-    const asked = [...(prior?.asked ?? []), a.clarify.field];
-    if (asked.filter((f) => f === a.clarify.field).length > MAX_ASKS_PER_FIELD) {
-      givenUp.push(a.clarify.about);
-      continue;
-    }
-    const id = prior?.id ?? `d${randomUUID().slice(0, 8)}`;
-    fresh.push({ id, intent: { ...a.intent, draftId: id }, asked, createdAt: prior?.createdAt ?? now.toISOString() });
-    clarify ??= a.clarify;
-  }
-  const drafts = [...fresh, ...keep].slice(0, MAX_DRAFTS);
-  return { drafts, clarify, givenUp };
-}
 
 export async function planTurn(input: {
   userId: string;
