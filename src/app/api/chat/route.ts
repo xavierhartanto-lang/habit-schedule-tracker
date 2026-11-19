@@ -16,11 +16,16 @@ import { planTurn } from "@/features/assistant/server/plan-service";
 import type { Clarify, PlanView } from "@/features/assistant/plan-types";
 import { plannerResultBlock } from "@/lib/assistant/planner-prompt";
 import { getPlan, setPlanMessage, toPlanView } from "@/lib/db/plans";
+import { NotFoundError } from "@/lib/db/client";
+import { isUuid } from "@/lib/domain/context-items";
+import { fallbackReply } from "@/features/assistant/fallback-reply";
+import { proposeDailyPlanFor, proposeFromRecommendationFor } from "@/features/proactive/server/service";
 import {
   CHAT_MESSAGE_MAX,
   OPENING_MAX,
   readUserMessageMeta,
   toChatMessage,
+  type ChatProactive,
   type ChatRequestBody,
   type ChatStreamEvent,
   type ClientAiError,
@@ -65,8 +70,10 @@ function parseBody(raw: unknown): ChatRequestBody | null {
   if (b.conversationId != null && typeof b.conversationId !== "string") return null;
   if (b.message != null && typeof b.message !== "string") return null;
   const checkIn = b.checkIn === "daily" || b.checkIn === "weekly" ? b.checkIn : undefined;
-  const opening =
-    typeof b.opening === "string" && b.opening.trim() ? b.opening.replace(/\s+/g, " ").trim().slice(0, OPENING_MAX) : undefined;
+  const line = (v: unknown) => (typeof v === "string" && v.trim() ? v.replace(/\s+/g, " ").trim().slice(0, OPENING_MAX) : undefined);
+  const opening = line(b.opening);
+  const proactive = b.mode === "assistant" ? parseProactive(b.proactive) : undefined;
+  if (b.proactive != null && !proactive) return null;
   return {
     mode: b.mode,
     conversationId: (b.conversationId as string | null | undefined) ?? null,
@@ -74,7 +81,19 @@ function parseBody(raw: unknown): ChatRequestBody | null {
     retry: b.retry === true,
     checkIn: b.mode === "assistant" ? checkIn : undefined,
     opening: b.mode === "assistant" ? opening : undefined,
+    proactive,
+    nudge: b.mode === "assistant" ? line(b.nudge) : undefined,
   };
+}
+
+function parseProactive(raw: unknown): ChatProactive | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const p = raw as Record<string, unknown>;
+  if (p.kind === "daily_plan") return { kind: "daily_plan" };
+  if (p.kind === "recommendation" && isUuid(p.id) && typeof p.actionId === "string" && /^[\w-]{1,60}$/.test(p.actionId)) {
+    return { kind: "recommendation", id: p.id, actionId: p.actionId };
+  }
+  return undefined;
 }
 
 const CHECKIN_TITLE = { daily: "Daily check-in", weekly: "Weekly check-in" } as const;
@@ -94,6 +113,9 @@ export async function POST(request: Request) {
 
   const body = parseBody(await request.json().catch(() => null));
   if (!body) return jsonError(400, { code: "bad_input", message: "That request didn't look right.", retryable: false });
+  if (body.proactive && !body.message) {
+    return jsonError(400, { code: "bad_input", message: "That request didn't look right.", retryable: false });
+  }
   if (body.message && body.message.length > CHAT_MESSAGE_MAX) {
     return jsonError(400, {
       code: "bad_input",
@@ -102,8 +124,11 @@ export async function POST(request: Request) {
     });
   }
 
-  // No key: refuse before saving anything. Never fake a reply.
-  if (!isAiConfigured()) {
+  // No key: refuse before saving anything. Never fake a reply. Proactive
+  // buttons are the exception: their plan is built without the AI, and the
+  // reply is a plain description of that plan.
+  const aiConfigured = isAiConfigured();
+  if (!aiConfigured && !body.proactive) {
     return jsonError(503, new AiError("not_configured").toJSON());
   }
 
@@ -147,6 +172,18 @@ export async function POST(request: Request) {
           }),
         );
       }
+    }
+
+    // Phase 5: the suggestion line the user is answering, so the reply has context.
+    if (body.nudge && body.message && !body.retry && history.at(-1)?.content !== body.nudge) {
+      history.push(
+        await appendMessage(user.id, {
+          conversationId: conversation.id,
+          role: "assistant",
+          content: body.nudge,
+          metadata: { source: "proactive_nudge" },
+        }),
+      );
     }
 
     if (body.retry) {
@@ -261,27 +298,25 @@ export async function POST(request: Request) {
         let plan: PlanView | null = null;
         let clarify: Clarify | null = null;
         let extras: Parameters<typeof streamReply>[0]["extras"];
+        let proactiveFailed: string | null = null;
         if (body.mode === "assistant") {
-          const phase4 = await runPhase4(user.id, conversation.id, userMessage, turns, body, createdUserMessage, signal);
+          const phase4 =
+            body.proactive && userMessage
+              ? await runProactive(user.id, conversation.id, userMessage, body.proactive, createdUserMessage)
+              : await runPhase4(user.id, conversation.id, userMessage, turns, body, createdUserMessage, signal);
           plan = phase4.plan;
           clarify = phase4.clarify;
           extras = phase4.extras;
+          proactiveFailed = (phase4 as { failed?: string | null }).failed ?? null;
         }
 
-        // Reply
-        try {
-          const reply = streamReply({ mode: body.mode, context: chatContext.prompt, history: turns, extras, signal });
-          let result = await reply.next();
-          while (!result.done) {
-            send({ type: "delta", text: result.value });
-            result = await reply.next();
-          }
+        const finish = async (content: string, metadata: MessageMetadata) => {
           const saved = await appendMessage(user.id, {
             conversationId: conversation.id,
             role: "assistant",
-            content: result.value.text,
+            content,
             metadata: {
-              model: result.value.model,
+              ...metadata,
               ...(plan ? { planId: plan.id } : {}),
               ...(clarify ? { clarify: clarify as unknown as MessageMetadata[string] } : {}),
             },
@@ -293,16 +328,44 @@ export async function POST(request: Request) {
           send({ type: "assistant_message", message: toChatMessage(saved, plan) });
           if (plan) send({ type: "plan", messageId: saved.id, plan });
           if (clarify) send({ type: "clarify", messageId: saved.id, clarify });
+        };
+
+        // Reply
+        let streamed = false;
+        try {
+          if (!aiConfigured) {
+            // Only proactive requests get here (see above): describe the plan plainly.
+            await finish(fallbackReply({ plan, failed: proactiveFailed }), { source: "fallback" });
+          } else {
+            const reply = streamReply({ mode: body.mode, context: chatContext.prompt, history: turns, extras, signal });
+            let result = await reply.next();
+            while (!result.done) {
+              streamed = true;
+              send({ type: "delta", text: result.value });
+              result = await reply.next();
+            }
+            await finish(result.value.text, { model: result.value.model });
+          }
         } catch (error) {
           const aiError = toAiError(error);
           if (aiError.code !== "aborted") console.error("[chat] reply failed", aiError.code, aiError.cause ?? error);
-          send({
-            type: "error",
-            error:
-              error instanceof Error && error.name === "DatabaseError"
+          const storage = error instanceof Error && error.name === "DatabaseError";
+          // A proactive plan is already built: still show it, with a plain reply.
+          let recovered = false;
+          if (body.proactive && !storage && aiError.code !== "aborted" && !streamed) {
+            recovered = await finish(fallbackReply({ plan, failed: proactiveFailed }), { source: "fallback" }).then(
+              () => true,
+              () => false,
+            );
+          }
+          if (!recovered) {
+            send({
+              type: "error",
+              error: storage
                 ? { code: "storage_unavailable", message: "The reply couldn't be saved. Try again.", retryable: true }
                 : aiError.toJSON(),
-          });
+            });
+          }
         }
 
         // Proposals: stored on the user's message so their source is clear.
@@ -406,5 +469,73 @@ async function runPhase4(
     if (aiError.code !== "aborted") console.error("[chat] planning failed", aiError.code, aiError.cause ?? error);
     const failed = error instanceof Error && error.name === "DatabaseError" ? "a storage error" : aiError.userMessage;
     return { plan: null, clarify: null, extras: { actions: plannerResultBlock({ plan: null, question: null, notes: [], failed }) } };
+  }
+}
+
+/**
+ * Phase 5: a proactive button. The proactive engine builds the plan from its
+ * own stored recommendation (or recomputes today's brief), so nothing the
+ * client sends beyond ids is trusted and no planner model runs. The plan is
+ * an ordinary Phase 4 plan: pending until the user approves it.
+ */
+async function runProactive(
+  userId: string,
+  conversationId: string,
+  userMessage: Message,
+  proactive: ChatProactive,
+  isNew: boolean,
+): Promise<{ plan: PlanView | null; clarify: Clarify | null; extras: Parameters<typeof streamReply>[0]["extras"]; failed?: string | null }> {
+  const meta = userMessage.metadata as Record<string, unknown>;
+  if (!isNew && typeof meta.planId === "string") {
+    try {
+      const view = toPlanView(await getPlan(userId, meta.planId));
+      return { plan: view, clarify: null, extras: { actions: plannerResultBlock({ plan: view, question: null, notes: [], failed: null }) } };
+    } catch {
+      return { plan: null, clarify: null, extras: { actions: null } };
+    }
+  }
+
+  try {
+    let plan: PlanView | null;
+    let note: string;
+    if (proactive.kind === "daily_plan") {
+      const result = await proposeDailyPlanFor(userId, { conversationId, sourceMessageId: userMessage.id });
+      plan = result.plan;
+      note = `The user tapped "${userMessage.content}" on today's brief, which said: ${result.brief.message} Explain the plan for today briefly.`;
+    } else {
+      const result = await proposeFromRecommendationFor(userId, {
+        id: proactive.id,
+        actionId: proactive.actionId,
+        conversationId,
+        sourceMessageId: userMessage.id,
+      });
+      plan = result.plan;
+      const r = result.recommendation;
+      note = `The user tapped "${userMessage.content}" on a suggestion Whitespace raised: ${r.message} Facts: ${r.facts.join("; ") || "none"}. Explain the suggested change briefly, using only these facts and the plan.`;
+    }
+    await updateMessageMetadata(userId, userMessage.id, {
+      ...userMessage.metadata,
+      planned: true,
+      ...(plan ? { planId: plan.id } : {}),
+    }).catch((error) => console.error("[chat] could not mark message planned", error));
+    return {
+      plan,
+      clarify: null,
+      extras: { actions: plannerResultBlock({ plan, question: null, notes: [note], failed: null }) },
+    };
+  } catch (error) {
+    const failed =
+      error instanceof NotFoundError
+        ? "That suggestion is no longer available."
+        : error instanceof Error && error.name === "DatabaseError"
+          ? "Couldn't load your schedule right now."
+          : "Couldn't put that plan together right now.";
+    if (!(error instanceof NotFoundError)) console.error("[chat] proactive plan failed", error);
+    return {
+      plan: null,
+      clarify: null,
+      failed,
+      extras: { actions: plannerResultBlock({ plan: null, question: null, notes: [], failed }) },
+    };
   }
 }

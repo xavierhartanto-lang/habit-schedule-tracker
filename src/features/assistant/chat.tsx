@@ -11,7 +11,10 @@ import { RichText } from "./rich-text";
 import { streamChat } from "./stream";
 import { PlanCard, type PlanCardActions } from "./plan-card";
 import { approvePlanItems, editPlanItem, rejectPlanItems, requestAlternatives, undoPlanItem } from "./plan-actions";
-import { CHAT_MESSAGE_MAX, type ChatMessage, type ClientAiError, type Proposal } from "./types";
+import { CHAT_MESSAGE_MAX, type ChatMessage, type ChatProactive, type ClientAiError, type Proposal } from "./types";
+import { ChipRow, NudgeList } from "./proactive-nudges";
+import { dismissRecommendation, markRecommendationsShown } from "@/features/proactive/actions";
+import type { Nudge, ProactiveChip } from "@/features/home/proactive";
 
 const PLAN_ACTIONS: PlanCardActions = {
   approve: approvePlanItems,
@@ -50,6 +53,12 @@ type Props = {
   /** Opening line shown before the first message, built from real data (never an LLM guess). */
   opening?: string | null;
   starters?: ChatStarter[];
+  /** Phase 5: buttons under the opening line (daily plan, a recommendation's actions). Work without the AI. */
+  openingChips?: ProactiveChip[];
+  /** Phase 5: gentle suggestions. Under the opening line, or after a resumed conversation. */
+  nudges?: Nudge[];
+  /** Recommendations this view shows, so the engine starts their cooldown. */
+  shownRecommendationIds?: string[];
 };
 
 type Failure = { error: ClientAiError; canRetry: boolean };
@@ -66,6 +75,9 @@ export function Chat({
   variant = "page",
   opening = null,
   starters = [],
+  openingChips = [],
+  nudges = [],
+  shownRecommendationIds = [],
 }: Props) {
   const embedded = variant === "embedded";
   const router = useRouter();
@@ -82,6 +94,9 @@ export function Chat({
   // Keep showing the opening line once the conversation it started is under way.
   const [showOpening, setShowOpening] = useState(() => Boolean(opening) && initialMessages.length === 0);
   const stickToBottom = useRef(true);
+  // Suggestions the user acted on or put off in this view.
+  const [handled, setHandled] = useState<ReadonlySet<string>>(() => new Set());
+  const [resumeAt] = useState(() => initialMessages.length - 1);
 
   // Keep the newest content in view unless the user scrolled up to read.
   useEffect(() => {
@@ -91,8 +106,22 @@ export function Chat({
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
+  // Start the cooldown for what Home showed, once per page view.
+  const shownKey = shownRecommendationIds.join(",");
+  useEffect(() => {
+    if (!shownKey) return;
+    void markRecommendationsShown({ ids: shownKey.split(",") }).catch(() => undefined);
+  }, [shownKey]);
+
   const run = useCallback(
-    async (request: { message?: string; retry?: boolean; checkIn?: "daily" | "weekly" }) => {
+    async (request: {
+      message?: string;
+      retry?: boolean;
+      checkIn?: "daily" | "weekly";
+      proactive?: ChatProactive;
+      /** The suggestion the user is answering, saved as the assistant's line before their message. */
+      nudge?: string;
+    }) => {
       if (busy) return;
       setBusy(true);
       setFailure(null);
@@ -127,7 +156,16 @@ export function Chat({
       const sendOpening = !conversationId && opening && request.message ? opening : undefined;
 
       for await (const event of streamChat(
-        { mode, conversationId, message: request.message, retry: request.retry, checkIn: request.checkIn, opening: sendOpening },
+        {
+          mode,
+          conversationId,
+          message: request.message,
+          retry: request.retry,
+          checkIn: request.checkIn,
+          opening: sendOpening,
+          proactive: request.proactive,
+          nudge: request.nudge,
+        },
         controller.signal,
       )) {
         switch (event.type) {
@@ -226,6 +264,33 @@ export function Chat({
     else void run({ message: s.prompt });
   };
 
+  /** A tap on a proactive button. Changes always come back as an approval card. */
+  const act = (chip: ProactiveChip, nudge: Nudge | null) => {
+    if (busy) return;
+    const done = (id: string) => setHandled((h) => new Set(h).add(id));
+    const a = chip.act;
+    switch (a.kind) {
+      case "dismiss":
+        done(a.id);
+        void dismissRecommendation({ id: a.id, reason: "not_now" }).catch(() => undefined);
+        return;
+      case "ask":
+        if (!aiConfigured) return;
+        if (nudge) done(nudge.id);
+        void run({ message: a.prompt, nudge: nudge?.message });
+        return;
+      case "recommendation":
+        done(a.id);
+        void run({ message: chip.label, proactive: { kind: "recommendation", id: a.id, actionId: a.actionId }, nudge: nudge?.message });
+        return;
+      case "daily_plan":
+        void run({ message: chip.label, proactive: { kind: "daily_plan" } });
+        return;
+    }
+  };
+  const visibleNudges = nudges.filter((n) => !handled.has(n.id));
+  const openingRecHandled = openingChips.some((c) => c.act.kind === "dismiss" && handled.has(c.act.id));
+
   const send = () => {
     const text = draft.trim();
     if (!text || busy || !aiConfigured || text.length > CHAT_MESSAGE_MAX) return;
@@ -272,6 +337,9 @@ export function Chat({
               <AssistantMessage>
                 <p>{opening}</p>
               </AssistantMessage>
+              {empty && !openingRecHandled && openingChips.length > 0 && (
+                <ChipRow chips={openingChips} onAct={(c) => act(c, null)} disabled={busy} className="pl-10" />
+              )}
               {empty && aiConfigured && starters.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 pl-10">
                   {starters.map((s) => (
@@ -284,6 +352,11 @@ export function Chat({
                       {s.label}
                     </button>
                   ))}
+                </div>
+              )}
+              {!initialMessages.length && visibleNudges.length > 0 && (
+                <div className="pl-10 pt-1">
+                  <NudgeList nudges={visibleNudges} lead="Also worth a look" onAct={(n, c) => act(c, n)} disabled={busy} />
                 </div>
               )}
             </div>
@@ -335,6 +408,16 @@ export function Chat({
                     onProposalsChange={onProposalsChange}
                     onAnswer={answer}
                   />
+                )}
+                {i === resumeAt && visibleNudges.length > 0 && (
+                  <AssistantMessage>
+                    <NudgeList
+                      nudges={visibleNudges}
+                      lead={visibleNudges.length > 1 ? "A couple of things I noticed" : "Something I noticed"}
+                      onAct={(n, c) => act(c, n)}
+                      disabled={busy}
+                    />
+                  </AssistantMessage>
                 )}
               </div>
             );
