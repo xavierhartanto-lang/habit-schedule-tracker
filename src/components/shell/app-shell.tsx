@@ -2,6 +2,7 @@ import { Suspense, type ReactNode } from "react";
 import { MobileTabBar, MobileTopBar } from "./mobile-nav";
 import { Sidebar } from "./sidebar";
 import { SidebarAccount, SidebarAccountSkeleton } from "./sidebar-account";
+import { TimeZoneSync } from "./timezone-sync";
 
 export function AppShell({ children }: { children: ReactNode }) {
   return (
@@ -18,6 +19,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         {children}
       </main>
       <MobileTabBar />
+      <TimeZoneSync />
     </div>
   );
 }
