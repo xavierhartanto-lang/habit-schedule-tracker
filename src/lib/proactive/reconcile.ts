@@ -66,6 +66,15 @@ export type ReconcileResult = {
   updates: { id: string; patch: RecommendationPatch }[];
 };
 
+/** JSON with object keys sorted: Postgres jsonb reorders keys, so plain JSON.stringify would always differ. */
+export function stableJson(value: unknown): string {
+  return JSON.stringify(value, (_key, v) =>
+    v && typeof v === "object" && !Array.isArray(v)
+      ? Object.fromEntries(Object.keys(v as object).sort().map((k) => [k, (v as Record<string, unknown>)[k]]))
+      : v,
+  );
+}
+
 function contentChanged(row: StoredRecommendation, c: Candidate): boolean {
   return (
     row.priority !== c.priority ||
@@ -73,9 +82,9 @@ function contentChanged(row: StoredRecommendation, c: Candidate): boolean {
     row.reason !== c.reason ||
     row.message !== c.message ||
     row.date !== c.date ||
-    JSON.stringify(row.facts) !== JSON.stringify(c.facts) ||
-    JSON.stringify(row.actions) !== JSON.stringify(c.actions) ||
-    JSON.stringify(row.commitmentIds) !== JSON.stringify(c.commitmentIds)
+    stableJson(row.facts) !== stableJson(c.facts) ||
+    stableJson(row.actions) !== stableJson(c.actions) ||
+    stableJson(row.commitmentIds) !== stableJson(c.commitmentIds)
   );
 }
 

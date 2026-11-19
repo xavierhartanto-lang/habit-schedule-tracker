@@ -249,6 +249,12 @@ describe("7-9. dismiss, reject, approve", () => {
     expect(second).toEqual({ inserts: [], updates: [] });
   });
 
+  it("an unchanged open row isn't rewritten, even after a jsonb round trip reorders keys", () => {
+    const reordered = c.actions.map((a) => ({ params: Object.fromEntries(Object.entries(a.params).reverse()), label: a.label, kind: a.kind, id: a.id }));
+    const r = reconcile({ stored: [stored(c, { actions: reordered as Candidate["actions"] })], candidates: [c], plans: new Map(), now: later });
+    expect(r.updates).toEqual([]);
+  });
+
   it("7. dismissed stays dismissed, and the task isn't nagged about through other kinds", () => {
     const row = stored(c, { status: "dismissed" });
     expect(reconcile({ stored: [row], candidates: [c], plans: new Map(), now: later })).toEqual({ inserts: [], updates: [] });

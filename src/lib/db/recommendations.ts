@@ -186,7 +186,17 @@ export async function applyReconcile(userId: string, result: ReconcileResult): P
   const results = await Promise.all(writes);
   const failed = results.find((r) => r.error);
   if (failed?.error) throw dbError(failed.error);
-  return results.flatMap((r) => (Array.isArray(r.data) ? r.data : r.data ? [r.data] : []));
+  const written = results.flatMap((r) => (Array.isArray(r.data) ? r.data : r.data ? [r.data] : []));
+  // A concurrent load (second render, another tab) may have inserted some keys first:
+  // ignoreDuplicates returns no row for those, so read them back by key.
+  const got = new Set(written.map((r) => r.dedupe_key));
+  const missing = result.inserts.map((c) => c.dedupeKey.slice(0, 200)).filter((k) => !got.has(k));
+  if (missing.length) {
+    const { data, error } = await supabase.from("recommendations").select("*").eq("user_id", userId).in("dedupe_key", missing);
+    if (error) throw dbError(error);
+    written.push(...data);
+  }
+  return written;
 }
 
 export async function updateRecommendation(userId: string, id: string, patch: RecommendationPatch & { status?: RecommendationStatus }): Promise<RecommendationRow> {
