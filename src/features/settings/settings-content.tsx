@@ -1,7 +1,7 @@
 import { getSessionUser } from "@/lib/auth/session";
 import { getPreferences, getProfile } from "@/lib/db/profiles";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
-import { ChevronRight, Shapes, UserRound } from "lucide-react";
+import { Bell, ChevronRight, Shapes, UserRound } from "lucide-react";
 import Link from "next/link";
 import { DEFAULT_PREFERENCES, DEFAULT_PROFILE } from "./defaults";
 import { PreferencesForm, ProfileForm } from "./forms";
@@ -63,6 +63,19 @@ export async function SettingsContent() {
         <span className="min-w-0 flex-1">
           <span className="block text-sm font-medium text-ink">Life areas</span>
           <span className="block text-[13px] text-ink-3">Create, rename, recolor and remove the areas you organize around.</span>
+        </span>
+        <ChevronRight className="size-4 text-ink-3 transition-transform group-hover:translate-x-0.5" />
+      </Link>
+      <Link
+        href="/school-schedule"
+        className="group flex items-center gap-3 rounded-2xl border border-border bg-surface px-5 py-4 shadow-card transition-colors hover:border-border-strong"
+      >
+        <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent-ink">
+          <Bell className="size-4" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-medium text-ink">School schedule</span>
+          <span className="block text-[13px] text-ink-3">Bell times, late starts and A/B days. Plans stay out of class.</span>
         </span>
         <ChevronRight className="size-4 text-ink-3 transition-transform group-hover:translate-x-0.5" />
       </Link>

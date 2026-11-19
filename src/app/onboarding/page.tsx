@@ -4,6 +4,8 @@ import { CONTEXT_REVIEW_HREF } from "@/features/assistant/context-panel";
 import { ChatPageState, ChatSkeleton } from "@/features/assistant/page-states";
 import { loadOnboardingPage } from "@/features/assistant/server/load";
 import { FinishButton } from "@/features/onboarding/finish-button";
+import { SchoolScheduleSetup } from "@/features/school-schedule/school-schedule-setup";
+import { loadSchoolSchedule } from "@/features/school-schedule/server";
 import type { OnboardingCoverage } from "@/lib/ai/prompts";
 import { cn } from "@/lib/utils/cn";
 import { Check, ShieldCheck } from "lucide-react";
@@ -59,6 +61,23 @@ async function OnboardingContent() {
   }
 
   const { coverage, permissions } = data.context;
+
+  // Step 1, asked once: school and bell schedule. Saved or skipped, it never
+  // comes back here (it's editable from Settings).
+  const school = await loadSchoolSchedule();
+  if (school.state === "ready" && school.stored.status === "none") {
+    return (
+      <main className="min-h-0 flex-1 overflow-y-auto bg-bg">
+        <SchoolScheduleSetup
+          variant="onboarding"
+          aiConfigured={data.aiConfigured}
+          initialSchool={school.profileSchool}
+          initialDistrict={null}
+          initialSchedule={null}
+        />
+      </main>
+    );
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col lg:flex-row">

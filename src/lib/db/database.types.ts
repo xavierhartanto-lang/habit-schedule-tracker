@@ -202,6 +202,15 @@ export type SchedulingPreferencesRow = Timestamps & {
   quiet_hours_end?: string | null;
 };
 
+export type SchoolScheduleRow = Timestamps & {
+  user_id: string;
+  status: "saved" | "skipped";
+  school: string | null;
+  district: string | null;
+  schedule: Json | null;
+  commitment_ids: string[];
+};
+
 export type RecommendationRow = Timestamps & {
   id: string;
   user_id: string;
@@ -290,6 +299,7 @@ export type Database = {
       plan_items: Table<PlanItemRow, "user_id" | "proposal_id" | "position" | "action" | "title">;
       plan_approvals: Table<PlanApprovalRow, "user_id" | "request_id" | "proposal_id">;
       recommendations: Table<RecommendationRow, "user_id" | "dedupe_key" | "kind" | "priority" | "title" | "reason" | "message">;
+      school_schedules: Table<SchoolScheduleRow, "user_id" | "status">;
     };
     Views: Record<string, never>;
     Functions: {
@@ -304,6 +314,10 @@ export type Database = {
       undo_plan_item: {
         Args: { p_item_id: string };
         Returns: undefined;
+      };
+      save_school_schedule: {
+        Args: { p_schedule: Json; p_school: string | null; p_district: string | null; p_blocks: Json };
+        Returns: string[];
       };
     };
     Enums: {
