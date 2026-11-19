@@ -72,7 +72,7 @@ export type BuildInput = {
   events: Commitment[];
   openTasks: Task[];
   /** Blocks proposed in other open plans, so plans never double-book. */
-  busy: { start: string; end: string; title?: string }[];
+  busy: { start: string; end: string; title?: string; taskId?: string | null }[];
   specs: { spec: ActionSpec; explicit: boolean }[];
   sourceMessageId: string | null;
 };
@@ -340,6 +340,15 @@ export function buildPlan(input: BuildInput): BuiltPlan {
     (e) => isFlexibleBlock(e) && (e as Commitment & { planItemId?: string | null }).planItemId && e.startsAt && Date.parse(e.startsAt) > now.getTime(),
   ) as (Commitment & { planItemId?: string | null; taskId?: string | null })[];
 
+  // Minutes already set aside for each task: future blocks on the calendar
+  // plus blocks still waiting for approval in other plans.
+  const bookedByTask = new Map<string, number>();
+  const book = (taskId: string | null | undefined, start: string, end: string) => {
+    if (taskId) bookedByTask.set(taskId, (bookedByTask.get(taskId) ?? 0) + (Date.parse(end) - Date.parse(start)) / 60_000);
+  };
+  for (const b of futureBlocks) book(b.taskId, b.startsAt!, b.endsAt!);
+  for (const b of input.busy) if (Date.parse(b.end) > now.getTime()) book(b.taskId, b.start, b.end);
+
   // ---- 1. Records and new events ----
   for (const { spec, explicit } of input.specs) {
     const auto = explicit && AUTO_APPLY.has(spec.kind);
@@ -559,12 +568,23 @@ export function buildPlan(input: BuildInput): BuiltPlan {
         } else if (task?.dueAt) {
           deadline = new Date(task.dueAt);
         }
+        // Planning a task again only books what's left of its estimate.
+        let amount = spec.amount;
+        const booked = task ? bookedByTask.get(task.id) ?? 0 : 0;
+        if (task && booked > 0 && amount.type === "total" && amount.minutes === task.estimatedMinutes) {
+          const left = Math.round(amount.minutes - booked);
+          if (left < 15) {
+            ctx.notes.push(`${task.title} already has its time booked.`);
+            break;
+          }
+          amount = { type: "total", minutes: left };
+        }
         const win = windowFor(spec, input, deadline);
         ctx.windows.push(win);
         ctx.requests.push({
           id: `r${ctx.requests.length}`,
           title: spec.title,
-          amount: spec.amount,
+          amount,
           priority: spec.priority,
           deadline: (deadline && deadline <= win.end ? deadline : win.end).toISOString(),
           earliestStart: win.start.toISOString(),
@@ -671,10 +691,6 @@ export function buildPlan(input: BuildInput): BuiltPlan {
         ctx.adaptive = true;
         const win = windowFor({ window: spec.window }, input, null);
         ctx.windows.push(win);
-        const scheduled = new Map<string, number>();
-        for (const b of futureBlocks) {
-          if (b.taskId) scheduled.set(b.taskId, (scheduled.get(b.taskId) ?? 0) + (Date.parse(b.endsAt!) - Date.parse(b.startsAt!)) / 60_000);
-        }
         const noEstimate: string[] = [];
         for (const task of input.openTasks) {
           if (task.dueAt && Date.parse(task.dueAt) > win.end.getTime() + 7 * 86_400_000) continue;
@@ -683,7 +699,7 @@ export function buildPlan(input: BuildInput): BuiltPlan {
             if (task.dueAt) noEstimate.push(task.title);
             continue;
           }
-          const left = (req.amount.type === "total" ? req.amount.minutes : 0) - (scheduled.get(task.id) ?? 0);
+          const left = (req.amount.type === "total" ? req.amount.minutes : 0) - (bookedByTask.get(task.id) ?? 0);
           if (left < 15) continue;
           ctx.requests.push({ ...req, id: `r${ctx.requests.length}`, amount: { type: "total", minutes: Math.round(left) } });
         }
