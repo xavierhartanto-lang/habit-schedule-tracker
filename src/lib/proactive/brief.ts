@@ -98,7 +98,7 @@ function briefMessage(a: Analysis, events: BriefEvent[], ranked: Ranked[], actio
   const top = ranked[0]?.t;
 
   const eventPart = next
-    ? `You have ${next.title} at ${clockAt(next.start, tz)} today${fixed.length > 1 ? `, plus ${plural(fixed.length - 1, "more commitment")}` : ""}`
+    ? `You have ${next.title} ${Date.parse(next.start) <= a.nowMs ? `until ${clockAt(next.end, tz)}` : `at ${clockAt(next.start, tz)}`} today${fixed.length > 1 ? `, plus ${plural(fixed.length - 1, "more commitment")}` : ""}`
     : null;
   const taskPart = top
     ? top.dueMs !== null && top.dueMs <= a.nowMs
