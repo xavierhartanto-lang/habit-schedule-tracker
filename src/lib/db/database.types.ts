@@ -107,6 +107,9 @@ export type TaskRow = Timestamps & {
   due_at: string | null;
   estimated_minutes: number | null;
   completed_at: string | null;
+  /** Phase 5. */
+  postpone_count?: number;
+  last_postponed_at?: string | null;
 };
 
 export type HabitRow = Timestamps & {
@@ -193,6 +196,33 @@ export type SchedulingPreferencesRow = Timestamps & {
   buffer_minutes: number;
   daily_cap_minutes: number;
   keep_free_percent: number;
+  /** Phase 5 assistant settings. */
+  proactivity?: "minimal" | "balanced" | "proactive";
+  quiet_hours_start?: string | null;
+  quiet_hours_end?: string | null;
+};
+
+export type RecommendationRow = Timestamps & {
+  id: string;
+  user_id: string;
+  dedupe_key: string;
+  kind: string;
+  priority: "high" | "medium" | "low";
+  status: "open" | "proposed" | "snoozed" | "dismissed" | "acted" | "resolved";
+  title: string;
+  reason: string;
+  message: string;
+  facts: Json;
+  actions: Json;
+  task_id: string | null;
+  commitment_ids: string[];
+  target_date: string | null;
+  plan_id: string | null;
+  snoozed_until: string | null;
+  last_shown_at: string | null;
+  shown_count: number;
+  last_seen_at: string;
+  resolved_at: string | null;
 };
 
 export type PlanKindEnum = "actions" | "schedule" | "reschedule";
@@ -259,6 +289,7 @@ export type Database = {
       plan_proposals: Table<PlanProposalRow, "user_id" | "kind">;
       plan_items: Table<PlanItemRow, "user_id" | "proposal_id" | "position" | "action" | "title">;
       plan_approvals: Table<PlanApprovalRow, "user_id" | "request_id" | "proposal_id">;
+      recommendations: Table<RecommendationRow, "user_id" | "dedupe_key" | "kind" | "priority" | "title" | "reason" | "message">;
     };
     Views: Record<string, never>;
     Functions: {

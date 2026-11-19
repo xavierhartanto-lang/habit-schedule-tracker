@@ -1,5 +1,7 @@
 import "server-only";
 
+import type { AssistantSettings } from "@/features/proactive/types";
+import { assistantSettingsSchema, settingsFromRow } from "@/lib/proactive/surface";
 import {
   defaultSchedulingPreferences,
   schedulingPreferencesSchema,
@@ -65,4 +67,46 @@ export async function saveSchedulingPreferences(userId: string, input: unknown):
   );
   if (error) throw dbError(error);
   return p;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5: assistant proactivity and quiet hours (same row, extra columns)
+// ---------------------------------------------------------------------------
+
+/** Saved assistant settings, or defaults ("balanced", no quiet hours). Never throws for a missing row. */
+export async function getAssistantSettings(userId: string): Promise<AssistantSettings> {
+  const supabase = await requireDb();
+  const { data, error } = await supabase
+    .from("scheduling_preferences")
+    .select("proactivity, quiet_hours_start, quiet_hours_end")
+    .eq("user_id", userId)
+    .maybeSingle();
+  // Before the Phase 5 migration the columns don't exist yet: use defaults.
+  if (error) {
+    if (error.code === "42703" || /column/.test(error.message)) return settingsFromRow(null);
+    throw dbError(error);
+  }
+  return settingsFromRow(data);
+}
+
+/**
+ * Validates and saves. Only the assistant columns are written; a user
+ * without a row gets one with default scheduling preferences.
+ */
+export async function saveAssistantSettings(userId: string, input: unknown): Promise<AssistantSettings> {
+  const parsed = assistantSettingsSchema.safeParse(input);
+  if (!parsed.success) throw new DataValidationError(parsed.error.issues[0]?.message ?? "Invalid assistant settings.");
+  const s = parsed.data;
+  const supabase = await requireDb();
+  const { error } = await supabase.from("scheduling_preferences").upsert(
+    {
+      user_id: userId,
+      proactivity: s.proactivity,
+      quiet_hours_start: s.quietHoursStart,
+      quiet_hours_end: s.quietHoursEnd,
+    },
+    { onConflict: "user_id" },
+  );
+  if (error) throw dbError(error);
+  return s;
 }

@@ -91,6 +91,10 @@ export type Task = {
   estimatedMinutes: number | null;
   completedAt?: string | null;
   createdAt?: string;
+  updatedAt?: string;
+  /** Times the due date (or a Whitespace session for it) was pushed later while open. */
+  postponeCount?: number;
+  lastPostponedAt?: string | null;
 };
 
 export type HabitCadence =

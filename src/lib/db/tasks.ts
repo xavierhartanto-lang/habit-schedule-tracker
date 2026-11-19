@@ -27,6 +27,10 @@ function toTask(row: TaskRow): Task {
     estimatedMinutes: row.estimated_minutes,
     completedAt: row.completed_at,
     createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    // Optional until the Phase 5 migration has run.
+    postponeCount: row.postpone_count ?? 0,
+    lastPostponedAt: row.last_postponed_at ?? null,
   };
 }
 
