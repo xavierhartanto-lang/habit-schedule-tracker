@@ -46,7 +46,7 @@ describe("buildOpening", () => {
 
   it("asks about the week on an empty calendar instead of inventing anything", () => {
     const o = buildOpening({ ...base, empty: true });
-    expect(o.message).toMatch(/calendar is empty/);
+    expect(o.message).toMatch(/^Blank calendar\./);
     expect(o.starters.length).toBeGreaterThan(0);
   });
 
@@ -55,7 +55,7 @@ describe("buildOpening", () => {
       ...base,
       deadlines: [d({ title: "Chemistry exam", kind: "event", days: 9, priority: undefined })],
     });
-    expect(o.message).toBe("You have Chemistry exam on Friday, Nov 27. Want to plan some study time?");
+    expect(o.message).toBe("Chemistry exam is on Friday, Nov 27. Want me to plan study time?");
     expect(o.starters[0].prompt).toContain("Chemistry exam");
   });
 
@@ -73,17 +73,17 @@ describe("buildOpening", () => {
       deadlines: [d({ title: "Dentist", kind: "event", days: 1 }), d({ title: "Return book", days: 6, priority: "low" })],
       remainingToday: [{ title: "Volleyball", start: "", end: "", allDay: false, time: "6 PM" }],
     });
-    expect(o.message).toBe("Next up is “Volleyball” at 6 PM. What else do you want to get done today?");
+    expect(o.message).toBe("Next up: “Volleyball” at 6 PM. What else needs doing today?");
   });
 
   it("mentions high-priority tasks due soon", () => {
     const o = buildOpening({ ...base, deadlines: [d({ title: "College essay", days: 2, priority: "high" })] });
-    expect(o.message).toBe("“College essay” is due on Friday. Want to block out time for it?");
+    expect(o.message).toBe("“College essay” is due on Friday. Want me to block out time?");
   });
 
   it("opens the week on Monday mornings", () => {
     const o = buildOpening({ ...base, isoWeekday: 1 });
-    expect(o.message).toBe("What's your week looking like? Anything important coming up?");
+    expect(o.message).toBe("New week. What's the big thing coming up?");
     expect(o.starters[0].checkIn).toBe("weekly");
   });
 

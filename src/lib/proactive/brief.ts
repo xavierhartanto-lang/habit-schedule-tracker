@@ -97,32 +97,34 @@ function briefMessage(a: Analysis, events: BriefEvent[], ranked: Ranked[], actio
   const next = fixed[0];
   const top = ranked[0]?.t;
 
-  const eventPart = next
-    ? `You have ${next.title} ${Date.parse(next.start) <= a.nowMs ? `until ${clockAt(next.end, tz)}` : `at ${clockAt(next.start, tz)}`} today${fixed.length > 1 ? `, plus ${plural(fixed.length - 1, "more commitment")}` : ""}`
-    : null;
+  // Lead with the most important thing: an overdue or urgent task beats the next event.
   const taskPart = top
     ? top.dueMs !== null && top.dueMs <= a.nowMs
-      ? `${quote(top.task.title)} is overdue`
+      ? `${quote(top.task.title)} is overdue.`
       : top.task.dueAt
-        ? `${quote(top.task.title)} is ${duePhrase(top.task.dueAt, tz, a.todayKey)}`
-        : `${quote(top.task.title)} is high priority`
+        ? `${quote(top.task.title)} is ${duePhrase(top.task.dueAt, tz, a.todayKey)}.`
+        : `${quote(top.task.title)} is high priority.`
+    : null;
+  const more = fixed.length > 1 ? `, plus ${plural(fixed.length - 1, "more")}` : "";
+  const eventPart = next
+    ? Date.parse(next.start) <= a.nowMs
+      ? `${next.title} runs until ${clockAt(next.end, tz)}${more}.`
+      : `${next.title} at ${clockAt(next.start, tz)}${more}.`
     : null;
 
   const sentences: string[] = [];
-  if (eventPart && taskPart) sentences.push(`${eventPart}, and ${taskPart}.`);
-  else if (eventPart) sentences.push(`${eventPart}.`);
-  else if (taskPart) sentences.push(`${taskPart.charAt(0).toUpperCase()}${taskPart.slice(1)}.`);
-  else if (!events.length) return "Nothing else is on your calendar today, and no deadlines need attention.";
-  else return "No deadlines need attention right now.";
+  if (taskPart) sentences.push(taskPart);
+  if (eventPart) sentences.push(eventPart);
+  if (!sentences.length) return events.length ? "No deadlines pressing right now." : "Nothing else on the calendar today, and no deadlines pressing.";
 
   if (top && action) {
     const today = a.days[0];
     if (planToday && today?.slots[0]) {
-      sentences.push(`I'd get started on ${quote(top.task.title)} ${periodPhrase(today.slots[0].start, tz)}. You have ${about(today.freeMinutes)} free.`);
+      sentences.push(`You've got ${about(today.freeMinutes)} free. I'd start ${periodPhrase(today.slots[0].start, tz)}.`);
+      sentences.push("Want me to plan the day?");
     } else {
-      sentences.push(`Today is full, so I'd start on ${quote(top.task.title)} tomorrow.`);
+      sentences.push("Today's full. Want me to plan tomorrow?");
     }
-    sentences.push(planToday ? "Want me to organize your schedule?" : "Want me to plan tomorrow?");
   }
   return sentences.join(" ");
 }
