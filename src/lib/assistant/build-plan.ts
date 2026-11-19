@@ -461,6 +461,18 @@ export function buildPlan(input: BuildInput): BuiltPlan {
         });
         break;
       }
+      case "task_remove": {
+        ctx.items.push({
+          action: "remove_task",
+          title: spec.task.title,
+          targetId: spec.task.id,
+          // Deleting always waits for approval, even when asked directly.
+          autoApply: false,
+          payload: { taskId: spec.task.id },
+          display: { ...EMPTY_DISPLAY, detail: "Delete this task", reason: "You asked to remove it. Undo brings it back." },
+        });
+        break;
+      }
       case "habit_create":
       case "habit_update": {
         const isNew = spec.kind === "habit_create";

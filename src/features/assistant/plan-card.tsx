@@ -54,6 +54,7 @@ const ACTION_LABEL: Record<PlanItemAction, string> = {
   create_task: "New task",
   update_task: "Update task",
   complete_task: "Complete task",
+  remove_task: "Delete task",
   create_habit: "New habit",
   update_habit: "Update habit",
   create_goal: "New goal",
@@ -71,6 +72,7 @@ const DONE_LABEL: Partial<Record<PlanItemAction, string>> = {
   remove_event: "Removed",
   skip_occurrence: "Skipped",
   complete_task: "Done",
+  remove_task: "Deleted",
   save_fact: "Saved",
 };
 

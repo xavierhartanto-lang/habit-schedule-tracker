@@ -259,6 +259,26 @@ describe("adaptive rescheduling", () => {
     expect(plan.notes.join(" ")).toContain("Chess club");
   });
 
+  it("deletes a task when asked, after approval, with undo", () => {
+    const essay = task({ title: "History essay", estimatedMinutes: 120 });
+    const w = world();
+    w.refs.tasks.set("t1", essay);
+    const i = intent({ type: "remove_task", title: "essay", evidence: "delete my essay task", target_ref: "t1", explicit: true });
+    const plan = buildPlan(input({ world: w, openTasks: [essay], specs: [specOf(i, w)] }));
+    expect(plan.items).toHaveLength(1);
+    expect(plan.items[0]).toMatchObject({ action: "remove_task", targetId: essay.id, autoApply: false, payload: { taskId: essay.id } });
+    expect(toOp({ id: uuid(), action: "remove_task", payload: plan.items[0].payload })).toMatchObject({ ok: true, op: { op: "remove_task", id: essay.id } });
+  });
+
+  it("removing something that's only a task removes the task instead of saying it isn't on the calendar", () => {
+    const sheet = task({ title: "Chem worksheet" });
+    const w = world();
+    w.refs.tasks.set("t1", sheet);
+    const plan = buildPlan(input({ world: w, openTasks: [sheet], specs: [specOf(intent({ type: "remove_event", title: "chem worksheet", evidence: "remove the chem worksheet" }), w)] }));
+    expect(plan.items.map((x) => [x.action, x.targetId])).toEqual([["remove_task", sheet.id]]);
+    expect(plan.notes).toEqual([]);
+  });
+
   it("asks which event when the name matches different events", () => {
     const w = world();
     w.refs.events.set("e1", event({ title: "Math tutoring", date: "2026-11-18", start: "18:00", end: "19:00" }));

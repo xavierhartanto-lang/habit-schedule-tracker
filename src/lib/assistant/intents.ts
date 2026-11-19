@@ -25,6 +25,7 @@ export const INTENT_TYPES = [
   "create_task", // a to-do
   "update_task", // change title, due date, priority or estimate of an existing task
   "complete_task", // mark an existing task done
+  "remove_task", // delete an existing task for good ("delete my essay task")
   "create_habit",
   "update_habit", // change how often
   "create_goal",
