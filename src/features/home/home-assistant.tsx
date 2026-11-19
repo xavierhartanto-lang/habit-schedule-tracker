@@ -142,7 +142,15 @@ export async function HomeAssistant({ fresh }: { fresh: boolean }) {
   const { proactive } = data;
   const openingChips = resumed ? [] : (proactive.opening?.chips ?? []);
   // Proactive buttons come first; the general starters fill up to four.
-  const starters = data.opening.starters.slice(0, Math.max(0, 4 - openingChips.filter((c) => c.act.kind !== "dismiss").length));
+  // The general starters fill up to four. When Whitespace leads with its own
+  // suggestion, the Phase 4 opening's topic starter (and a duplicate
+  // "Plan my day") would compete with it, so only the general ones stay.
+  const actionChips = openingChips.filter((c) => c.act.kind !== "dismiss");
+  const general = proactive.opening && !resumed ? data.opening.generalStarters : data.opening.starters;
+  const starters = general
+    .filter((s) => !(s.checkIn === "daily" && actionChips.some((c) => c.act.kind === "daily_plan")))
+    .filter((s) => !actionChips.some((c) => c.label === s.label))
+    .slice(0, Math.max(0, 4 - actionChips.length));
 
   return (
     <div className="space-y-5">

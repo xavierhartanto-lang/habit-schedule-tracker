@@ -73,12 +73,17 @@ export function Chat({
   suggestions = [],
   placeholder = "Message Whitespace…",
   variant = "page",
-  opening = null,
+  opening: openingProp = null,
   starters = [],
-  openingChips = [],
-  nudges = [],
+  openingChips: openingChipsProp = [],
+  nudges: nudgesProp = [],
   shownRecommendationIds = [],
 }: Props) {
+  // Suggestions are fixed for this view: a refresh mid-conversation (a new
+  // conversation was created) must not swap them under the user.
+  const [openingChips] = useState(openingChipsProp);
+  const [nudges] = useState(nudgesProp);
+  const [opening] = useState(openingProp);
   const embedded = variant === "embedded";
   const router = useRouter();
   const [conversationId, setConversationId] = useState(initialConversationId);
@@ -101,6 +106,8 @@ export function Chat({
   // Keep the newest content in view unless the user scrolled up to read.
   useEffect(() => {
     const el = scrollRef.current;
+    // Before anything is said, the opening line (and suggestions) start at the top.
+    if (messages.length === 0 && !busy) return;
     if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
   }, [messages, streaming, failure, busy]);
 

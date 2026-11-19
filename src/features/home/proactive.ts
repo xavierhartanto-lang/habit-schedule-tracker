@@ -1,4 +1,5 @@
 import type { DailyBrief, ProactiveState, Recommendation, RecommendationKind } from "@/features/proactive/types";
+import { surface } from "@/lib/proactive/surface";
 
 /**
  * Turns the proactive engine's output into what Home shows: one opening line
@@ -95,18 +96,22 @@ function briefOpening(brief: DailyBrief): ProactiveOpening | null {
  *  2. Otherwise a high-priority recommendation (overdue, overload, a broken plan).
  *  3. Otherwise nothing: Home keeps its Phase 4 opening line.
  * Recommendations about a task the opening already covers are not repeated.
+ * Pass the engine's `surface: "all"` state.
  */
-export function homeProactive(state: ProactiveState | null, aiConfigured: boolean): HomeProactive {
+export function homeProactive(state: ProactiveState | null, aiConfigured: boolean, now: Date = new Date()): HomeProactive {
   if (!state) return EMPTY_PROACTIVE;
-  const recs = state.recommendations.filter((r) => r.status === "open" || r.status === "snoozed" || r.status === "proposed");
-  const usable = recs.filter((r) => r.status === "open" && clean(r.message || r.title));
-
   let opening = briefOpening(state.today);
+  // `state` comes from the engine's "all" surface. Drop what the brief already
+  // covers first, then let the engine apply the level, quiet hours and limit,
+  // so a covered task never takes the place of something new.
+  const covered = new Set(opening ? state.today.focus.map((f) => f.taskId) : []);
+  const candidates = state.recommendations.filter(
+    (r) => r.status === "open" && clean(r.message || r.title) && (!r.target.taskId || !covered.has(r.target.taskId)),
+  );
+  const usable = surface(candidates, { settings: state.settings, now, timeZone: state.today.timeZone, mode: "home" });
+
   let rest = usable;
-  if (opening) {
-    const covered = new Set(state.today.focus.map((f) => f.taskId));
-    rest = usable.filter((r) => !r.target.taskId || !covered.has(r.target.taskId));
-  } else {
+  if (!opening) {
     // Something already raised recently can sit quietly below; it never leads again.
     const top = usable.find((r) => r.priority === "high" && !r.raisedRecently);
     if (top) {

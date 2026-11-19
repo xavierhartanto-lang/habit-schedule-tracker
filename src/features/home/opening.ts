@@ -40,7 +40,13 @@ export type Starter = {
   checkIn?: "daily" | "weekly";
 };
 
-export type Opening = { greeting: string; message: string; starters: Starter[] };
+export type Opening = {
+  greeting: string;
+  message: string;
+  starters: Starter[];
+  /** Starters that don't depend on the opening line's topic (used when a proactive line leads). */
+  generalStarters: Starter[];
+};
 
 const STUDY_RE = /\b(exam|test|quiz|midterm|final|finals|sat|act|ap|psat|ib)\b/i;
 
@@ -104,6 +110,7 @@ export function buildOpening(input: OpeningInput): Opening {
         { label: "An upcoming deadline", prompt: "I have a deadline coming up." },
         week,
       ],
+      generalStarters: [week, changed, add],
     };
   }
 
@@ -141,8 +148,7 @@ export function buildOpening(input: OpeningInput): Opening {
     message = "Your calendar is clear today. What would you like to accomplish?";
   }
 
-  if (weekStart) starters.push(week, plan);
-  else starters.push(plan, week);
-  starters.push(changed, add);
-  return { greeting, message, starters: starters.slice(0, 4) };
+  const general = weekStart ? [week, plan, changed, add] : [plan, week, changed, add];
+  starters.push(...general);
+  return { greeting, message, starters: starters.slice(0, 4), generalStarters: general };
 }

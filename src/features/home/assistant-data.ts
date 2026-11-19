@@ -65,12 +65,12 @@ export async function loadHomeAssistant(): Promise<HomeAssistantData> {
     getProfile(ctx.userId).catch(() => null),
     listConversations(ctx.userId, { kind: "assistant", limit: 1 }).catch(() => []),
     // Suggestions are a bonus: if the engine fails, Home still opens normally.
-    loadProactive(ctx.userId, { now, surface: "home" }).catch((error) => {
+    loadProactive(ctx.userId, { now, surface: "all" }).catch((error) => {
       console.error("[home] proactive suggestions failed", error);
       return null;
     }),
   ]);
-  const proactive = proactiveState ? homeProactive(proactiveState, aiConfigured) : EMPTY_PROACTIVE;
+  const proactive = proactiveState ? homeProactive(proactiveState, aiConfigured, now) : EMPTY_PROACTIVE;
 
   // ---- Occurrences: today and the next week ----
   const from = startOfDayInZone(today, tz);

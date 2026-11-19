@@ -87,6 +87,29 @@ describe("homeProactive", () => {
     expect(p.nudges[0].tone).toBe("warning");
   });
 
+  it("covered tasks don't use up the suggestion limit", () => {
+    const focus = [
+      { taskId: "a", title: "A", dueAt: null, estimatedMinutes: 60, why: "" },
+      { taskId: "b", title: "B", dueAt: null, estimatedMinutes: 60, why: "" },
+    ];
+    const recs = [
+      rec({ priority: "high", target: { taskId: "a", commitmentIds: [], date: null } }),
+      rec({ priority: "high", target: { taskId: "b", commitmentIds: [], date: null } }),
+      rec({ priority: "high", kind: "overload_day", target: { taskId: null, commitmentIds: [], date: "2026-11-20" } }),
+    ];
+    const p = homeProactive(state({ today: brief({ message: "Plan today.", action: planDay, focus }), recommendations: recs }), true);
+    expect(p.nudges.map((x) => x.id)).toEqual([recs[2].id]);
+  });
+
+  it("stays quiet during quiet hours", () => {
+    const p = homeProactive(
+      state({ settings: { proactivity: "balanced", quietHoursStart: "00:00", quietHoursEnd: "23:59" }, recommendations: [rec({ priority: "high" })] }),
+      true,
+    );
+    expect(p.opening).toBeNull();
+    expect(p.nudges).toEqual([]);
+  });
+
   it("leads with a fresh high-priority recommendation when there's no brief", () => {
     const top = rec({ priority: "high", kind: "overdue" });
     const second = rec({ priority: "medium" });
