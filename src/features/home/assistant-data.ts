@@ -18,7 +18,9 @@ import {
 } from "@/lib/scheduling/zoned";
 import { dueParts } from "@/lib/domain/tasks";
 import { toChatMessage, type ChatMessage } from "@/features/assistant/types";
+import { loadProactive } from "@/features/proactive/server/service";
 import { HOME_DAYS_AHEAD, LOOKAHEAD_DAYS, loadHomeData } from "./home-data";
+import { EMPTY_PROACTIVE, homeProactive, type HomeProactive } from "./proactive";
 import { buildOpening, partOfDay, type Opening, type OpeningDeadline } from "./opening";
 import { summarizeWeek, type WeekSummary } from "./week-summary";
 
@@ -40,6 +42,8 @@ export type HomeAssistantData =
       messages: ChatMessage[];
       week: WeekSummary;
       timeZone: string;
+      /** Phase 5: the daily brief and gentle suggestions (empty when there's nothing worth raising). */
+      proactive: HomeProactive;
     };
 
 const RESUME_MESSAGES = 40;
@@ -56,10 +60,17 @@ export async function loadHomeAssistant(): Promise<HomeAssistantData> {
 
   const tz = ctx.timeZone;
   const today = ctx.todayKey;
-  const [profile, conversations] = await Promise.all([
+  const aiConfigured = isAiConfigured();
+  const [profile, conversations, proactiveState] = await Promise.all([
     getProfile(ctx.userId).catch(() => null),
     listConversations(ctx.userId, { kind: "assistant", limit: 1 }).catch(() => []),
+    // Suggestions are a bonus: if the engine fails, Home still opens normally.
+    loadProactive(ctx.userId, { now, surface: "all" }).catch((error) => {
+      console.error("[home] proactive suggestions failed", error);
+      return null;
+    }),
   ]);
+  const proactive = proactiveState ? homeProactive(proactiveState, aiConfigured, now) : EMPTY_PROACTIVE;
 
   // ---- Occurrences: today and the next week ----
   const from = startOfDayInZone(today, tz);
@@ -146,5 +157,5 @@ export async function loadHomeAssistant(): Promise<HomeAssistantData> {
     }
   }
 
-  return { state: "ready", aiConfigured: isAiConfigured(), opening, conversationId, messages, week, timeZone: tz };
+  return { state: "ready", aiConfigured, opening, conversationId, messages, week, timeZone: tz, proactive };
 }

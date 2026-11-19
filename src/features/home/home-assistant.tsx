@@ -4,6 +4,7 @@ import { Chat } from "@/features/assistant/chat";
 import { ArrowUpRight, Database, LogIn, Plus, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { loadHomeAssistant } from "./assistant-data";
+import { shownIds } from "./proactive";
 
 /**
  * The center of Home: a greeting and a live conversation with the
@@ -138,6 +139,20 @@ export async function HomeAssistant({ fresh }: { fresh: boolean }) {
     ? "Tell me what's going on. I'll keep your plan in order."
     : "Here's your day. The assistant isn't set up yet.";
 
+  const { proactive } = data;
+  const openingChips = resumed ? [] : (proactive.opening?.chips ?? []);
+  // Proactive buttons come first; the general starters fill up to four.
+  // The general starters fill up to four. When Whitespace leads with its own
+  // suggestion, the Phase 4 opening's topic starter (and a duplicate
+  // "Plan my day") would compete with it, so only the general ones stay.
+  const actionChips = openingChips.filter((c) => c.act.kind !== "dismiss");
+  const general = proactive.opening && !resumed ? data.opening.generalStarters : data.opening.starters;
+  const starters = general
+    .filter((s) => !(s.checkIn === "daily" && actionChips.some((c) => c.act.kind === "daily_plan")))
+    .filter((s) => !actionChips.some((c) => c.label === s.label))
+    // With suggestions below, keep the row short so the conversation stays calm.
+    .slice(0, Math.max(0, (proactive.nudges.length ? 3 : 4) - actionChips.length));
+
   return (
     <div className="space-y-5">
       <Title greeting={data.opening.greeting} sub={sub} />
@@ -151,8 +166,11 @@ export async function HomeAssistant({ fresh }: { fresh: boolean }) {
             conversationId={conversationId}
             initialMessages={resumed ? data.messages : []}
             aiConfigured={data.aiConfigured}
-            opening={resumed ? null : data.opening.message}
-            starters={data.opening.starters}
+            opening={resumed ? null : (proactive.opening?.message ?? data.opening.message)}
+            openingChips={openingChips}
+            starters={starters}
+            nudges={resumed ? proactive.resumeNudges : proactive.nudges}
+            shownRecommendationIds={shownIds(proactive, resumed)}
             placeholder="Tell me what’s coming up…"
           />
         </div>

@@ -76,7 +76,20 @@ export type ChatRequestBody = {
    * Only honored with a message and no conversationId. Max 300 characters.
    */
   opening?: string;
+  /**
+   * Phase 5: the user tapped a proactive button. The server builds the plan
+   * deterministically (no planner model), so this works without the AI.
+   * `message` carries the button label.
+   */
+  proactive?: ChatProactive;
+  /**
+   * Phase 5: the suggestion line the user is answering. Saved as an assistant
+   * message right before theirs, also in an existing conversation. Max 300 characters.
+   */
+  nudge?: string;
 };
+
+export type ChatProactive = { kind: "daily_plan" } | { kind: "recommendation"; id: string; actionId: string };
 
 export const OPENING_MAX = 300;
 

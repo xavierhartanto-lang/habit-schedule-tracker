@@ -5,6 +5,11 @@ import { ChevronRight, Shapes, UserRound } from "lucide-react";
 import Link from "next/link";
 import { DEFAULT_PREFERENCES, DEFAULT_PROFILE } from "./defaults";
 import { PreferencesForm, ProfileForm } from "./forms";
+import { AssistantForm } from "./assistant-form";
+import { getAssistantSettings } from "@/features/proactive/actions";
+import type { AssistantSettings } from "@/features/proactive/types";
+
+const DEFAULT_ASSISTANT: AssistantSettings = { proactivity: "balanced", quietHoursStart: "22:00", quietHoursEnd: "07:00" };
 
 function timezones(): string[] {
   try {
@@ -18,9 +23,13 @@ function timezones(): string[] {
 export async function SettingsContent() {
   const configured = isSupabaseConfigured();
   const user = configured ? await getSessionUser() : null;
-  const [profile, prefs] = user
-    ? await Promise.all([getProfile(user.id), getPreferences(user.id)])
-    : [null, null];
+  const [profile, prefs, assistant] = user
+    ? await Promise.all([
+        getProfile(user.id),
+        getPreferences(user.id),
+        getAssistantSettings().catch(() => null),
+      ])
+    : [null, null, null];
 
   return (
     <div className="space-y-6">
@@ -62,6 +71,10 @@ export async function SettingsContent() {
         email={user?.email ?? null}
         timezones={timezones()}
         disabled={!user}
+      />
+      <AssistantForm
+        settings={assistant?.ok ? assistant.settings : DEFAULT_ASSISTANT}
+        disabled={!user || (assistant !== null && !assistant.ok)}
       />
       <PreferencesForm prefs={prefs ?? DEFAULT_PREFERENCES} disabled={!user} />
     </div>
