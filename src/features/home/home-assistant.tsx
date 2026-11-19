@@ -150,7 +150,8 @@ export async function HomeAssistant({ fresh }: { fresh: boolean }) {
   const starters = general
     .filter((s) => !(s.checkIn === "daily" && actionChips.some((c) => c.act.kind === "daily_plan")))
     .filter((s) => !actionChips.some((c) => c.label === s.label))
-    .slice(0, Math.max(0, 4 - actionChips.length));
+    // With suggestions below, keep the row short so the conversation stays calm.
+    .slice(0, Math.max(0, (proactive.nudges.length ? 3 : 4) - actionChips.length));
 
   return (
     <div className="space-y-5">
