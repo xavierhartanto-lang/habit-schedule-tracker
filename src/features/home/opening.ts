@@ -104,7 +104,7 @@ export function buildOpening(input: OpeningInput): Opening {
     return {
       greeting,
       message:
-        "Your calendar is empty, so let's fill in the basics. Tell me about a normal week: school hours, practices, lessons, anything that repeats.",
+        "Blank calendar. Let's fix that. Walk me through a normal week: school, practices, lessons, anything that repeats.",
       starters: [
         { label: "My weekly routine", prompt: "Let me tell you about a normal week for me." },
         { label: "An upcoming deadline", prompt: "I have a deadline coming up." },
@@ -120,32 +120,32 @@ export function buildOpening(input: OpeningInput): Opening {
 
   if (focus && focus.days < 0) {
     const ago = focus.days === -1 ? "yesterday" : `${-focus.days} days ago`;
-    message = `“${focus.title}” was due ${ago}. Want to find time to finish it, or is it already done?`;
+    message = `“${focus.title}” was due ${ago}. Want me to find time, or is it done?`;
     starters.push({ label: `Reschedule ${focus.title}`, prompt: `Help me find time to finish “${focus.title}”.` });
   } else if (focus && isStudy(focus.title)) {
-    message = `You have ${focus.title} ${whenPhrase(focus)}. Want to plan some study time?`;
+    message = `${focus.title} is ${whenPhrase(focus)}. Want me to plan study time?`;
     starters.push({
       label: "Plan study time",
       prompt: `Help me plan study time for ${focus.title} ${whenPhrase(focus)}.`,
     });
   } else if (focus) {
     const verb = focus.kind === "task" ? "is due" : "is";
-    message = `“${focus.title}” ${verb} ${whenPhrase(focus)}. Want to block out time for it?`;
+    message = `“${focus.title}” ${verb} ${whenPhrase(focus)}. Want me to block out time?`;
     starters.push({ label: "Block time for it", prompt: `Help me block out time for “${focus.title}”.` });
   } else if (weekStart && !evening) {
-    message = "What's your week looking like? Anything important coming up?";
+    message = "New week. What's the big thing coming up?";
   } else if (input.remainingToday.length > 0) {
     const next = input.remainingToday[0];
     const n = input.remainingToday.length;
     const lead = next.allDay ? `“${next.title}” today` : `“${next.title}” at ${next.time}`;
     message =
       n === 1
-        ? `Next up is ${lead}. What else do you want to get done today?`
-        : `You have ${n} things left today, starting with ${lead}. What else do you want to get done?`;
+        ? `Next up: ${lead}. What else needs doing today?`
+        : `${n} things left today. First up: ${lead}. What else needs doing?`;
   } else if (evening) {
-    message = "Today's calendar is clear. Want to get a head start on tomorrow?";
+    message = "Today's clear. Want a head start on tomorrow?";
   } else {
-    message = "Your calendar is clear today. What would you like to accomplish?";
+    message = "Clear calendar today. What do you want out of it?";
   }
 
   const general = weekStart ? [week, plan, changed, add] : [plan, week, changed, add];

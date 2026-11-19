@@ -98,7 +98,7 @@ describe("1. one assignment due tomorrow", () => {
     const brief = buildBrief(analyze(data));
     expect(brief.focus.map((f) => f.title)).toEqual(["History essay"]);
     expect(brief.message).toContain("“History essay” is due tomorrow");
-    expect(brief.message).toContain("Want me to organize your schedule?");
+    expect(brief.message).toContain("Want me to plan the day?");
     expect(brief.action).toMatchObject({ kind: "plan_day", params: { date: "2026-11-18", taskIds: [history.id] } });
   });
 
@@ -146,7 +146,7 @@ describe("3. more work than available time", () => {
   it("flags the overloaded day and week", () => {
     const day = byKind(cs, "overload_day").find((c) => c.date === "2026-11-20");
     expect(day?.title).toBe("Friday looks overloaded");
-    expect(day?.message).toMatch(/^Friday is looking pretty busy: 2 deadlines/);
+    expect(day?.message).toMatch(/^Friday's packed: 2 deadlines/);
     const week = byKind(cs, "overload_week");
     expect(week).toHaveLength(1);
     expect(week[0].actions[0].kind).toBe("plan_week");
@@ -192,7 +192,7 @@ describe("5. unavailable during a scheduled study session", () => {
   it("recognizes the plan no longer works", () => {
     const broken = byKind(detect(data), "plan_broken");
     expect(broken).toHaveLength(1);
-    expect(broken[0].message).toBe("Your Biology study session tomorrow at 4 PM now overlaps Dentist. Want me to find another time before it's due Saturday?");
+    expect(broken[0].message).toBe("Biology study tomorrow at 4 PM now overlaps Dentist. Want me to find another slot before it's due Saturday?");
     expect(broken[0].actions[0]).toMatchObject({ kind: "reschedule", params: { commitmentIds: [block.id] } });
   });
 
@@ -222,7 +222,7 @@ describe("brief wording", () => {
   it("an event in progress reads as 'until' its end", () => {
     const now = zonedToUtc("2026-11-18", "09:15", TZ).toISOString();
     const t = task({ title: "History essay", dueAt: due("2026-11-19"), estimatedMinutes: 120 });
-    expect(buildBrief(analyze(input({ now, tasks: [t] }))).message).toMatch(/^You have School until 3 PM today, and “History essay” is due tomorrow\./);
+    expect(buildBrief(analyze(input({ now, tasks: [t] }))).message).toMatch(/^“History essay” is due tomorrow\. School runs until 3 PM\./);
   });
 });
 
@@ -233,7 +233,7 @@ describe("6. no tasks or commitments", () => {
     const brief = buildBrief(analyze(data));
     expect(brief.action).toBeNull();
     expect(brief.focus).toEqual([]);
-    expect(brief.message).toBe("Nothing else is on your calendar today, and no deadlines need attention.");
+    expect(brief.message).toBe("Nothing else on the calendar today, and no deadlines pressing.");
   });
 });
 

@@ -141,7 +141,7 @@ function overdue(t: TaskLoad, a: Analysis): Candidate | null {
     priority,
     title: `${t.task.title} is overdue`,
     reason: `It was due ${when} and is still open.`,
-    message: `${quote(t.task.title)} was due ${when}. Want me to find time to finish it, or is it already done?`,
+    message: `${quote(t.task.title)} was due ${when}. Want me to find time, or is it done?`,
     facts: factsFor(t),
     actions,
     taskId: t.task.id,
@@ -164,8 +164,8 @@ function atRisk(t: TaskLoad, a: Analysis): Candidate | null {
     reason: `It needs ${about(t.unscheduled)} more, but only ${about(free)} of realistic free time is left before it's ${when}.`,
     message:
       free >= 15
-        ? `${quote(t.task.title)} is ${when} and needs ${about(t.unscheduled)} more, but you only have ${about(free)} free before then. Want me to schedule what fits so you can start now?`
-        : `${quote(t.task.title)} is ${when} and needs ${about(t.unscheduled)} more, but your schedule has no free time left before then. Want to move the due date or make room?`,
+        ? `${quote(t.task.title)} is ${when}. It needs ${about(t.unscheduled)}, you've got ${about(free)}. Schedule what fits?`
+        : `${quote(t.task.title)} is ${when} and needs ${about(t.unscheduled)}. There's no free time left before then. Move the due date, or make room?`,
     facts: factsFor(t, [`About ${duration(roughly(free))} free before then`]),
     actions: [
       ...(free >= 15 ? [scheduleWork(t, t.unscheduled, "Schedule what fits")] : []),
@@ -199,7 +199,7 @@ function postponed(t: TaskLoad, a: Analysis): Candidate | null {
     priority: taskPriority(t, "medium"),
     title: `${t.task.title} keeps getting pushed back`,
     reason: `It has been postponed ${plural(n, "time")}.`,
-    message: `You've pushed ${quote(t.task.title)} back ${plural(n, "time")}. Want to break it into smaller sessions, or is it less important than it looks?`,
+    message: `You've pushed ${quote(t.task.title)} back ${plural(n, "time")}. Smaller sessions, or is it less urgent than it looks?`,
     facts: factsFor(t, [`Postponed ${plural(n, "time")}`]),
     actions,
     taskId: t.task.id,
@@ -228,14 +228,14 @@ function deadlineSoon(t: TaskLoad, a: Analysis): Candidate | null {
       : t.futureBlockMinutes > 0
         ? `${duration(t.unscheduled)} of it isn't scheduled yet.`
         : `It needs ${about(t.unscheduled)} and nothing is scheduled for it yet.`;
-  const lead = start && free >= 15 ? ` You have ${about(free)} free before then, so I'd start ${start}.` : "";
+  const lead = start && free >= 15 ? ` You've got ${about(free)} free. I'd start ${start}.` : "";
   return {
     dedupeKey: `deadline_soon:${t.task.id}:${t.dueDate}`,
     kind: "deadline_soon",
     priority: taskPriority(t, days === 0 ? "high" : "medium"),
     title: `${t.task.title} is ${when}`,
     reason,
-    message: `${quote(t.task.title)} is ${when}.${lead} Want me to block out time for it?`,
+    message: `${quote(t.task.title)} is ${when}.${lead} Want me to block it out?`,
     facts: factsFor(t, [free > 0 ? `About ${duration(roughly(free))} free before then` : null]),
     actions: [
       t.unscheduled
@@ -265,7 +265,7 @@ function missedSession(t: TaskLoad, a: Analysis): Candidate | null {
     priority: taskPriority(t, dueSoon ? "high" : "medium"),
     title: `Did the ${t.task.title} session happen?`,
     reason: `A session was planned ${when} and the task is still open.`,
-    message: `You had time planned for ${quote(t.task.title)} ${when}. If it didn't happen, I can find another slot. If you finished, I'll mark it done.`,
+    message: `Did ${quote(t.task.title)} happen ${when}? If not, I'll find another slot.`,
     facts: factsFor(t, [`${duration(minutes)} session ${when}`]),
     actions: [scheduleWork(t, minutes, "Find another time"), markComplete(t, "I finished it")],
     taskId: t.task.id,
@@ -288,7 +288,7 @@ function startEarly(t: TaskLoad, a: Analysis): Candidate | null {
     priority: taskPriority(t, days <= 3 && t.task.priority === "high" ? "high" : "medium"),
     title: `Start ${t.task.title} early`,
     reason: `It's ${about(t.unscheduled)} of work, ${when}, and more than one session long.`,
-    message: `${quote(t.task.title)} is ${when} and will take ${about(t.unscheduled)}. I'd split it into ${sessions} sessions rather than leaving it all for ${lastMinute}. Want me to schedule them?`,
+    message: `${quote(t.task.title)} is ${when} and needs ${about(t.unscheduled)}. Better as ${sessions} sessions than one long ${lastMinute}. Want me to schedule them?`,
     facts: factsFor(t, [`About ${duration(roughly(capacityBefore(a, t.dueMs)))} free before then`]),
     actions: [split(t, t.unscheduled, a)],
     taskId: t.task.id,
@@ -341,7 +341,7 @@ function brokenPlans(a: Analysis): Candidate[] {
       priority: Date.parse(start) - a.nowMs < 86_400_000 ? "high" : "medium",
       title: `${block.title} no longer fits`,
       reason: `It overlaps ${hit.title} (${dayPhrase(key, a.todayKey)}, ${clockAt(hit.start, a.timeZone)}).`,
-      message: `Your ${block.title} session ${when} now overlaps ${hit.title}. Want me to find another time${due}?`,
+      message: `${block.title} ${when} now overlaps ${hit.title}. Want me to find another slot${due}?`,
       facts: [
         `Planned ${shortDate(key)}, ${clockAt(start, a.timeZone)}–${clockAt(block.endsAt!, a.timeZone)}`,
         `Overlaps ${hit.title}`,
@@ -410,13 +410,13 @@ function overloadedDays(a: Analysis): Candidate[] {
       const task = a.tasks.find((t) => t.task.id === block.taskId);
       const target = lightestDay(a, day.date, task?.dueDate ?? null);
       action = { id: "lighten_day", kind: "lighten_day", label: `Move ${block.title}`, params: { date: day.date, commitmentIds: [block.id] } };
-      offer = `Want me to move ${block.title} to a lighter day${target ? `, like ${dayPhrase(target.date, a.todayKey)}` : ""}?`;
+      offer = target ? `Move ${block.title} to ${dayPhrase(target.date, a.todayKey)}?` : `Move ${block.title} to a lighter day?`;
     } else if (firstDue && day.date > a.todayKey) {
       action = scheduleWork(firstDue, firstDue.unscheduled!, `Start ${firstDue.task.title} earlier`, day.date);
-      offer = `Want me to schedule ${quote(firstDue.task.title)} before ${dayPhrase(day.date, a.todayKey)} so it doesn't all land on one day?`;
+      offer = `Want me to start ${quote(firstDue.task.title)} before then?`;
     } else {
       action = ask("rebalance", "Help me rebalance", `${name} looks overloaded. Help me rebalance it.`);
-      offer = "Want help deciding what can wait?";
+      offer = "Want help picking what can wait?";
     }
 
     out.push({
@@ -427,7 +427,7 @@ function overloadedDays(a: Analysis): Candidate[] {
       reason: tooMuch
         ? `About ${duration(roughly(load))} of work is planned or due, but only ${about(holds)} realistically fits.`
         : `${plural(day.due.length, "deadline")} and ${plural(day.commitments.length, "commitment")} fall on the same day.`,
-      message: `${name} is looking pretty busy: ${list}. ${offer}`,
+      message: `${name}'s packed: ${list}. ${offer}`,
       facts: [
         ...parts,
         tooMuch ? `About ${duration(roughly(load))} of work, ${duration(roughly(holds))} fits` : null,
@@ -462,7 +462,7 @@ function overloadedWeek(a: Analysis): Candidate | null {
     priority: worst.short >= 120 ? "high" : "medium",
     title: "More work than time this week",
     reason: `About ${duration(roughly(worst.need))} of unscheduled work is due by ${shortDate(worst.date)}, but only ${about(worst.free)} of free time fits before then.`,
-    message: `You have ${plural(due.length, "deadline")} in the next week and ${about(worst.short)} more work than free time. Want me to schedule what fits and show what doesn't?`,
+    message: `This week's over capacity: ${plural(due.length, "deadline")}, ${about(worst.short)} more work than free time. Want me to schedule what fits and flag the rest?`,
     facts: [
       `${plural(due.length, "deadline")} by ${shortDate(due[due.length - 1].dueDate!)}`,
       `About ${duration(roughly(worst.need))} of work to schedule`,
