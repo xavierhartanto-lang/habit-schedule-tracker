@@ -161,24 +161,32 @@ function insertColumns(userId: string, c: Candidate) {
   };
 }
 
-/** Applies a reconcile result. Concurrent loads (two tabs) can't create duplicates: (user, dedupe_key) is unique. */
-export async function applyReconcile(userId: string, result: ReconcileResult): Promise<void> {
-  if (!result.inserts.length && !result.updates.length) return;
+/**
+ * Applies a reconcile result and returns the rows it wrote. Concurrent loads
+ * (two tabs) can't create duplicates: (user, dedupe_key) is unique.
+ * Callers merge these rows in memory instead of listing again: React
+ * memoizes identical GET fetches within one render, so a second identical
+ * list would return the stale first result.
+ */
+export async function applyReconcile(userId: string, result: ReconcileResult): Promise<RecommendationRow[]> {
+  if (!result.inserts.length && !result.updates.length) return [];
   const supabase = await requireDb();
-  const writes: PromiseLike<{ error: { message: string; code?: string } | null }>[] = [];
+  const writes: PromiseLike<{ data: RecommendationRow[] | RecommendationRow | null; error: { message: string; code?: string } | null }>[] = [];
   if (result.inserts.length) {
     writes.push(
       supabase
         .from("recommendations")
-        .upsert(result.inserts.map((c) => insertColumns(userId, c)), { onConflict: "user_id,dedupe_key", ignoreDuplicates: true }),
+        .upsert(result.inserts.map((c) => insertColumns(userId, c)), { onConflict: "user_id,dedupe_key", ignoreDuplicates: true })
+        .select("*"),
     );
   }
   for (const u of result.updates.slice(0, 100)) {
-    writes.push(supabase.from("recommendations").update(patchColumns(u.patch)).eq("user_id", userId).eq("id", u.id));
+    writes.push(supabase.from("recommendations").update(patchColumns(u.patch)).eq("user_id", userId).eq("id", u.id).select("*"));
   }
   const results = await Promise.all(writes);
   const failed = results.find((r) => r.error);
   if (failed?.error) throw dbError(failed.error);
+  return results.flatMap((r) => (Array.isArray(r.data) ? r.data : r.data ? [r.data] : []));
 }
 
 export async function updateRecommendation(userId: string, id: string, patch: RecommendationPatch & { status?: RecommendationStatus }): Promise<RecommendationRow> {

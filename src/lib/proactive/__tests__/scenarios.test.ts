@@ -218,6 +218,14 @@ describe("5. unavailable during a scheduled study session", () => {
   });
 });
 
+describe("brief wording", () => {
+  it("an event in progress reads as 'until' its end", () => {
+    const now = zonedToUtc("2026-11-18", "09:15", TZ).toISOString();
+    const t = task({ title: "History essay", dueAt: due("2026-11-19"), estimatedMinutes: 120 });
+    expect(buildBrief(analyze(input({ now, tasks: [t] }))).message).toMatch(/^You have School until 3 PM today, and “History essay” is due tomorrow\./);
+  });
+});
+
 describe("6. no tasks or commitments", () => {
   it("finds nothing and says so plainly", () => {
     const data = input({ events: [] });

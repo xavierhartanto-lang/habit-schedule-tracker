@@ -131,11 +131,13 @@ async function sync(userId: string, candidates: Candidate[], settings: Assistant
   );
   const result = reconcile({ stored, candidates, plans, now });
   if (result.inserts.length || result.updates.length) {
-    await applyReconcile(userId, result);
+    const written = await applyReconcile(userId, result);
     // Occasional cleanup, piggybacking on a load that already wrote something.
     if (result.updates.some((u) => u.patch.status === "resolved")) await pruneResolved(userId, now).catch(() => undefined);
-    const fresh = await listRecommendationRows(userId, now);
-    return fresh.map((r) => toRecommendation(r, settings.proactivity, now));
+    // Merge in memory; a second identical list would be memoized (see applyReconcile).
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    for (const r of written) byId.set(r.id, r);
+    return [...byId.values()].map((r) => toRecommendation(r, settings.proactivity, now));
   }
   return rows.map((r) => toRecommendation(r, settings.proactivity, now));
 }
