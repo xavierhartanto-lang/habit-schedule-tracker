@@ -85,6 +85,7 @@ export const PAYLOAD_SCHEMAS = {
       .strict(),
   }),
   complete_task: z.object({ taskId: zUuid }),
+  remove_task: z.object({ taskId: zUuid }),
   create_habit: z.object({ title: zText(200), lifeAreaId: zAreaId, cadence: zCadence }),
   update_habit: z.object({ habitId: zUuid, cadence: zCadence }),
   create_goal: z.object({ title: zText(200), lifeAreaId: zAreaId, targetDate: zDateKey.nullish(), description: zOptText(2000) }),
@@ -234,6 +235,11 @@ export function toOp(item: { id: string; action: PlanItemAction; payload: unknow
       const p = parsePayload("complete_task", item.payload);
       if (!p.ok) return p;
       return { ok: true, op: { ...base, op: "update_task", id: p.value.taskId, patch: { status: "done" } } };
+    }
+    case "remove_task": {
+      const p = parsePayload("remove_task", item.payload);
+      if (!p.ok) return p;
+      return { ok: true, op: { ...base, op: "remove_task", id: p.value.taskId } };
     }
     case "create_habit": {
       const p = parsePayload("create_habit", item.payload);

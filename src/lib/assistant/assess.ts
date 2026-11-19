@@ -66,6 +66,7 @@ export type ActionSpec =
       };
     }
   | { kind: "task_complete"; task: Task }
+  | { kind: "task_remove"; task: Task }
   | { kind: "habit_create"; title: string; lifeAreaId: string | null; cadence: HabitCadence }
   | { kind: "habit_update"; habit: Habit; cadence: HabitCadence }
   | { kind: "goal_create"; title: string; lifeAreaId: string | null; targetDate: string | null; description: string | null }
@@ -343,13 +344,15 @@ export function assessIntent(intent: Intent, world: World): Assessment {
     }
 
     case "update_task":
-    case "complete_task": {
+    case "complete_task":
+    case "remove_task": {
       const task = findByRef(refs.tasks, intent.targetRef, intent.title);
       if (!task) {
         const options = candidates(refs.tasks, intent.title);
         return needs(intent, "target", intent.title ?? "Task", "Which task do you mean?", options);
       }
       if (intent.type === "complete_task") return { status: "ready", intent, spec: { kind: "task_complete", task } };
+      if (intent.type === "remove_task") return { status: "ready", intent, spec: { kind: "task_remove", task } };
       const patch: Extract<ActionSpec, { kind: "task_update" }>["patch"] = {};
       const due = resolveDateRef(intent.deadline ?? intent.date, world.todayKey, world.weekStartsOn);
       if (due) {
@@ -491,6 +494,11 @@ export function assessIntent(intent: Intent, world: World): Assessment {
         return needs(intent, "target", "Event", "Which event should I remove?", [...refs.events.values()].slice(0, 3).map((e) => e.title));
       }
       const matches = matchEvents([...refs.events.values(), ...refs.blocks.values()], title);
+      // Tasks aren't on the calendar. If only a task matches, the user meant that.
+      if (!matches.length) {
+        const task = findByRef(refs.tasks, null, title);
+        if (task) return { status: "ready", intent, spec: { kind: "task_remove", task } };
+      }
       const names = [...new Set(matches.map((m) => m.title))];
       const distinct = new Set(matches.map((m) => normalizeText(m.title)));
       if (distinct.size > 1) return needs(intent, "target", title, "Which one should I remove?", names.slice(0, 4));

@@ -22,6 +22,7 @@ export const PLAN_ITEM_ACTIONS = [
   "create_task",
   "update_task",
   "complete_task",
+  "remove_task",
   "create_habit",
   "update_habit",
   "create_goal",
