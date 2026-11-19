@@ -1,10 +1,11 @@
-import { Card, CardBody, CardHeader, LifeAreaDot } from "@/components/ui";
+import { LifeAreaDot } from "@/components/ui";
 import { findArea } from "@/lib/domain/life-areas";
 import { dueParts } from "@/lib/domain/tasks";
 import { expandEvents } from "@/lib/scheduling/recurrence";
 import { addDaysToKey, dateKeyInZone, daysBetweenKeys, formatDateKey, formatTimeInZone, startOfDayInZone } from "@/lib/scheduling/zoned";
 import { CalendarDays, CircleCheck } from "lucide-react";
 import { LOOKAHEAD_DAYS, loadHomeData } from "./home-data";
+import { RailNote, RailSection } from "./rail-section";
 
 function relativeDay(n: number, key: string) {
   if (n === 0) return "Today";
@@ -54,30 +55,27 @@ export async function Upcoming() {
   const shown = items.slice(0, 5);
 
   return (
-    <Card>
-      <CardHeader title="Coming up" description="Next 2 weeks" />
-      <CardBody className="pt-3">
-        {shown.length === 0 ? (
-          <p className="rounded-xl bg-surface-2 px-4 py-5 text-center text-[13px] text-ink-3">
-            {ctx.state === "ready" ? "No deadlines or one-off events in the next two weeks." : "Sign in to see what's coming up."}
-          </p>
-        ) : (
-          <ul className="divide-y divide-border">
-            {shown.map((u) => (
-              <li key={`${u.kind}:${u.id}`} className="flex items-start gap-3 py-3 first:pt-1 last:pb-0">
-                <LifeAreaDot area={findArea(ctx.areas, u.areaId)} className="mt-1.5" />
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium leading-snug text-ink">{u.title}</p>
-                  <p className="mt-0.5 flex items-center gap-1 text-[12px] text-ink-3">
-                    {u.kind === "event" ? <CalendarDays className="size-3" /> : <CircleCheck className="size-3" />}
-                    {u.when}
-                  </p>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </CardBody>
-    </Card>
+    <RailSection title="Coming up" meta="2 weeks">
+      {shown.length === 0 ? (
+        <RailNote>
+          {ctx.state === "ready" ? "No deadlines or one-off events in the next two weeks." : "Sign in to see what's coming up."}
+        </RailNote>
+      ) : (
+        <ul className="space-y-0.5">
+          {shown.map((u) => (
+            <li key={`${u.kind}:${u.id}`} className="-mx-2 flex items-start gap-2.5 rounded-lg px-2 py-1.5">
+              <LifeAreaDot area={findArea(ctx.areas, u.areaId)} className="mt-[7px]" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[13.5px] leading-snug text-ink">{u.title}</p>
+                <p className="mt-0.5 flex items-center gap-1 text-[12px] tabular-nums text-ink-3">
+                  {u.kind === "event" ? <CalendarDays aria-hidden className="size-3" /> : <CircleCheck aria-hidden className="size-3" />}
+                  {u.when}
+                </p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </RailSection>
   );
 }

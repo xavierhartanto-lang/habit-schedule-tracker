@@ -91,7 +91,7 @@ export function TimeGrid({
               <span
                 className={cn(
                   "mx-auto mt-0.5 grid size-7 place-items-center rounded-full text-sm font-semibold",
-                  today ? "bg-accent text-white" : "text-ink",
+                  today ? "bg-accent text-on-accent" : "text-ink",
                 )}
               >
                 {Number(k.slice(8))}

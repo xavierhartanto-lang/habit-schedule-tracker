@@ -1,22 +1,19 @@
-import { Card, CardBody, CardHeader, Skeleton } from "@/components/ui";
+import { Skeleton } from "@/components/ui";
 import { expandEvents } from "@/lib/scheduling/recurrence";
 import { addDaysToKey, startOfDayInZone } from "@/lib/scheduling/zoned";
-import Link from "next/link";
 import { loadHomeData } from "./home-data";
+import { RailNote, RailSection } from "./rail-section";
 import { TodayList } from "./today-list";
 
 export function TodayScheduleSkeleton() {
   return (
-    <Card>
-      <CardHeader title="Today" />
-      <CardBody className="pt-3">
-        <div className="space-y-2">
-          {[0, 1, 2].map((i) => (
-            <Skeleton key={i} className="h-11" />
-          ))}
-        </div>
-      </CardBody>
-    </Card>
+    <RailSection title="Today">
+      <div className="space-y-2">
+        {[0, 1, 2].map((i) => (
+          <Skeleton key={i} className="h-10" />
+        ))}
+      </div>
+    </RailSection>
   );
 }
 
@@ -37,26 +34,14 @@ export async function TodaySchedule() {
   }));
 
   return (
-    <Card>
-      <CardHeader
-        title="Today"
-        action={
-          <Link href="/calendar?view=day" className="text-[12px] font-medium text-accent-ink hover:underline">
-            Calendar
-          </Link>
-        }
-      />
-      <CardBody className="pt-3">
-        {error ? (
-          <p className="rounded-xl bg-surface-2 px-4 py-6 text-center text-sm text-danger">Could not load today. Refresh to try again.</p>
-        ) : ctx.state !== "ready" ? (
-          <p className="rounded-xl bg-surface-2 px-4 py-6 text-center text-sm text-ink-3">
-            {ctx.state === "preview" ? "Preview mode: connect Supabase to see your day." : "Sign in to see your day."}
-          </p>
-        ) : (
-          <TodayList items={today} areas={ctx.areas} timeZone={ctx.timeZone} />
-        )}
-      </CardBody>
-    </Card>
+    <RailSection title="Today" href="/calendar?view=day" hrefLabel="Calendar">
+      {error ? (
+        <RailNote tone="danger">Couldn&apos;t load today. Refresh to try again.</RailNote>
+      ) : ctx.state !== "ready" ? (
+        <RailNote>{ctx.state === "preview" ? "Preview mode: connect Supabase to see your day." : "Sign in to see your day."}</RailNote>
+      ) : (
+        <TodayList items={today} areas={ctx.areas} timeZone={ctx.timeZone} />
+      )}
+    </RailSection>
   );
 }

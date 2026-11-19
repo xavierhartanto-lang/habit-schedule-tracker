@@ -73,20 +73,20 @@ export function Dialog({
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-6">
-      <div className="absolute inset-0 bg-ink/30 backdrop-blur-[2px]" onClick={onClose} aria-hidden />
+      <div className="absolute inset-0 animate-fade-in bg-[rgb(5_7_12/0.55)] backdrop-blur-[2px]" onClick={onClose} aria-hidden />
       <div
         ref={panel}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         className={cn(
-          "relative flex max-h-[92dvh] w-full flex-col rounded-t-2xl border border-border bg-surface shadow-pop animate-fade-up sm:rounded-2xl",
+          "relative flex max-h-[92dvh] w-full flex-col rounded-t-2xl border border-border bg-surface-3 shadow-pop animate-sheet-up sm:animate-pop-in sm:rounded-2xl",
           size === "sm" ? "sm:max-w-md" : "sm:max-w-lg",
         )}
       >
         <div className="flex items-start justify-between gap-4 px-5 pb-2 pt-5">
           <div className="min-w-0">
-            <h2 id={titleId} className="text-[16px] font-semibold tracking-tight text-ink">
+            <h2 id={titleId} className="text-[16px] font-medium tracking-[-0.01em] text-ink">
               {title}
             </h2>
             {description && <p className="mt-0.5 text-[13px] text-ink-3">{description}</p>}
@@ -95,7 +95,7 @@ export function Dialog({
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="-mr-1 -mt-1 grid size-8 shrink-0 place-items-center rounded-lg text-ink-3 hover:bg-surface-2 hover:text-ink"
+            className="-mr-1 -mt-1 grid size-8 shrink-0 place-items-center rounded-lg text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink"
           >
             <X className="size-4" />
           </button>

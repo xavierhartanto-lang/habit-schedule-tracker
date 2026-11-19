@@ -1,26 +1,35 @@
 @import "tailwindcss";
 
 /*
-  Design tokens.
-  Palette: warm paper neutrals, ink text, one calm "iris" accent.
-  Category hues are muted so a busy week still reads as calm.
+  Design tokens — "Midnight".
+  Dark (Midnight) is the reference look; light mirrors it with cool neutrals.
+  Theme follows the OS. One blue-violet accent for actions and selection;
+  cyan (--accent-2) is rare. Life-area hues stay distinct in both themes.
+
+  Surfaces, from back to front: bg → surface → surface-2 (fills, hovers)
+  → surface-3 (elevated: menus, dialogs, popovers).
 */
 :root {
-  --bg: #f7f7f5;
+  --bg: #f6f7f9;
   --surface: #ffffff;
-  --surface-2: #f1f1ee;
-  --border: #e6e5e0;
-  --border-strong: #d6d5cf;
-  --ink: #16171b;
-  --ink-2: #4a4c55;
-  --ink-3: #7c7e88;
-  --accent: #5b5bd6;
-  --accent-hover: #4b4bc4;
-  --accent-soft: #ededfc;
-  --accent-ink: #3a3a9e;
-  --focus: #8b8bf0;
-  --danger: #d14343;
-  --success: #2f8f5b;
+  --surface-2: #eff1f5;
+  --surface-3: #ffffff;
+  --border: #e3e7ee;
+  --border-strong: #cdd3de;
+  --ink: #0e1320;
+  --ink-2: #495266;
+  --ink-3: #6b7588;
+  --accent: #4f5fdf;
+  --accent-hover: #4050cc;
+  --accent-soft: #eceffe;
+  --accent-ink: #3a47b8;
+  --on-accent: #ffffff;
+  --accent-2: #0f8a9c;
+  --focus: #8b9cff;
+  --danger: #cf4646;
+  --danger-soft: #fcecec;
+  --success: #1f8a5f;
+  --success-soft: #e6f5ee;
 
   /* Life areas */
   --cat-academics: #3b74e6;
@@ -57,69 +66,74 @@
   --area-cyan-soft: #e3f1fa;
   --area-brown: #9a6b4b;
   --area-brown-soft: #f4ece6;
-  --area-none: #a3a5ad;
-  --area-none-soft: #f1f1ee;
+  --area-none: #a3abb8;
+  --area-none-soft: #eff1f5;
 
-  --shadow-sm: 0 1px 2px rgb(22 23 27 / 0.04), 0 1px 1px rgb(22 23 27 / 0.03);
-  --shadow-md: 0 4px 16px -4px rgb(22 23 27 / 0.08), 0 2px 4px rgb(22 23 27 / 0.04);
+  --shadow-sm: 0 1px 2px rgb(14 19 32 / 0.05), 0 0 0 1px rgb(14 19 32 / 0.02);
+  --shadow-md: 0 12px 32px -12px rgb(14 19 32 / 0.18), 0 2px 6px rgb(14 19 32 / 0.05);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0f1013;
-    --surface: #16171b;
-    --surface-2: #1d1e23;
-    --border: #2a2b31;
-    --border-strong: #383a41;
-    --ink: #ececef;
-    --ink-2: #b2b4bd;
-    --ink-3: #7f828c;
-    --accent: #7c7cf0;
-    --accent-hover: #8f8ff5;
-    --accent-soft: #23234a;
-    --accent-ink: #c4c4fb;
-    --focus: #6c6ce6;
-    --danger: #ef6b6b;
-    --success: #4cc28a;
+    --bg: #0b0e14;
+    --surface: #111722;
+    --surface-2: #171f2d;
+    --surface-3: #171f2d;
+    --border: #252f40;
+    --border-strong: #344157;
+    --ink: #f2f5fa;
+    --ink-2: #a0aabb;
+    --ink-3: #707d91;
+    --accent: #8b9cff;
+    --accent-hover: #aab7ff;
+    --accent-soft: #222a48;
+    --accent-ink: #c3ccff;
+    --on-accent: #0b0e14;
+    --accent-2: #6ed6e5;
+    --focus: #8b9cff;
+    --danger: #f07878;
+    --danger-soft: #3a1f26;
+    --success: #4ccb98;
+    --success-soft: #16302b;
 
-    --cat-academics: #6b9bf5;
-    --cat-academics-soft: #1a2640;
-    --cat-extracurricular: #a088f2;
-    --cat-extracurricular-soft: #251e40;
-    --cat-athletics: #4fc28f;
-    --cat-athletics-soft: #15302a;
-    --cat-creative: #eaa646;
-    --cat-creative-soft: #352713;
-    --cat-personal: #ec7c9d;
-    --cat-personal-soft: #3a1c27;
-    --cat-rest: #9aa1ae;
-    --cat-rest-soft: #23262c;
+    --cat-academics: #6e9cf7;
+    --cat-academics-soft: #202c44;
+    --cat-extracurricular: #a48bf5;
+    --cat-extracurricular-soft: #292a44;
+    --cat-athletics: #4fc79a;
+    --cat-athletics-soft: #1b3335;
+    --cat-creative: #ebaa4e;
+    --cat-creative-soft: #342f29;
+    --cat-personal: #ee7fa0;
+    --cat-personal-soft: #342836;
+    --cat-rest: #95a0b3;
+    --cat-rest-soft: #262d39;
 
-    --area-blue: #6b9bf5;
-    --area-blue-soft: #1a2640;
-    --area-violet: #a088f2;
-    --area-violet-soft: #251e40;
-    --area-green: #4fc28f;
-    --area-green-soft: #15302a;
-    --area-amber: #eaa646;
-    --area-amber-soft: #352713;
-    --area-pink: #ec7c9d;
-    --area-pink-soft: #3a1c27;
-    --area-slate: #9aa1ae;
-    --area-slate-soft: #23262c;
-    --area-teal: #4cc3cc;
-    --area-teal-soft: #12302f;
-    --area-orange: #f08a62;
-    --area-orange-soft: #3a2118;
-    --area-cyan: #5db4ea;
-    --area-cyan-soft: #142a38;
-    --area-brown: #c49673;
-    --area-brown-soft: #30251d;
-    --area-none: #6b6e78;
-    --area-none-soft: #1d1e23;
+    --area-blue: #6e9cf7;
+    --area-blue-soft: #202c44;
+    --area-violet: #a48bf5;
+    --area-violet-soft: #292a44;
+    --area-green: #4fc79a;
+    --area-green-soft: #1b3335;
+    --area-amber: #ebaa4e;
+    --area-amber-soft: #342f29;
+    --area-pink: #ee7fa0;
+    --area-pink-soft: #342836;
+    --area-slate: #95a0b3;
+    --area-slate-soft: #262d39;
+    --area-teal: #4cc6cf;
+    --area-teal-soft: #1a333e;
+    --area-orange: #f28c64;
+    --area-orange-soft: #352a2d;
+    --area-cyan: #5db6ec;
+    --area-cyan-soft: #1d3042;
+    --area-brown: #c79a78;
+    --area-brown-soft: #2e2c30;
+    --area-none: #5e6a7e;
+    --area-none-soft: #1d2431;
 
-    --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.3);
-    --shadow-md: 0 6px 20px -6px rgb(0 0 0 / 0.5);
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.35);
+    --shadow-md: 0 16px 40px -12px rgb(0 0 0 / 0.6), 0 0 0 1px rgb(255 255 255 / 0.03);
   }
 }
 
@@ -127,6 +141,7 @@
   --color-bg: var(--bg);
   --color-surface: var(--surface);
   --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
   --color-border: var(--border);
   --color-border-strong: var(--border-strong);
   --color-ink: var(--ink);
@@ -136,9 +151,13 @@
   --color-accent-hover: var(--accent-hover);
   --color-accent-soft: var(--accent-soft);
   --color-accent-ink: var(--accent-ink);
+  --color-on-accent: var(--on-accent);
+  --color-accent-2: var(--accent-2);
   --color-focus: var(--focus);
   --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
   --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
 
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
@@ -148,6 +167,24 @@
 
   --animate-fade-up: fade-up 320ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
   --animate-pulse-dot: pulse-dot 1.2s ease-in-out infinite;
+  --animate-fade-in: fade-in 180ms ease-out both;
+  --animate-pop-in: pop-in 200ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  --animate-sheet-up: sheet-up 260ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes pop-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes sheet-up {
+  from { opacity: 0.6; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes fade-up {
@@ -168,6 +205,11 @@ body {
   font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   font-feature-settings: "cv11", "ss01";
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 :focus-visible {

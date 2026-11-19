@@ -43,7 +43,7 @@ export function ContextPanel({
                     <span
                       className={cn(
                         "grid size-4 shrink-0 place-items-center rounded-full",
-                        t.covered ? "bg-accent text-white" : "border border-border-strong",
+                        t.covered ? "bg-accent text-on-accent" : "border border-border-strong",
                       )}
                     >
                       {t.covered && <Check className="size-2.5" strokeWidth={3} />}

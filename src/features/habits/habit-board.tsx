@@ -214,7 +214,7 @@ function HabitRow({
                 )}
                 style={isDone ? { background: color, borderColor: color } : { borderColor: "var(--border-strong)" }}
               >
-                {isDone && <Check className="size-3.5 text-white" strokeWidth={3} />}
+                {isDone && <Check className="size-3.5 text-on-accent" strokeWidth={3} />}
               </button>
             );
           })}

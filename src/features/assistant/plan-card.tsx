@@ -211,9 +211,12 @@ export function PlanCard({
       )}
       <section
         aria-label={calendarCount > 0 ? "Proposed schedule" : "Suggested changes"}
-        className="overflow-hidden rounded-xl border border-border bg-surface shadow-card animate-fade-up"
+        className={cn(
+          "overflow-hidden rounded-xl border bg-surface shadow-card animate-fade-up transition-colors duration-300",
+          open.length > 0 && !locked ? "border-accent/35" : "border-border",
+        )}
       >
-        <header className="flex items-start gap-3 border-b border-border bg-surface-2/60 px-3.5 py-2.5">
+        <header className="flex items-start gap-3 border-b border-border px-3.5 py-3">
           <span className="mt-0.5 grid size-6 shrink-0 place-items-center rounded-md bg-accent-soft text-accent">
             {plan.status === "applied" ? (
               <CalendarCheck className="size-3.5" />

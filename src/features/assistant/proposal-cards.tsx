@@ -361,7 +361,7 @@ function ProposalEditor({
                 onClick={() => setKind(k)}
                 className={cn(
                   "rounded-md px-3 py-1 text-[12px] font-medium transition-colors",
-                  kind === k ? "bg-ink text-bg" : "text-ink-2 hover:text-ink",
+                  kind === k ? "bg-accent-soft text-accent-ink" : "text-ink-2 hover:text-ink",
                 )}
               >
                 {k === "fixed" ? "Set time" : "Flexible"}

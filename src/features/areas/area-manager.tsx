@@ -167,7 +167,7 @@ export function ColorPicker({ value, onChange }: { value: AreaColor; onChange: (
             )}
             style={{ background: `var(--area-${c})` }}
           >
-            {on && <Check className="size-4 text-white" strokeWidth={3} />}
+            {on && <Check className="size-4 text-on-accent" strokeWidth={3} />}
           </button>
         );
       })}

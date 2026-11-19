@@ -11,7 +11,7 @@ export function Sidebar({ footer }: { footer: ReactNode }) {
   const pathname = usePathname();
 
   return (
-    <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-border bg-bg/80 px-4 py-5 backdrop-blur lg:flex">
+    <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-border bg-bg px-4 py-5 lg:flex">
       <div className="px-2">
         <Brand />
       </div>
@@ -26,9 +26,9 @@ export function Sidebar({ footer }: { footer: ReactNode }) {
               href={item.href}
               aria-current={active ? "page" : undefined}
               className={cn(
-                "group relative flex h-9 items-center gap-3 rounded-lg px-3 text-sm transition-colors",
+                "group relative flex h-9 items-center gap-3 rounded-lg px-3 text-[13.5px] transition-colors duration-150",
                 active
-                  ? "bg-surface font-medium text-ink shadow-card"
+                  ? "bg-accent-soft/70 font-medium text-ink"
                   : "text-ink-2 hover:bg-surface-2 hover:text-ink",
               )}
             >

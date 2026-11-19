@@ -80,7 +80,7 @@ export function AssistantForm({ settings, disabled }: { settings: AssistantSetti
               <span className="relative mt-0.5 inline-flex shrink-0">
                 <input type="checkbox" checked={quiet} onChange={(e) => setQuiet(e.target.checked)} className="peer sr-only" />
                 <span className="h-5 w-9 rounded-full bg-border-strong transition-colors peer-checked:bg-accent peer-focus-visible:ring-2 peer-focus-visible:ring-focus peer-disabled:opacity-50" />
-                <span className="pointer-events-none absolute left-0.5 top-0.5 size-4 rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-4" />
+                <span className="pointer-events-none absolute left-0.5 top-0.5 size-4 rounded-full bg-white shadow-sm transition-transform duration-200 ease-out peer-checked:translate-x-4" />
               </span>
             </label>
             {quiet && (

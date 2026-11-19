@@ -133,7 +133,7 @@ function Progress({
             <span
               className={cn(
                 "grid size-6 shrink-0 place-items-center rounded-full text-[11px] font-semibold tabular-nums transition-colors",
-                t.covered ? "bg-accent text-white" : "border border-border-strong text-ink-3",
+                t.covered ? "bg-accent text-on-accent" : "border border-border-strong text-ink-3",
               )}
             >
               {t.covered ? <Check className="size-3.5" strokeWidth={3} /> : i + 1}
