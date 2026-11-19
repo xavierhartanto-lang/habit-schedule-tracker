@@ -1,89 +1,99 @@
 import { Skeleton } from "@/components/ui";
 import { buttonClasses } from "@/components/ui/button";
 import { Chat } from "@/features/assistant/chat";
+import { formatDateKey } from "@/lib/scheduling/zoned";
 import { ArrowUpRight, Database, LogIn, Plus, Sparkles } from "lucide-react";
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { loadHomeAssistant } from "./assistant-data";
 import { shownIds } from "./proactive";
+import type { WeekSummary } from "./week-summary";
 
 /**
- * The center of Home: a greeting and a live conversation with the
- * assistant, opened with a line built from the user's real schedule.
+ * The center of Home. Not a panel: the page itself is the assistant.
+ * Greeting and the week in one line, then the daily brief, what needs
+ * attention, the conversation, and a composer pinned to the bottom.
  * Render inside <Suspense>.
  */
 
-const PANEL = "flex flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-card";
-const PANEL_HEIGHT = "h-[min(600px,calc(100dvh-14rem))] min-h-[440px]";
+const GHOST_LINK = buttonClasses("ghost", "sm", "h-7 px-2 text-[12px] text-ink-3");
 
-function Title({ greeting, sub }: { greeting: string; sub: string }) {
+function Header({
+  date,
+  greeting,
+  week,
+  actions,
+}: {
+  date: string | null;
+  greeting: string;
+  week?: WeekSummary;
+  actions?: ReactNode;
+}) {
   return (
-    <div className="animate-fade-up">
-      <h1 className="text-[26px] font-semibold tracking-tight text-ink sm:text-[30px]">{greeting}</h1>
-      <p className="mt-1 text-[15px] text-ink-2">{sub}</p>
-    </div>
+    <header className="animate-fade-up">
+      <div className="flex min-h-7 items-center justify-between gap-3">
+        <p className="text-[13px] tabular-nums text-ink-3">{date}</p>
+        {actions && <div className="-mr-2 flex items-center gap-0.5">{actions}</div>}
+      </div>
+      <h1 className="mt-1 text-[28px] font-semibold leading-[1.15] tracking-[-0.022em] text-ink sm:text-[32px]">
+        {greeting}
+      </h1>
+      {week && <WeekLine week={week} />}
+    </header>
   );
 }
 
-function PanelBar({ resumed, conversationId }: { resumed: boolean; conversationId: string | null }) {
+/** Three plain facts about the next seven days, inline under the greeting. */
+function WeekLine({ week }: { week: WeekSummary }) {
+  const facts: { value: string; label: string }[] = [
+    { value: String(week.commitments), label: week.commitments === 1 ? "commitment" : "commitments" },
+    { value: String(week.deadlines), label: week.deadlines === 1 ? "deadline" : "deadlines" },
+    week.busiestDay
+      ? { value: formatDateKey(week.busiestDay, { weekday: "short" }), label: "busiest" }
+      : { value: String(week.openDays), label: week.openDays === 1 ? "open day" : "open days" },
+  ];
   return (
-    <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-2.5 sm:px-5">
-      <p className="flex items-center gap-2 text-[13px] font-medium text-ink">
-        <span className="grid size-6 place-items-center rounded-md bg-accent-soft text-accent">
-          <Sparkles className="size-3.5" />
-        </span>
-        {resumed ? "Picking up where you left off" : "Your assistant"}
-      </p>
-      <div className="flex items-center gap-1">
-        {resumed && (
-          <Link href="/?new=1" className={buttonClasses("ghost", "sm", "h-7 px-2 text-[12px]")}>
-            <Plus className="size-3.5" /> New
-          </Link>
-        )}
-        <Link
-          href={conversationId ? `/assistant?c=${conversationId}` : "/assistant"}
-          className={buttonClasses("ghost", "sm", "h-7 px-2 text-[12px]")}
-        >
-          Full view <ArrowUpRight className="size-3.5" />
-        </Link>
-      </div>
-    </div>
+    <dl aria-label="Next 7 days" className="mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-[13px] text-ink-3">
+      <dt className="text-ink-3">Next 7 days</dt>
+      {facts.map((f) => (
+        <dd key={f.label} className="flex items-baseline gap-1">
+          <span className="font-medium tabular-nums text-ink">{f.value}</span>
+          {f.label}
+        </dd>
+      ))}
+    </dl>
   );
 }
 
 export function HomeAssistantSkeleton() {
   return (
-    <div className="space-y-5">
+    <div className="space-y-10">
       <div>
-        <Skeleton className="h-8 w-64" />
-        <Skeleton className="mt-2 h-4 w-48" />
+        <Skeleton className="h-4 w-40" />
+        <Skeleton className="mt-3 h-8 w-72" />
+        <Skeleton className="mt-4 h-4 w-60" />
       </div>
-      <div className={`${PANEL} ${PANEL_HEIGHT}`}>
-        <div className="border-b border-border px-5 py-3">
-          <Skeleton className="h-5 w-36" />
-        </div>
-        <div className="flex-1 space-y-3 p-6">
-          <Skeleton className="h-4 w-4/5" />
-          <Skeleton className="h-4 w-3/5" />
-          <div className="flex gap-2 pt-2">
-            <Skeleton className="h-8 w-28 rounded-full" />
-            <Skeleton className="h-8 w-28 rounded-full" />
-          </div>
-        </div>
-        <div className="border-t border-border p-4">
-          <Skeleton className="h-12 rounded-2xl" />
+      <div className="space-y-3">
+        <Skeleton className="h-3.5 w-20" />
+        <Skeleton className="h-4 w-full max-w-xl" />
+        <Skeleton className="h-4 w-4/5 max-w-lg" />
+        <div className="flex gap-2 pt-2">
+          <Skeleton className="h-8 w-28 rounded-full" />
+          <Skeleton className="h-8 w-28 rounded-full" />
         </div>
       </div>
+      <Skeleton className="h-14 rounded-2xl" />
     </div>
   );
 }
 
-function Blocked({ icon, title, body, action }: { icon: React.ReactNode; title: string; body: string; action?: React.ReactNode }) {
+function Blocked({ icon, title, body, action }: { icon: ReactNode; title: string; body: string; action?: ReactNode }) {
   return (
-    <div className={`${PANEL} items-center justify-center px-6 py-14 text-center`}>
+    <div className="flex flex-col items-center rounded-2xl border border-border bg-surface px-6 py-14 text-center">
       <span className="grid size-11 place-items-center rounded-xl bg-surface-2 text-ink-3">{icon}</span>
-      <h2 className="mt-4 text-[15px] font-semibold text-ink">{title}</h2>
+      <h2 className="mt-4 text-[15px] font-medium text-ink">{title}</h2>
       <p className="mt-1.5 max-w-sm text-[13px] leading-relaxed text-ink-2">{body}</p>
-      {action && <div className="mt-4">{action}</div>}
+      {action && <div className="mt-5">{action}</div>}
     </div>
   );
 }
@@ -93,8 +103,8 @@ export async function HomeAssistant({ fresh }: { fresh: boolean }) {
 
   if (data.state === "preview") {
     return (
-      <div className="space-y-5">
-        <Title greeting={data.greeting} sub="Preview mode" />
+      <div className="space-y-8">
+        <Header date="Preview mode" greeting={data.greeting} />
         <Blocked
           icon={<Database className="size-5" />}
           title="Connect Supabase to start planning"
@@ -105,8 +115,8 @@ export async function HomeAssistant({ fresh }: { fresh: boolean }) {
   }
   if (data.state === "signed-out") {
     return (
-      <div className="space-y-5">
-        <Title greeting={data.greeting} sub="Sign in to plan your week." />
+      <div className="space-y-8">
+        <Header date={null} greeting={data.greeting} />
         <Blocked
           icon={<LogIn className="size-5" />}
           title="Sign in to continue"
@@ -122,8 +132,8 @@ export async function HomeAssistant({ fresh }: { fresh: boolean }) {
   }
   if (data.state === "error") {
     return (
-      <div className="space-y-5">
-        <Title greeting={data.greeting} sub="Something didn't load." />
+      <div className="space-y-8">
+        <Header date={null} greeting={data.greeting} />
         <Blocked
           icon={<Sparkles className="size-5" />}
           title="Couldn't load your schedule"
@@ -135,16 +145,13 @@ export async function HomeAssistant({ fresh }: { fresh: boolean }) {
 
   const resumed = !fresh && data.messages.length > 0;
   const conversationId = resumed ? data.conversationId : null;
-  const sub = data.aiConfigured
-    ? "Tell me what's going on. I'll keep your plan in order."
-    : "Here's your day. The assistant isn't set up yet.";
 
   const { proactive } = data;
   const openingChips = resumed ? [] : (proactive.opening?.chips ?? []);
   // Proactive buttons come first; the general starters fill up to four.
-  // The general starters fill up to four. When Whitespace leads with its own
-  // suggestion, the Phase 4 opening's topic starter (and a duplicate
-  // "Plan my day") would compete with it, so only the general ones stay.
+  // When Whitespace leads with its own suggestion, the Phase 4 opening's topic
+  // starter (and a duplicate "Plan my day") would compete with it, so only
+  // the general ones stay.
   const actionChips = openingChips.filter((c) => c.act.kind !== "dismiss");
   const general = proactive.opening && !resumed ? data.opening.generalStarters : data.opening.starters;
   const starters = general
@@ -154,26 +161,39 @@ export async function HomeAssistant({ fresh }: { fresh: boolean }) {
     .slice(0, Math.max(0, (proactive.nudges.length ? 3 : 4) - actionChips.length));
 
   return (
-    <div className="space-y-5">
-      <Title greeting={data.opening.greeting} sub={sub} />
-      <section aria-label="Assistant" className={`${PANEL} ${PANEL_HEIGHT}`}>
-        <PanelBar resumed={resumed} conversationId={conversationId} />
-        <div className="min-h-0 flex-1">
-          <Chat
-            key={conversationId ?? "home"}
-            mode="assistant"
-            variant="embedded"
-            conversationId={conversationId}
-            initialMessages={resumed ? data.messages : []}
-            aiConfigured={data.aiConfigured}
-            opening={resumed ? null : (proactive.opening?.message ?? data.opening.message)}
-            openingChips={openingChips}
-            starters={starters}
-            nudges={resumed ? proactive.resumeNudges : proactive.nudges}
-            shownRecommendationIds={shownIds(proactive, resumed)}
-            placeholder="Tell me what’s coming up…"
-          />
-        </div>
+    <div className="flex flex-col gap-9">
+      <Header
+        date={formatDateKey(data.todayKey, { weekday: "long", month: "long", day: "numeric" })}
+        greeting={data.opening.greeting}
+        week={data.week}
+        actions={
+          <>
+            {resumed && (
+              <Link href="/?new=1" className={GHOST_LINK}>
+                <Plus className="size-3.5" /> New chat
+              </Link>
+            )}
+            <Link href={conversationId ? `/assistant?c=${conversationId}` : "/assistant"} className={GHOST_LINK}>
+              Full view <ArrowUpRight className="size-3.5" />
+            </Link>
+          </>
+        }
+      />
+      <section aria-label="Assistant" className="min-w-0">
+        <Chat
+          key={conversationId ?? "home"}
+          mode="assistant"
+          variant="embedded"
+          conversationId={conversationId}
+          initialMessages={resumed ? data.messages : []}
+          aiConfigured={data.aiConfigured}
+          opening={resumed ? null : (proactive.opening?.message ?? data.opening.message)}
+          openingChips={openingChips}
+          starters={starters}
+          nudges={resumed ? proactive.resumeNudges : proactive.nudges}
+          shownRecommendationIds={shownIds(proactive, resumed)}
+          placeholder="Tell me what’s coming up…"
+        />
       </section>
     </div>
   );

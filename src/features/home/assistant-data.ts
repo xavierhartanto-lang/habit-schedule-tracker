@@ -42,6 +42,8 @@ export type HomeAssistantData =
       messages: ChatMessage[];
       week: WeekSummary;
       timeZone: string;
+      /** "YYYY-MM-DD" in the user's time zone. */
+      todayKey: string;
       /** Phase 5: the daily brief and gentle suggestions (empty when there's nothing worth raising). */
       proactive: HomeProactive;
     };
@@ -157,5 +159,5 @@ export async function loadHomeAssistant(): Promise<HomeAssistantData> {
     }
   }
 
-  return { state: "ready", aiConfigured, opening, conversationId, messages, week, timeZone: tz, proactive };
+  return { state: "ready", aiConfigured, opening, conversationId, messages, week, timeZone: tz, todayKey: today, proactive };
 }

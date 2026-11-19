@@ -2,7 +2,7 @@
 
 import { buttonClasses } from "@/components/ui/button";
 import { cn } from "@/lib/utils/cn";
-import { ArrowUp, KeyRound, RotateCcw, Square } from "lucide-react";
+import { ArrowUp, ChevronUp, KeyRound, RotateCcw, Sparkles, Square } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { AssistantMessage, SystemNotice, ThinkingState, UserMessage } from "./messages";
@@ -15,6 +15,14 @@ import { CHAT_MESSAGE_MAX, type ChatMessage, type ChatProactive, type ClientAiEr
 import { ChipRow, NudgeList } from "./proactive-nudges";
 import { dismissRecommendation, markRecommendationsShown } from "@/features/proactive/actions";
 import type { Nudge, ProactiveChip } from "@/features/home/proactive";
+
+/** Home shows this many turns of a resumed conversation before "earlier messages". */
+const HOME_RESUME_SHOWN = 6;
+
+const CHIP_BUTTON =
+  "rounded-full border border-border bg-surface px-3 py-1.5 text-[12.5px] text-ink-2 transition-[background-color,border-color,color,transform] duration-150 hover:border-accent/40 hover:bg-accent-soft hover:text-accent-ink active:scale-[0.97] disabled:pointer-events-none disabled:opacity-50";
+
+const EYEBROW = "flex items-center gap-1.5 text-[12px] font-medium tracking-[0.01em] text-ink-3";
 
 const PLAN_ACTIONS: PlanCardActions = {
   approve: approvePlanItems,
@@ -98,18 +106,39 @@ export function Chat({
   const started = useRef(false);
   // Keep showing the opening line once the conversation it started is under way.
   const [showOpening, setShowOpening] = useState(() => Boolean(opening) && initialMessages.length === 0);
-  const stickToBottom = useRef(true);
+  // Home scrolls the page, not a panel: only follow new content after the user acts.
+  const stickToBottom = useRef(!embedded);
+  const endRef = useRef<HTMLDivElement>(null);
+  // Home shows the tail of a resumed conversation; earlier turns are one tap away.
+  const [hiddenCount, setHiddenCount] = useState(() => (embedded ? Math.max(0, initialMessages.length - HOME_RESUME_SHOWN) : 0));
   // Suggestions the user acted on or put off in this view.
   const [handled, setHandled] = useState<ReadonlySet<string>>(() => new Set());
   const [resumeAt] = useState(() => initialMessages.length - 1);
 
   // Keep the newest content in view unless the user scrolled up to read.
   useEffect(() => {
-    const el = scrollRef.current;
     // Before anything is said, the opening line (and suggestions) start at the top.
     if (messages.length === 0 && !busy) return;
-    if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
-  }, [messages, streaming, failure, busy]);
+    if (!stickToBottom.current) return;
+    if (embedded) {
+      endRef.current?.scrollIntoView({ block: "nearest" });
+      return;
+    }
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages, streaming, failure, busy, embedded]);
+
+  // On Home the page scrolls. Scrolling up to read stops the follow.
+  useEffect(() => {
+    if (!embedded) return;
+    let last = window.scrollY;
+    const onScroll = () => {
+      if (window.scrollY < last - 4) stickToBottom.current = false;
+      last = window.scrollY;
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [embedded]);
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
@@ -325,21 +354,57 @@ export function Chat({
   const tooLong = draft.length > CHAT_MESSAGE_MAX;
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className={cn("flex flex-col", !embedded && "h-full min-h-0")}>
       <div
         ref={scrollRef}
         onScroll={(e) => {
+          if (embedded) return;
           const el = e.currentTarget;
           stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
         }}
-        className="min-h-0 flex-1 overflow-y-auto"
+        className={cn(!embedded && "min-h-0 flex-1 overflow-y-auto")}
         aria-live="polite"
         aria-busy={busy}
       >
-        <div className={cn("mx-auto w-full max-w-3xl space-y-6 px-4 py-6", embedded ? "sm:px-6" : "sm:px-8")}>
+        <div className={cn("w-full space-y-6", embedded ? "pb-6" : "mx-auto max-w-3xl px-4 py-6 sm:px-8")}>
           {empty && !showOpening && emptyState}
 
-          {showOpening && opening && (
+          {showOpening && opening && embedded && (
+            <div className="space-y-8">
+              <section aria-labelledby="home-brief" className="animate-fade-up">
+                <h2 id="home-brief" className={EYEBROW}>
+                  <Sparkles aria-hidden className="size-3.5 text-accent" /> Briefing
+                </h2>
+                <p className="mt-2.5 max-w-[60ch] text-[15.5px] leading-[1.65] tracking-[-0.005em] text-ink text-pretty sm:text-[16.5px]">{opening}</p>
+                {empty && !openingRecHandled && openingChips.length > 0 && (
+                  <ChipRow chips={openingChips} onAct={(c) => act(c, null)} disabled={busy} className="mt-4" />
+                )}
+                {empty && aiConfigured && starters.length > 0 && (
+                  <div className={cn("flex flex-wrap gap-1.5", openingChips.length > 0 && !openingRecHandled ? "mt-2" : "mt-4")}>
+                    {starters.map((s) => (
+                      <button key={s.label} type="button" onClick={() => startWith(s)} disabled={busy} className={CHIP_BUTTON}>
+                        {s.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </section>
+              {!initialMessages.length && visibleNudges.length > 0 && (
+                <section aria-labelledby="home-attention" className="animate-fade-up">
+                  <h2 id="home-attention" className={EYEBROW}>
+                    Needs attention
+                    <span className="tabular-nums text-ink-3/70">{visibleNudges.length}</span>
+                  </h2>
+                  <div className="mt-3">
+                    <NudgeList nudges={visibleNudges} lead={null} onAct={(n, c) => act(c, n)} disabled={busy} />
+                  </div>
+                </section>
+              )}
+              {messages.length > 0 && <hr className="border-border" />}
+            </div>
+          )}
+
+          {showOpening && opening && !embedded && (
             <div className="space-y-3">
               <AssistantMessage>
                 <p>{opening}</p>
@@ -350,12 +415,7 @@ export function Chat({
               {empty && aiConfigured && starters.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 pl-10">
                   {starters.map((s) => (
-                    <button
-                      key={s.label}
-                      type="button"
-                      onClick={() => startWith(s)}
-                      className="rounded-full border border-border bg-surface px-3 py-1.5 text-[12.5px] text-ink-2 transition-colors hover:border-accent/40 hover:bg-accent-soft hover:text-accent-ink"
-                    >
+                    <button key={s.label} type="button" onClick={() => startWith(s)} disabled={busy} className={CHIP_BUTTON}>
                       {s.label}
                     </button>
                   ))}
@@ -369,7 +429,19 @@ export function Chat({
             </div>
           )}
 
+          {hiddenCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setHiddenCount(0)}
+              className="mx-auto flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-medium text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink-2"
+            >
+              <ChevronUp className="size-3.5" />
+              {hiddenCount === 1 ? "1 earlier message" : `${hiddenCount} earlier messages`}
+            </button>
+          )}
+
           {messages.map((m, i) => {
+            if (i < hiddenCount) return null;
             const next = messages[i + 1];
             // Proposals render after the reply to the message they came from.
             const proposalSource =
@@ -395,12 +467,7 @@ export function Chat({
                 {m.role === "assistant" && m.clarify && i === messages.length - 1 && !busy && aiConfigured && m.clarify.choices.length > 0 && (
                   <div className="flex flex-wrap gap-1.5 pl-10">
                     {m.clarify.choices.map((c) => (
-                      <button
-                        key={c}
-                        type="button"
-                        onClick={() => void run({ message: c })}
-                        className="rounded-full border border-border bg-surface px-3 py-1.5 text-[12.5px] text-ink-2 transition-colors hover:border-accent/40 hover:bg-accent-soft hover:text-accent-ink"
-                      >
+                      <button key={c} type="button" onClick={() => void run({ message: c })} className={CHIP_BUTTON}>
                         {c}
                       </button>
                     ))}
@@ -481,11 +548,18 @@ export function Chat({
               {failure.error.message}
             </SystemNotice>
           )}
+          <div ref={endRef} aria-hidden className="scroll-mb-36" />
         </div>
       </div>
 
-      <div className="border-t border-border bg-surface/80 backdrop-blur">
-        <div className={cn("mx-auto w-full max-w-3xl px-4 pb-4 pt-3", embedded ? "sm:px-6" : "sm:px-8")}>
+      <div
+        className={cn(
+          embedded
+            ? "sticky bottom-[calc(4rem+env(safe-area-inset-bottom))] z-10 -mx-1 bg-bg px-1 pb-3 pt-2 lg:bottom-0 lg:pb-6"
+            : "border-t border-border bg-surface/80 backdrop-blur",
+        )}
+      >
+        <div className={cn("w-full", embedded ? "" : "mx-auto max-w-3xl px-4 pb-4 pt-3 sm:px-8")}>
           {!aiConfigured ? (
             <NotConfigured />
           ) : (
@@ -493,12 +567,7 @@ export function Chat({
               {empty && !showOpening && starters.length > 0 && (
                 <div className="mb-3 flex gap-1.5 overflow-x-auto pb-1">
                   {starters.map((s) => (
-                    <button
-                      key={s.label}
-                      type="button"
-                      onClick={() => startWith(s)}
-                      className="shrink-0 rounded-full border border-border bg-surface px-3 py-1.5 text-[12px] text-ink-2 transition-colors hover:border-border-strong hover:text-ink"
-                    >
+                    <button key={s.label} type="button" onClick={() => startWith(s)} className={cn(CHIP_BUTTON, "shrink-0")}>
                       {s.label}
                     </button>
                   ))}
@@ -514,7 +583,7 @@ export function Chat({
                         setDraft(p);
                         inputRef.current?.focus();
                       }}
-                      className="shrink-0 rounded-full border border-border bg-surface px-3 py-1.5 text-[12px] text-ink-2 transition-colors hover:border-border-strong hover:text-ink"
+                      className={cn(CHIP_BUTTON, "shrink-0")}
                     >
                       {p}
                     </button>
@@ -527,8 +596,8 @@ export function Chat({
                   send();
                 }}
                 className={cn(
-                  "flex items-end gap-2 rounded-2xl border bg-surface p-2 shadow-card transition-colors focus-within:ring-2 focus-within:ring-accent/15",
-                  tooLong ? "border-danger/60" : "border-border focus-within:border-accent/50",
+                  "flex items-end gap-2 rounded-2xl border bg-surface p-2 shadow-card transition-[border-color,box-shadow] duration-200 focus-within:shadow-pop",
+                  tooLong ? "border-danger/60" : "border-border hover:border-border-strong focus-within:border-accent/60",
                 )}
               >
                 <label htmlFor={`${mode}-input`} className="sr-only">
@@ -552,14 +621,17 @@ export function Chat({
                   }}
                   rows={1}
                   placeholder={answering ?? placeholder}
-                  className="max-h-40 min-h-9 flex-1 resize-none bg-transparent px-2 py-2 text-sm text-ink placeholder:text-ink-3 composer-input"
+                  className={cn(
+                    "max-h-40 flex-1 resize-none bg-transparent px-2.5 py-2 text-ink placeholder:text-ink-3 composer-input",
+                    embedded ? "min-h-10 text-[15px]" : "min-h-9 text-sm",
+                  )}
                 />
                 {busy ? (
                   <button
                     type="button"
                     onClick={() => abortRef.current?.abort()}
                     aria-label="Stop"
-                    className="grid size-9 shrink-0 place-items-center rounded-xl bg-surface-2 text-ink-2 transition-colors hover:text-ink"
+                    className="grid size-9 shrink-0 place-items-center rounded-xl bg-surface-2 text-ink-2 transition-colors hover:text-ink active:scale-95"
                   >
                     <Square className="size-3.5 fill-current" />
                   </button>
@@ -568,9 +640,9 @@ export function Chat({
                     type="submit"
                     disabled={!draft.trim() || tooLong}
                     aria-label="Send"
-                    className="grid size-9 shrink-0 place-items-center rounded-xl bg-accent text-white transition-colors hover:bg-accent-hover disabled:bg-surface-2 disabled:text-ink-3"
+                    className="grid size-9 shrink-0 place-items-center rounded-xl bg-accent text-on-accent transition-[background-color,transform] duration-150 hover:bg-accent-hover active:scale-95 disabled:bg-surface-2 disabled:text-ink-3"
                   >
-                    <ArrowUp className="size-4" />
+                    <ArrowUp className="size-4" strokeWidth={2.25} />
                   </button>
                 )}
               </form>

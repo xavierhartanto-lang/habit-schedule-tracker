@@ -24,8 +24,8 @@ export function TaskCheck({ id, title, inProgress }: { id: string; title: string
         })
       }
       className={cn(
-        "grid size-[18px] shrink-0 place-items-center rounded-md border-[1.5px] transition-colors",
-        done ? "border-transparent bg-ink text-bg" : "border-border-strong hover:border-accent",
+        "grid size-[18px] shrink-0 place-items-center rounded-md border-[1.5px] transition-[background-color,border-color,transform] duration-150 active:scale-90",
+        done ? "border-transparent bg-accent text-on-accent" : "border-border-strong hover:border-accent",
         inProgress && !done && "border-accent bg-accent-soft",
       )}
     >

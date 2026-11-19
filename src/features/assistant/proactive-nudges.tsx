@@ -9,7 +9,7 @@ import type { Nudge, ProactiveChip } from "@/features/home/proactive";
  */
 
 const CHIP =
-  "rounded-full border px-3 py-1.5 text-[12.5px] transition-colors disabled:cursor-not-allowed disabled:opacity-50";
+  "rounded-full border px-3 py-1.5 text-[12.5px] transition-[background-color,border-color,color,transform] duration-150 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50";
 
 export function ChipRow({
   chips,
@@ -65,10 +65,10 @@ export function NudgeList({
       {lead && <p className="text-[12px] font-medium text-ink-3">{lead}</p>}
       <ul className="space-y-3">
         {nudges.map((n) => (
-          <li key={n.id} className="animate-fade-up border-l-2 pl-3 [border-color:var(--nudge)]" style={{ "--nudge": n.tone === "warning" ? "var(--cat-creative)" : "var(--border-strong)" } as React.CSSProperties}>
-            <p className="text-[13.5px] leading-relaxed text-ink">{n.message}</p>
+          <li key={n.id} className="animate-fade-up border-l-2 pl-3.5 [border-color:var(--nudge)]" style={{ "--nudge": n.tone === "warning" ? "var(--cat-creative)" : "var(--accent)" } as React.CSSProperties}>
+            <p className="max-w-[62ch] text-[14px] leading-relaxed text-ink text-pretty">{n.message}</p>
             {n.facts.length > 0 && (
-              <p className="mt-0.5 text-[12px] text-ink-3">{n.facts.join(" · ")}</p>
+              <p className="mt-1 text-[12px] tabular-nums text-ink-3">{n.facts.join(" · ")}</p>
             )}
             <ChipRow chips={n.chips} onAct={(c) => onAct(n, c)} disabled={disabled} className="mt-2" />
           </li>
