@@ -163,7 +163,7 @@ export function ProposalGroup({
               key={c.question}
               type="button"
               onClick={() => onAnswer?.(c.question)}
-              className="rounded-full border border-border bg-surface px-2.5 py-1 text-left text-[12px] text-ink-2 transition-colors hover:border-accent/40 hover:text-ink"
+              className="rounded-full border border-border bg-surface px-2.5 py-1 text-left text-[12px] text-ink-2 pointer-coarse:px-3 pointer-coarse:py-2 pointer-coarse:text-[13px] transition-colors hover:border-accent/40 hover:text-ink"
             >
               {c.question}
             </button>

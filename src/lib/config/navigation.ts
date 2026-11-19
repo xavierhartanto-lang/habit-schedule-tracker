@@ -16,7 +16,10 @@ export type NavItem = {
   label: string;
   shortLabel?: string;
   icon: LucideIcon;
-  /** Shown in the mobile bottom bar. Settings lives in the top bar instead. */
+  /**
+   * A tab in the mobile bottom bar. The assistant is the bar's center action;
+   * everything else lives in the top bar's "More" sheet.
+   */
   mobile: boolean;
 };
 
@@ -25,7 +28,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/calendar", label: "Calendar", icon: CalendarDays, mobile: true },
   { href: "/tasks", label: "Tasks", icon: CircleCheck, mobile: true },
   { href: "/habits", label: "Habits & Goals", shortLabel: "Habits", icon: Target, mobile: true },
-  { href: "/assistant", label: "AI Assistant", shortLabel: "Assistant", icon: Sparkles, mobile: true },
+  { href: "/assistant", label: "AI Assistant", shortLabel: "Assistant", icon: Sparkles, mobile: false },
   { href: "/insights", label: "Insights", icon: LineChart, mobile: false },
   { href: "/areas", label: "Life areas", icon: Shapes, mobile: false },
   { href: "/about-you", label: "What Whitespace knows", shortLabel: "About you", icon: UserRound, mobile: false },

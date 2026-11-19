@@ -75,7 +75,7 @@ export function ConversationHistory({
         <Link
           href="/assistant"
           aria-label="New conversation"
-          className="grid size-7 place-items-center rounded-lg text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink"
+          className="grid size-7 place-items-center rounded-lg pointer-coarse:size-10 text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink"
         >
           <Plus className="size-4" />
         </Link>
@@ -139,7 +139,7 @@ export function ConversationHistory({
                     type="button"
                     onClick={() => setConfirming(c.id)}
                     aria-label={`Delete ${titleFor(c)}`}
-                    className="absolute right-2 top-2 grid size-6 place-items-center rounded-md text-ink-3 opacity-0 transition-opacity hover:bg-surface hover:text-danger focus-visible:opacity-100 group-hover:opacity-100"
+                    className="absolute right-2 top-2 grid size-6 place-items-center rounded-md text-ink-3 opacity-0 pointer-coarse:right-1 pointer-coarse:top-1 pointer-coarse:size-10 pointer-coarse:opacity-100 transition-opacity hover:bg-surface hover:text-danger focus-visible:opacity-100 group-hover:opacity-100"
                   >
                     <Trash2 className="size-3.5" />
                   </button>

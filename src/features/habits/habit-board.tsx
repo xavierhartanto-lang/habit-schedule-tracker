@@ -176,7 +176,7 @@ function HabitRow({
     <li className="px-2 py-3.5">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto_96px] sm:items-center sm:gap-6">
         <div className="min-w-0">
-          <button type="button" onClick={onEdit} className="block max-w-full truncate text-left text-sm font-medium text-ink hover:underline">
+          <button type="button" onClick={onEdit} className="block max-w-full truncate text-left text-sm font-medium text-ink hover:underline pointer-coarse:-my-2 pointer-coarse:py-2">
             {h.title}
           </button>
           <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5">
@@ -186,7 +186,7 @@ function HabitRow({
               type="button"
               onClick={() => setShowHistory((s) => !s)}
               aria-expanded={showHistory}
-              className="inline-flex items-center gap-0.5 text-[12px] text-ink-3 hover:text-ink"
+              className="hit-area inline-flex items-center gap-0.5 text-[12px] text-ink-3 hover:text-ink"
             >
               History <ChevronDown className={cn("size-3 transition-transform", showHistory && "rotate-180")} />
             </button>
@@ -206,7 +206,7 @@ function HabitRow({
                 aria-pressed={isDone}
                 aria-label={`${formatDateKey(k, { weekday: "long", month: "short", day: "numeric" })}: ${isDone ? "done" : "not done"}${planned ? "" : " (not planned)"}`}
                 className={cn(
-                  "grid size-7 place-items-center rounded-md border transition-colors disabled:cursor-default",
+                  "grid size-7 place-items-center rounded-md border transition-[background-color,border-color,transform] duration-150 active:scale-90 disabled:cursor-default pointer-coarse:size-9 pointer-coarse:rounded-lg",
                   !isDone && !future && "hover:border-ink-3",
                   !planned && !isDone && "border-dashed opacity-60",
                   future && "opacity-40",

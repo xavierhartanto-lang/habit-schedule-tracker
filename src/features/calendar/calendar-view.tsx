@@ -9,11 +9,12 @@ import {
   addMonthsToKey,
   formatDateKey,
   startOfDayInZone,
+  weekKeys,
 } from "@/lib/scheduling/zoned";
 import { cn } from "@/lib/utils/cn";
 import { ChevronLeft, ChevronRight, Lock, MoveVertical, Plus, TriangleAlert } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { EventDetails } from "./event-details";
 import { EventEditor, formFromEvent, newEventForm, type EditorTarget } from "./event-editor";
 import { MonthGrid } from "./month-grid";
@@ -30,6 +31,8 @@ const VIEW_OPTIONS = [
 
 export function CalendarView({
   view,
+  viewChosen = true,
+  weekStartsOn = 1,
   date,
   dayKeys,
   events,
@@ -40,6 +43,9 @@ export function CalendarView({
   disabled,
 }: {
   view: CalendarViewMode;
+  /** False when the URL didn't ask for a view, so phones can switch to Day. */
+  viewChosen?: boolean;
+  weekStartsOn?: 0 | 1;
   date: string;
   dayKeys: string[];
   events: Commitment[];
@@ -73,7 +79,13 @@ export function CalendarView({
   };
 
   const title = (() => {
-    if (view === "day") return formatDateKey(date, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+    if (view === "day")
+      return (
+        <>
+          <span className="sm:hidden">{formatDateKey(date, { weekday: "short", month: "short", day: "numeric" })}</span>
+          <span className="hidden sm:inline">{formatDateKey(date, { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</span>
+        </>
+      );
     if (view === "month") return formatDateKey(date, { month: "long", year: "numeric" });
     const a = dayKeys[0];
     const b = dayKeys[6];
@@ -92,11 +104,19 @@ export function CalendarView({
     view === "month" ? todayKey.slice(0, 7) === date.slice(0, 7) : dayKeys.includes(todayKey);
   const defaultNewDate = todayVisible ? todayKey : view === "week" ? dayKeys[0] : date;
 
+  // Seven columns don't fit a phone. Without an explicit ?view, open on Day there.
+  useEffect(() => {
+    if (viewChosen || view !== "week") return;
+    if (window.matchMedia("(max-width: 639px)").matches) {
+      router.replace(`${pathname}?view=day&date=${date}`, { scroll: false });
+    }
+  }, [viewChosen, view, date, pathname, router]);
+
   const browserTz =typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : timeZone;
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
         <div className="flex min-w-0 items-center gap-2">
           <Button variant="secondary" size="sm" onClick={() => go(view, todayKey)}>
             Today
@@ -109,11 +129,11 @@ export function CalendarView({
               <ChevronRight className="size-4" />
             </NavButton>
           </div>
-          <h2 className="ml-1 truncate text-[15px] font-semibold tracking-tight text-ink" aria-live="polite">
+          <h2 className="ml-1 min-w-0 truncate text-[15px] font-semibold tracking-tight text-ink" aria-live="polite">
             {title}
           </h2>
         </div>
-        <div className="flex flex-wrap items-center justify-between gap-3 md:justify-end">
+        <div className="flex flex-wrap items-center justify-between gap-3 xl:justify-end">
           <Legend />
           <div className="flex items-center gap-2">
             <Segmented label="Calendar view" value={view} options={VIEW_OPTIONS} onChange={(v) => go(v, date)} />
@@ -123,6 +143,15 @@ export function CalendarView({
           </div>
         </div>
       </div>
+
+      {view === "day" && (
+        <WeekStrip
+          days={weekKeys(date, weekStartsOn)}
+          selected={date}
+          todayKey={todayKey}
+          onPick={(k) => go("day", k)}
+        />
+      )}
 
       <div className={cn("transition-opacity", navigating && "opacity-60")} aria-busy={navigating}>
         {view === "month" ? (
@@ -221,13 +250,56 @@ export function CalendarView({
   );
 }
 
+/** Day view on phones: the week as tappable days, so moving around is one tap. */
+function WeekStrip({
+  days,
+  selected,
+  todayKey,
+  onPick,
+}: {
+  days: string[];
+  selected: string;
+  todayKey: string;
+  onPick: (k: string) => void;
+}) {
+  return (
+    <div role="group" aria-label="Pick a day" className="grid grid-cols-7 gap-1 md:hidden">
+      {days.map((k) => {
+        const active = k === selected;
+        const today = k === todayKey;
+        return (
+          <button
+            key={k}
+            type="button"
+            onClick={() => onPick(k)}
+            aria-pressed={active}
+            aria-label={formatDateKey(k, { weekday: "long", month: "long", day: "numeric" })}
+            className={cn(
+              "flex h-14 flex-col items-center justify-center gap-1 rounded-xl transition-[background-color,color,transform] duration-150 active:scale-95",
+              active ? "bg-accent text-on-accent shadow-card" : "text-ink-2 active:bg-surface-2",
+            )}
+          >
+            <span className={cn("text-[11px] font-medium uppercase tracking-wide", active ? "text-on-accent/80" : "text-ink-3")}>
+              {formatDateKey(k, { weekday: "narrow" })}
+            </span>
+            <span className="relative text-[16px] font-semibold tabular-nums leading-none">
+              {Number(k.slice(8))}
+              {today && !active && <span aria-hidden className="absolute -bottom-2 left-1/2 size-1 -translate-x-1/2 rounded-full bg-accent" />}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function NavButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
   return (
     <button
       type="button"
       onClick={onClick}
       aria-label={label}
-      className="grid size-8 place-items-center rounded-lg text-ink-2 hover:bg-surface-2 hover:text-ink"
+      className="grid size-8 place-items-center rounded-lg text-ink-2 hover:bg-surface-2 hover:text-ink active:bg-surface-2 pointer-coarse:size-10"
     >
       {children}
     </button>

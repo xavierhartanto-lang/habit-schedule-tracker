@@ -79,7 +79,7 @@ export function MonthGrid({
                 }}
                 aria-label={`Open ${formatDateKey(k, { weekday: "long", month: "long", day: "numeric" })}`}
                 className={cn(
-                  "mb-0.5 grid size-6 place-items-center rounded-full text-[12px] font-medium hover:bg-surface-2",
+                  "hit-area mb-0.5 grid size-6 place-items-center rounded-full text-[12px] font-medium hover:bg-surface-2",
                   today ? "bg-accent text-on-accent hover:bg-accent" : inMonth ? "text-ink" : "text-ink-3",
                 )}
               >

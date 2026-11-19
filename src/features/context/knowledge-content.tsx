@@ -120,7 +120,7 @@ export async function KnowledgeContent() {
               {prefs.aiMemoryEnabled
                 ? "The assistant only uses what is on this page. Edit or delete anything."
                 : "Memory is off, so the assistant ignores facts learned in chats."}{" "}
-              <Link href="/settings#ai" className="font-medium text-accent-ink hover:underline">
+              <Link href="/settings#ai" className="hit-area font-medium text-accent-ink hover:underline">
                 AI settings
               </Link>
             </p>
@@ -132,7 +132,7 @@ export async function KnowledgeContent() {
             <a
               key={c.anchor}
               href={`#${c.anchor}`}
-              className="inline-flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-[12px] text-ink-2 transition-colors hover:border-border-strong hover:bg-surface-2 hover:text-ink"
+              className="inline-flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-[12px] text-ink-2 pointer-coarse:px-3 pointer-coarse:py-2.5 pointer-coarse:text-[13px] active:bg-surface-2 transition-colors hover:border-border-strong hover:bg-surface-2 hover:text-ink"
             >
               {c.label}
               <span className={c.n ? "text-ink-3" : "text-ink-3/60"}>{c.n}</span>

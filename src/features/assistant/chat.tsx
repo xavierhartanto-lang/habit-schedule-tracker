@@ -20,7 +20,7 @@ import type { Nudge, ProactiveChip } from "@/features/home/proactive";
 const HOME_RESUME_SHOWN = 6;
 
 const CHIP_BUTTON =
-  "rounded-full border border-border bg-surface px-3 py-1.5 text-[12.5px] text-ink-2 transition-[background-color,border-color,color,transform] duration-150 hover:border-accent/40 hover:bg-accent-soft hover:text-accent-ink active:scale-[0.97] disabled:pointer-events-none disabled:opacity-50";
+  "rounded-full border border-border bg-surface px-3 py-1.5 text-[12.5px] text-ink-2 pointer-coarse:px-3.5 pointer-coarse:py-2.5 pointer-coarse:text-[13.5px] transition-[background-color,border-color,color,transform] duration-150 hover:border-accent/40 hover:bg-accent-soft hover:text-accent-ink active:scale-[0.97] disabled:pointer-events-none disabled:opacity-50";
 
 const EYEBROW = "flex items-center gap-1.5 text-[12px] font-medium tracking-[0.01em] text-ink-3";
 
@@ -555,7 +555,7 @@ export function Chat({
       <div
         className={cn(
           embedded
-            ? "sticky bottom-[calc(4rem+env(safe-area-inset-bottom))] z-10 -mx-1 bg-bg px-1 pb-3 pt-2 lg:bottom-0 lg:pb-6"
+            ? "sticky bottom-[var(--tabbar-h)] z-10 -mx-1 bg-bg px-1 pb-3 pt-2 before:pointer-events-none before:absolute before:inset-x-0 before:-top-6 before:h-6 before:bg-gradient-to-t before:from-bg before:to-transparent lg:bottom-0 lg:pb-6"
             : "border-t border-border bg-surface/80 backdrop-blur",
         )}
       >
@@ -565,7 +565,7 @@ export function Chat({
           ) : (
             <>
               {empty && !showOpening && starters.length > 0 && (
-                <div className="mb-3 flex gap-1.5 overflow-x-auto pb-1">
+                <div className="scroll-row -mx-4 mb-3 flex gap-1.5 overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0">
                   {starters.map((s) => (
                     <button key={s.label} type="button" onClick={() => startWith(s)} className={cn(CHIP_BUTTON, "shrink-0")}>
                       {s.label}
@@ -574,7 +574,7 @@ export function Chat({
                 </div>
               )}
               {empty && !showOpening && suggestions.length > 0 && (
-                <div className="mb-3 flex gap-1.5 overflow-x-auto pb-1">
+                <div className="scroll-row -mx-4 mb-3 flex gap-1.5 overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0">
                   {suggestions.map((p) => (
                     <button
                       key={p}
@@ -622,8 +622,8 @@ export function Chat({
                   rows={1}
                   placeholder={answering ?? placeholder}
                   className={cn(
-                    "max-h-40 flex-1 resize-none bg-transparent px-2.5 py-2 text-ink placeholder:text-ink-3 composer-input",
-                    embedded ? "min-h-10 text-[15px]" : "min-h-9 text-sm",
+                    "max-h-40 flex-1 resize-none bg-transparent px-2.5 py-2 text-ink placeholder:text-ink-3 composer-input placeholder-shown:overflow-hidden placeholder-shown:text-ellipsis placeholder-shown:whitespace-nowrap",
+                    embedded ? "min-h-10 text-[15px]" : "min-h-9 text-sm", "pointer-coarse:text-base",
                   )}
                 />
                 {busy ? (
@@ -640,7 +640,7 @@ export function Chat({
                     type="submit"
                     disabled={!draft.trim() || tooLong}
                     aria-label="Send"
-                    className="grid size-9 shrink-0 place-items-center rounded-xl bg-accent text-on-accent transition-[background-color,transform] duration-150 hover:bg-accent-hover active:scale-95 disabled:bg-surface-2 disabled:text-ink-3"
+                    className="grid size-9 shrink-0 place-items-center rounded-xl pointer-coarse:size-10 bg-accent text-on-accent transition-[background-color,transform] duration-150 hover:bg-accent-hover active:scale-95 disabled:bg-surface-2 disabled:text-ink-3"
                   >
                     <ArrowUp className="size-4" strokeWidth={2.25} />
                   </button>
