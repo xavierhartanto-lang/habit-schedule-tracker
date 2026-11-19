@@ -17,6 +17,7 @@ import {
   periodPhrase,
   plural,
   quote,
+  roughly,
   shortDate,
   weekdayLong,
 } from "./text";
@@ -104,7 +105,7 @@ function newDueDate(t: TaskLoad): RecommendationAction {
 function factsFor(t: TaskLoad, extra: (string | null)[] = []): string[] {
   const out: (string | null)[] = [
     t.dueDate ? `Due ${shortDate(t.dueDate)}` : null,
-    t.remaining !== null ? `About ${duration(t.remaining)} of work left` : null,
+    t.remaining !== null ? `About ${duration(roughly(t.remaining))} of work left` : null,
     t.futureBlockMinutes > 0 ? `${duration(t.futureBlockMinutes)} already scheduled` : null,
     t.task.priority !== "medium" ? PRIORITY_WORD[t.task.priority] : null,
     ...extra,
@@ -165,7 +166,7 @@ function atRisk(t: TaskLoad, a: Analysis): Candidate | null {
       free >= 15
         ? `${quote(t.task.title)} is ${when} and needs ${about(t.unscheduled)} more, but you only have ${about(free)} free before then. Want me to schedule what fits so you can start now?`
         : `${quote(t.task.title)} is ${when} and needs ${about(t.unscheduled)} more, but your schedule has no free time left before then. Want to move the due date or make room?`,
-    facts: factsFor(t, [`${duration(free)} free before then`]),
+    facts: factsFor(t, [`About ${duration(roughly(free))} free before then`]),
     actions: [
       ...(free >= 15 ? [scheduleWork(t, t.unscheduled, "Schedule what fits")] : []),
       newDueDate(t),
@@ -235,7 +236,7 @@ function deadlineSoon(t: TaskLoad, a: Analysis): Candidate | null {
     title: `${t.task.title} is ${when}`,
     reason,
     message: `${quote(t.task.title)} is ${when}.${lead} Want me to block out time for it?`,
-    facts: factsFor(t, [free > 0 ? `${duration(free)} free before then` : null]),
+    facts: factsFor(t, [free > 0 ? `About ${duration(roughly(free))} free before then` : null]),
     actions: [
       t.unscheduled
         ? scheduleWork(t, t.unscheduled, `Block out ${duration(clampMinutes(t.unscheduled))}`)
@@ -288,7 +289,7 @@ function startEarly(t: TaskLoad, a: Analysis): Candidate | null {
     title: `Start ${t.task.title} early`,
     reason: `It's ${about(t.unscheduled)} of work, ${when}, and more than one session long.`,
     message: `${quote(t.task.title)} is ${when} and will take ${about(t.unscheduled)}. I'd split it into ${sessions} sessions rather than leaving it all for ${lastMinute}. Want me to schedule them?`,
-    facts: factsFor(t, [`${duration(capacityBefore(a, t.dueMs))} free before then`]),
+    facts: factsFor(t, [`About ${duration(roughly(capacityBefore(a, t.dueMs)))} free before then`]),
     actions: [split(t, t.unscheduled, a)],
     taskId: t.task.id,
     commitmentIds: [],
@@ -424,12 +425,12 @@ function overloadedDays(a: Analysis): Candidate[] {
       priority: daysBetweenKeys(a.todayKey, day.date) <= 1 ? "high" : "medium",
       title: `${name} looks overloaded`,
       reason: tooMuch
-        ? `About ${duration(load)} of work is planned or due, but only ${about(holds)} realistically fits.`
+        ? `About ${duration(roughly(load))} of work is planned or due, but only ${about(holds)} realistically fits.`
         : `${plural(day.due.length, "deadline")} and ${plural(day.commitments.length, "commitment")} fall on the same day.`,
       message: `${name} is looking pretty busy: ${list}. ${offer}`,
       facts: [
         ...parts,
-        tooMuch ? `${duration(load)} of work vs ${duration(holds)} that fits` : null,
+        tooMuch ? `About ${duration(roughly(load))} of work, ${duration(roughly(holds))} fits` : null,
       ].filter((f): f is string => !!f),
       actions: [action],
       taskId: null,
@@ -460,12 +461,12 @@ function overloadedWeek(a: Analysis): Candidate | null {
     kind: "overload_week",
     priority: worst.short >= 120 ? "high" : "medium",
     title: "More work than time this week",
-    reason: `About ${duration(worst.need)} of unscheduled work is due by ${shortDate(worst.date)}, but only ${about(worst.free)} of free time fits before then.`,
+    reason: `About ${duration(roughly(worst.need))} of unscheduled work is due by ${shortDate(worst.date)}, but only ${about(worst.free)} of free time fits before then.`,
     message: `You have ${plural(due.length, "deadline")} in the next week and ${about(worst.short)} more work than free time. Want me to schedule what fits and show what doesn't?`,
     facts: [
       `${plural(due.length, "deadline")} by ${shortDate(due[due.length - 1].dueDate!)}`,
-      `${duration(worst.need)} of work to schedule`,
-      `${duration(worst.free)} free`,
+      `About ${duration(roughly(worst.need))} of work to schedule`,
+      `About ${duration(roughly(worst.free))} free`,
     ],
     actions: [
       { id: "plan_week", kind: "plan_week", label: "Plan my week", params: {} },

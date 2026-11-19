@@ -11,10 +11,15 @@ export function duration(minutes: number): string {
   return rest ? `${h} h ${rest} min` : `${h} h`;
 }
 
-/** "about 2 h", rounded to 15 minutes so it doesn't sound falsely precise. */
+/** Rounded so it doesn't sound falsely precise: 5 min steps under an hour, 15 under three hours, then 30. */
+export function roughly(minutes: number): number {
+  const step = minutes < 60 ? 5 : minutes < 180 ? 15 : 30;
+  return Math.max(step === 5 ? 5 : 0, Math.round(minutes / step) * step);
+}
+
+/** "about 2 h". */
 export function about(minutes: number): string {
-  const rounded = minutes >= 30 ? Math.round(minutes / 15) * 15 : Math.max(5, Math.round(minutes / 5) * 5);
-  return `about ${duration(rounded)}`;
+  return `about ${duration(roughly(minutes))}`;
 }
 
 export function weekdayLong(key: string): string {
