@@ -230,7 +230,7 @@ export async function listPlansForConversation(userId: string, conversationId: s
 export async function listPendingBlocks(
   userId: string,
   options: { excludePlanId?: string; now?: Date } = {},
-): Promise<{ start: string; end: string; title: string }[]> {
+): Promise<{ start: string; end: string; title: string; taskId: string | null }[]> {
   const supabase = await requireDb();
   const now = options.now ?? new Date();
   const { data: plans, error } = await supabase
@@ -245,7 +245,7 @@ export async function listPendingBlocks(
   if (!ids.length) return [];
   const { data: items, error: itemsError } = await supabase
     .from("plan_items")
-    .select("title, display, action, status")
+    .select("title, display, payload, action, status")
     .eq("user_id", userId)
     .in("proposal_id", ids)
     .in("action", ["schedule_block", "move_block"])
@@ -254,7 +254,8 @@ export async function listPendingBlocks(
   if (itemsError) throw dbError(itemsError);
   return items.flatMap((i) => {
     const t = toDisplay(i.display).timing;
-    return t ? [{ start: t.start, end: t.end, title: i.title }] : [];
+    const taskId = obj(i.payload).taskId;
+    return t ? [{ start: t.start, end: t.end, title: i.title, taskId: typeof taskId === "string" ? taskId : null }] : [];
   });
 }
 

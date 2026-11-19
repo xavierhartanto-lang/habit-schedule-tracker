@@ -103,6 +103,41 @@ describe("conversation-based planning", () => {
   });
 });
 
+describe("planning a task twice", () => {
+  const due = zonedToUtc("2026-11-20", "08:00", TZ).toISOString();
+  function essaySetup() {
+    const essay = task({ title: "History essay", estimatedMinutes: 120, dueAt: due, priority: "high" });
+    const w = world();
+    w.refs.tasks.set("t1", essay);
+    const spec = specOf(intent({ type: "plan_time", evidence: "my essay", target_ref: "t1" }), w);
+    return { essay, w, spec };
+  }
+  const minutesOf = (plan: ReturnType<typeof buildPlan>) =>
+    plan.items.filter((b) => b.action === "schedule_block").reduce((s, b) => s + b.display.timing!.durationMinutes, 0);
+
+  it("only books what's left when part of the task is already on the calendar", () => {
+    const { essay, w, spec } = essaySetup();
+    const booked = { ...event({ title: "History essay (1 of 2)", date: "2026-11-18", start: "19:00", end: "20:00", kind: "flexible" }), planItemId: uuid(), taskId: essay.id };
+    const plan = buildPlan(input({ world: w, openTasks: [essay], events: [...weekCalendar(), booked], specs: [spec] }));
+    expect(minutesOf(plan)).toBe(60);
+  });
+
+  it("only books what's left when part of the task is waiting for approval", () => {
+    const { essay, w, spec } = essaySetup();
+    const pending = { start: zonedToUtc("2026-11-18", "19:00", TZ).toISOString(), end: zonedToUtc("2026-11-18", "20:00", TZ).toISOString(), title: "History essay", taskId: essay.id };
+    const plan = buildPlan(input({ world: w, openTasks: [essay], busy: [pending], specs: [spec] }));
+    expect(minutesOf(plan)).toBe(60);
+  });
+
+  it("books nothing new once the whole estimate is covered", () => {
+    const { essay, w, spec } = essaySetup();
+    const booked = { ...event({ title: "History essay", date: "2026-11-18", start: "18:00", end: "20:00", kind: "flexible" }), planItemId: uuid(), taskId: essay.id };
+    const plan = buildPlan(input({ world: w, openTasks: [essay], events: [...weekCalendar(), booked], specs: [spec] }));
+    expect(minutesOf(plan)).toBe(0);
+    expect(plan.notes.join(" ")).toContain("History essay");
+  });
+});
+
 describe("events from conversation", () => {
   it("shows conflicts with existing commitments but never blocks the user's own event", () => {
     const i = intent({ type: "create_event", title: "Basketball", evidence: "extra basketball practice tomorrow", date: date({ day_offset: 1 }), start_time: "18:30", duration_minutes: 90, recurrence: "once" });
