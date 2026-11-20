@@ -14,6 +14,7 @@ import type { PlanActionResult } from "./plan-types";
 import { approvePlanItems, editPlanItem, rejectPlanItems, requestAlternatives, undoPlanItem } from "./plan-actions";
 import { CHAT_MESSAGE_MAX, type ChatMessage, type ChatProactive, type ClientAiError, type Proposal } from "./types";
 import { ChipRow, NudgeList } from "./proactive-nudges";
+import { HOME_ACT_EVENT, type HomeActDetail } from "@/features/home/adaptive/home-bridge";
 import { dismissRecommendation, markRecommendationsShown } from "@/features/proactive/actions";
 import type { Nudge, ProactiveChip } from "@/features/home/proactive";
 
@@ -339,6 +340,22 @@ export function Chat({
         return;
     }
   };
+  // Home's adaptive rail sends its suggestion buttons here, so the approval card lands in the conversation.
+  const actRef = useRef(act);
+  useEffect(() => {
+    actRef.current = act;
+  });
+  useEffect(() => {
+    if (!embedded) return;
+    const onAct = (e: Event) => {
+      const { chip, nudge } = (e as CustomEvent<HomeActDetail>).detail;
+      stickToBottom.current = true;
+      actRef.current(chip, nudge);
+      if (chip.act.kind !== "dismiss") endRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    };
+    window.addEventListener(HOME_ACT_EVENT, onAct);
+    return () => window.removeEventListener(HOME_ACT_EVENT, onAct);
+  }, [embedded]);
   const visibleNudges = nudges.filter((n) => !handled.has(n.id));
   const openingRecHandled = openingChips.some((c) => c.act.kind === "dismiss" && handled.has(c.act.id));
 
