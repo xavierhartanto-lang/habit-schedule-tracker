@@ -1,4 +1,5 @@
 import { Brand } from "@/components/shell/brand";
+import { TimeZoneSync } from "@/components/shell/timezone-sync";
 import { Chat } from "@/features/assistant/chat";
 import { CONTEXT_REVIEW_HREF } from "@/features/assistant/context-panel";
 import { ChatPageState, ChatSkeleton } from "@/features/assistant/page-states";
@@ -22,6 +23,7 @@ export const metadata: Metadata = { title: "Set up Whitespace" };
 export default function OnboardingPage() {
   return (
     <div className="flex h-dvh flex-col bg-bg pb-[env(safe-area-inset-bottom)]">
+      <TimeZoneSync />
       <header className="box-content flex h-14 shrink-0 items-center pt-[env(safe-area-inset-top)] justify-between border-b border-border bg-surface/80 px-4 backdrop-blur sm:px-6">
         <Brand />
         <p className="hidden text-[13px] text-ink-3 sm:block">Setup · a quick conversation</p>
