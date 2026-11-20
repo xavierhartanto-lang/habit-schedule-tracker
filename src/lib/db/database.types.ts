@@ -240,6 +240,18 @@ export type RecommendationRow = Timestamps & {
   resolved_at: string | null;
 };
 
+export type WeeklyBriefingRow = Timestamps & {
+  id: string;
+  user_id: string;
+  week_start: string;
+  facts_hash: string;
+  facts: Json;
+  summary: string | null;
+  generated_at: string;
+  shown_at: string | null;
+  dismissed_at: string | null;
+};
+
 export type PlanKindEnum = "actions" | "schedule" | "reschedule";
 export type PlanStatusEnum = "pending" | "partially_applied" | "applied" | "rejected" | "stale";
 export type PlanItemStatusEnum = "pending" | "applied" | "rejected" | "conflict" | "failed" | "undone";
@@ -306,6 +318,7 @@ export type Database = {
       plan_approvals: Table<PlanApprovalRow, "user_id" | "request_id" | "proposal_id">;
       recommendations: Table<RecommendationRow, "user_id" | "dedupe_key" | "kind" | "priority" | "title" | "reason" | "message">;
       school_schedules: Table<SchoolScheduleRow, "user_id" | "status">;
+      weekly_briefings: Table<WeeklyBriefingRow, "user_id" | "week_start" | "facts_hash">;
     };
     Views: Record<string, never>;
     Functions: {

@@ -746,8 +746,67 @@ export function examPreps(a: Analysis): Candidate[] {
 }
 
 // ---------------------------------------------------------------------------
+// Phase 7.6: a life area that dropped off
+// ---------------------------------------------------------------------------
 
-export function detectFromAnalysis(a: Analysis): Candidate[] {
+/** Per-area time the neglected-area detector reads (lib/insights/area-time). */
+export type AreaHistory = {
+  /** Areas with time in the earlier weeks: total minutes and the last local day with any. */
+  earlier: { areaId: string; name: string; minutes: number; lastDate: string }[];
+  /** Area ids with any time in the recent window, past or planned. */
+  active: ReadonlySet<string>;
+};
+
+/** The area was a real part of the week: at least this much time in the earlier weeks. */
+export const NEGLECT_MIN_EARLIER = 120;
+/** No time at all in this many days, and none planned in the next week. */
+export const NEGLECT_QUIET_DAYS = 14;
+const NEGLECT_WINDOW_MINUTES = 60;
+
+/**
+ * A life area that used to have regular time and has had none for two
+ * weeks, with nothing planned and a real free window this week. Low
+ * priority (only the "proactive" level raises it on its own). It never
+ * assumes areas need equal time: an area the user never gave time to is
+ * never raised. One at a time. Keyed on the last day the area had time,
+ * so "That's fine" holds until the area is used and dropped again.
+ */
+export function neglectedAreas(a: Analysis, h: AreaHistory): Candidate[] {
+  const area = h.earlier
+    .filter((e) => e.minutes >= NEGLECT_MIN_EARLIER && !h.active.has(e.areaId))
+    .sort((x, y) => y.minutes - x.minutes)[0];
+  if (!area) return [];
+  const window = a.days
+    .slice(1, 8)
+    .map((d) => ({ d, cap: dayCapacity(a, d) }))
+    .filter((x) => x.cap >= NEGLECT_WINDOW_MINUTES)
+    .sort((x, y) => y.cap - x.cap || x.d.date.localeCompare(y.d.date))[0];
+  if (!window) return [];
+  const day = dayPhrase(window.d.date, a.todayKey);
+  const weeks = Math.round(NEGLECT_QUIET_DAYS / 7);
+  return [
+    {
+      dedupeKey: `neglected_area:${area.areaId}:${area.lastDate}`,
+      kind: "neglected_area",
+      priority: "low",
+      title: `No time for ${area.name} lately`,
+      reason: `${area.name} had ${about(area.minutes)} in the weeks before, and nothing in the last ${weeks} weeks or planned this week.`,
+      message: `${area.name} hasn't had any time in ${weeks} weeks, and nothing's planned. If you want it back, ${day} has room. Want me to find an hour?`,
+      facts: [`Last time: ${shortDate(area.lastDate)}`, `About ${duration(roughly(window.cap))} free ${day}`],
+      actions: [
+        ask("find_time", "Find an hour", `Find me an hour for ${area.name} this week.`),
+        { id: "acknowledge", kind: "acknowledge", label: "That's fine for now", params: {} },
+      ],
+      taskId: null,
+      commitmentIds: [],
+      date: window.d.date,
+    },
+  ];
+}
+
+// ---------------------------------------------------------------------------
+
+export function detectFromAnalysis(a: Analysis, extra: { history?: AreaHistory | null } = {}): Candidate[] {
   const out: Candidate[] = [];
   for (const t of a.tasks) {
     for (const detect of TASK_DETECTORS) {
@@ -762,6 +821,7 @@ export function detectFromAnalysis(a: Analysis): Candidate[] {
   const week = overloadedWeek(a);
   if (week) out.push(week);
   out.push(...commitmentConflicts(a), ...deadlineClusters(a), ...examPreps(a));
+  if (extra.history) out.push(...neglectedAreas(a, extra.history));
   // Unique keys, even if two detectors ever agree.
   const seen = new Set<string>();
   return out.filter((c) => (seen.has(c.dedupeKey) ? false : (seen.add(c.dedupeKey), true)));
