@@ -73,6 +73,8 @@ export type Commitment = {
   taskId?: string | null;
   /** Set when the assistant created this row from an approved plan. */
   planItemId?: string | null;
+  /** When the row was created (ISO). */
+  createdAt?: string;
   /** Work sessions: what actually happened. Null = not recorded (assumed done once past). */
   outcome?: SessionOutcome | null;
 };
