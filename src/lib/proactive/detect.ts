@@ -7,6 +7,7 @@ import { checkPlacements } from "@/lib/scheduling/planner";
 import { addDaysToKey, dateKeyInZone, daysBetweenKeys, startOfDayInZone, startOfWeekKey } from "@/lib/scheduling/zoned";
 import type { Occurrence } from "@/lib/scheduling/recurrence";
 import { pickKeeper } from "./conflict-pick";
+import { EXAM_LOOKAHEAD_DAYS, examPrepPlan, hasPrep, isExam } from "./exam";
 import type { Commitment } from "@/lib/domain/types";
 import { analyze, capacityBefore, dayCapacity, HORIZON_DAYS, type Analysis, type DayLoad, type ProactiveInput, type TaskLoad } from "./analyze";
 import {
@@ -663,6 +664,57 @@ export function deadlineClusters(a: Analysis): Candidate[] {
 }
 
 // ---------------------------------------------------------------------------
+// Exam prep (7.3)
+// ---------------------------------------------------------------------------
+
+/**
+ * An exam, test or quiz in the next days with nothing planned to study for
+ * it: propose study sessions before it, sized by how close it is and the
+ * realistic free time before it.
+ */
+export function examPreps(a: Analysis): Candidate[] {
+  const prepTitles = [...a.tasks.map((t) => t.task.title), ...a.futureBlocks.map((b) => b.title)];
+  const out: Candidate[] = [];
+  for (const day of a.days.slice(0, EXAM_LOOKAHEAD_DAYS + 1)) {
+    for (const o of day.commitments) {
+      const e = o.event;
+      if (e.kind !== "fixed" || o.recurring || !isExam(e.title) || hasPrep(e.title, prepTitles)) continue;
+      const startMs = o.start.getTime();
+      const plan = examPrepPlan(
+        { title: e.title, startMs },
+        { nowMs: a.nowMs, minSessionMinutes: a.preferences.minSessionMinutes, maxSessionMinutes: a.preferences.maxSessionMinutes, capacity: capacityBefore(a, startMs) },
+      );
+      if (!plan) continue;
+      const when = `${dayPhrase(day.date, a.todayKey)} at ${clockAt(o.start.toISOString(), a.timeZone)}`;
+      const sessions = plan.sessions === 1 ? `a ${duration(plan.minutesEach)} study session` : `${plan.sessions} study sessions of ${duration(plan.minutesEach)}`;
+      const days = daysBetweenKeys(a.todayKey, day.date);
+      out.push({
+        dedupeKey: `exam_prep:${e.id}:${day.date}`,
+        kind: "exam_prep",
+        priority: days <= 2 ? "high" : "medium",
+        title: `${e.title} ${dayPhrase(day.date, a.todayKey)}`,
+        reason: "Nothing is planned to study for it yet.",
+        message: `${quote(e.title)} is ${when}, and nothing's planned to study for it. I'd book ${sessions} before then. Want me to?`,
+        facts: [`${e.title}: ${shortDate(day.date)}, ${clockAt(o.start.toISOString(), a.timeZone)}`, `About ${duration(roughly(capacityBefore(a, startMs)))} free before then`],
+        actions: [
+          {
+            id: "prep_exam",
+            kind: "prep_exam",
+            label: plan.sessions === 1 ? "Book a study session" : `Book ${plan.sessions} study sessions`,
+            params: { eventId: e.id, sessions: plan.sessions, minutesEach: plan.minutesEach },
+          },
+          { id: "acknowledge", kind: "acknowledge", label: "I'm prepared", params: {} },
+        ],
+        taskId: null,
+        commitmentIds: [e.id],
+        date: day.date,
+      });
+    }
+  }
+  return out.slice(0, 3);
+}
+
+// ---------------------------------------------------------------------------
 
 export function detectFromAnalysis(a: Analysis): Candidate[] {
   const out: Candidate[] = [];
@@ -678,7 +730,7 @@ export function detectFromAnalysis(a: Analysis): Candidate[] {
   out.push(...brokenPlans(a), ...overloadedDays(a));
   const week = overloadedWeek(a);
   if (week) out.push(week);
-  out.push(...commitmentConflicts(a), ...deadlineClusters(a));
+  out.push(...commitmentConflicts(a), ...deadlineClusters(a), ...examPreps(a));
   // Unique keys, even if two detectors ever agree.
   const seen = new Set<string>();
   return out.filter((c) => (seen.has(c.dedupeKey) ? false : (seen.add(c.dedupeKey), true)));

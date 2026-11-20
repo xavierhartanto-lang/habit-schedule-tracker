@@ -1,8 +1,8 @@
 import type { BriefEvent, BriefFocus, DailyBrief, RecommendationAction } from "@/features/proactive/types";
 import { expandEvents } from "@/lib/scheduling/recurrence";
 import { addDaysToKey, daysBetweenKeys, startOfDayInZone } from "@/lib/scheduling/zoned";
-import { capacityBefore, isSession, type Analysis, type TaskLoad } from "./analyze";
-import { about, clockAt, dayPhrase, duePhrase, periodPhrase, plural, quote, shortDate } from "./text";
+import { capacityBefore, dayCapacity, isSession, type Analysis, type TaskLoad } from "./analyze";
+import { about, clockAt, dayName, dayPhrase, duePhrase, periodPhrase, plural, quote, shortDate } from "./text";
 
 /**
  * The daily planning view: what's left today, the few tasks worth
@@ -47,11 +47,93 @@ export function focusTasks(a: Analysis): Ranked[] {
   return rankTasks(a).slice(0, MAX_FOCUS);
 }
 
-/** Minutes worth planning for a focus task in one day: what's left, at most one long session. */
-export function dayMinutesFor(t: TaskLoad, maxSession: number): number | null {
-  const left = t.unscheduled ?? null;
-  if (left === null || left < 15) return null;
-  return Math.min(left, maxSession);
+/**
+ * Ranked tasks first, then any other open task with an estimate (high
+ * priority first). Used by Now/Next and Plan my day: the same order, so
+ * the two never disagree about what matters most.
+ */
+export function planCandidates(a: Analysis): { t: TaskLoad; why: string | null }[] {
+  const ranked = rankTasks(a).map((r) => ({ t: r.t, why: r.why as string | null }));
+  const seen = new Set(ranked.map((r) => r.t.task.id));
+  const order = { high: 0, medium: 1, low: 2 } as const;
+  const rest = a.tasks
+    .filter((t) => !seen.has(t.task.id) && t.estimate !== null && (t.dueMs === null || t.dueMs > a.nowMs))
+    .sort((x, y) => order[x.task.priority] - order[y.task.priority] || (x.dueMs ?? Infinity) - (y.dueMs ?? Infinity) || x.task.id.localeCompare(y.task.id))
+    .map((t) => ({ t, why: null }));
+  return [...ranked, ...rest];
+}
+
+// ---------------------------------------------------------------------------
+// Plan my day (7.3): fill the day's real capacity, explain what's left out
+// ---------------------------------------------------------------------------
+
+const MAX_DAY_TASKS = 6;
+const MAX_LEFT_OUT = 4;
+/** A partial session shorter than this isn't worth booking. */
+const MIN_PARTIAL_MINUTES = 30;
+
+export type DayPick = { taskId: string; minutes: number };
+export type DayLeftOut = { taskId: string; reason: string };
+export type DayPlan = { date: string; picks: DayPick[]; leftOut: DayLeftOut[]; capacity: number };
+
+/**
+ * Which tasks get time on `date` (today or tomorrow), in ranking order,
+ * until the day's realistic capacity (free time minus the share kept open,
+ * capped by the daily limit) is used. Each task gets what's left of its
+ * work, at most one long session. Multi-session work may take a shorter
+ * session when that's all the room left. Ranked tasks that don't make it
+ * get a plain reason. Pure.
+ */
+export function planDayPicks(a: Analysis, date: string): DayPlan {
+  const day = a.days.find((d) => d.date === date);
+  const capacity = day ? dayCapacity(a, day) : 0;
+  const dayStart = startOfDayInZone(date, a.timeZone).getTime();
+  const dayWord = date === a.todayKey ? "today" : "tomorrow";
+  const { maxSessionMinutes, minSessionMinutes } = a.preferences;
+  const minPartial = Math.max(minSessionMinutes, MIN_PARTIAL_MINUTES);
+  const picks: DayPick[] = [];
+  const leftOut: DayLeftOut[] = [];
+  let room = capacity;
+
+  for (const { t, why } of planCandidates(a)) {
+    const worth = why !== null; // only ranked tasks are worth explaining
+    const left = t.unscheduled;
+    if (left === 0) continue; // its time is already booked
+    if (t.dueMs !== null && t.dueMs > a.nowMs && t.dueMs <= dayStart) {
+      if (worth) leftOut.push({ taskId: t.task.id, reason: `Due before ${dayWord}.` });
+      continue;
+    }
+    if (left === null) {
+      if (worth) leftOut.push({ taskId: t.task.id, reason: "No time estimate yet, so I couldn't size it." });
+      continue;
+    }
+    if (left < 15) continue;
+    if (picks.length >= MAX_DAY_TASKS) {
+      if (worth) leftOut.push({ taskId: t.task.id, reason: `${dayName(date, a.todayKey)} is already full of work.` });
+      continue;
+    }
+    let minutes = Math.min(left, maxSessionMinutes);
+    if (minutes > room) {
+      // Multi-session work can take a shorter session; a one-sitting task needs its whole time.
+      const partial = Math.floor(room / 5) * 5;
+      if (left > maxSessionMinutes && partial >= minPartial) minutes = partial;
+      else {
+        if (worth) leftOut.push({ taskId: t.task.id, reason: leftOutReason(t, a, dayWord) });
+        continue;
+      }
+    }
+    picks.push({ taskId: t.task.id, minutes });
+    room -= minutes;
+  }
+  return { date, picks, leftOut: leftOut.slice(0, MAX_LEFT_OUT), capacity };
+}
+
+function leftOutReason(t: TaskLoad, a: Analysis, dayWord: string): string {
+  const base = `No room left ${dayWord}.`;
+  if (!t.dueDate || t.dueMs === null) return base;
+  if (t.dueMs <= a.nowMs) return `${base} It's overdue, so it's first in line next.`;
+  const after = capacityBefore(a, t.dueMs);
+  return after >= (t.unscheduled ?? 0) ? `${base} Due ${dayPhrase(t.dueDate, a.todayKey)}, and there's time before then.` : `${base} Due ${dayPhrase(t.dueDate, a.todayKey)}, and it's tight.`;
 }
 
 export function buildBrief(a: Analysis): DailyBrief {
@@ -82,13 +164,18 @@ export function buildBrief(a: Analysis): DailyBrief {
   // Plan today while there is real time left, otherwise tomorrow.
   const planToday = freeMinutes >= MIN_PLAN_MINUTES;
   const planDate = planToday ? a.todayKey : addDaysToKey(a.todayKey, 1);
-  const plannable = ranked.filter(({ t }) => dayMinutesFor(t, a.preferences.maxSessionMinutes) !== null).map(({ t }) => t);
-  const action: RecommendationAction | null = plannable.length
+  const day = planDayPicks(a, planDate);
+  const action: RecommendationAction | null = day.picks.length
     ? {
         id: "plan_day",
         kind: "plan_day",
         label: planToday ? "Plan my day" : "Plan tomorrow",
-        params: { date: planDate, taskIds: plannable.map((t) => t.task.id) },
+        params: {
+          date: planDate,
+          taskIds: day.picks.map((p) => p.taskId),
+          minutes: day.picks.map((p) => String(p.minutes)),
+          leftOut: day.leftOut.map((l) => `${l.taskId}|${l.reason}`),
+        },
       }
     : null;
 

@@ -225,3 +225,21 @@ export async function markPastSessionsDone(userId: string, taskId: string, now =
     .lte("ends_at", now.toISOString());
   if (error && !(error.code === "42703" || error.code === "PGRST204" || /outcome/.test(error.message))) throw dbError(error);
 }
+
+/**
+ * Sessions booked on the same card as a new task belong to that task once
+ * both are approved. Only the user's own Whitespace sessions with no task yet.
+ */
+export async function linkSessionsToTask(userId: string, commitmentIds: string[], taskId: string): Promise<void> {
+  const ids = commitmentIds.filter(isUuid);
+  if (!ids.length || !isUuid(taskId)) return;
+  const supabase = await requireDb();
+  const { error } = await supabase
+    .from("commitments")
+    .update({ task_id: taskId })
+    .eq("user_id", userId)
+    .in("id", ids)
+    .is("task_id", null)
+    .not("plan_item_id", "is", null);
+  if (error) throw dbError(error);
+}

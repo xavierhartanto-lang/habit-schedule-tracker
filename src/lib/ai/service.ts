@@ -24,6 +24,7 @@ import {
 import { PlannerApiSchema, fromApiWire, validatePlannerOutput, type Draft, type PlannerResult } from "@/lib/assistant/intents";
 import { formatFactTitle, type NamingContext } from "@/lib/assistant/naming";
 import { PLANNER_SYSTEM_PROMPT } from "@/lib/assistant/planner-prompt";
+import { BREAKDOWN_SYSTEM_PROMPT, BreakdownWireSchema, type BreakdownWire } from "@/lib/assistant/breakdown";
 
 /**
  * Entry points Chunk C calls from route handlers / server actions.
@@ -213,4 +214,37 @@ export async function interpretMessage(input: InterpretInput): Promise<PlannerRe
   } catch (error) {
     throw new AiError("invalid_output", { cause: error });
   }
+}
+
+/**
+ * Phase 7.3: name and size the steps of a task (structured outputs). Dates,
+ * limits and totals are finished deterministically by finishBreakdown.
+ * Never writes anything: the user saves the steps.
+ */
+export async function suggestBreakdown(input: { prompt: string; signal?: AbortSignal }): Promise<BreakdownWire> {
+  const { client, model } = getAiClient();
+  let response;
+  try {
+    response = await client.beta.messages.parse(
+      {
+        model,
+        max_tokens: 4_000,
+        output_config: { effort: "low", format: zodOutputFormat(BreakdownWireSchema) },
+        system: [{ type: "text", text: BREAKDOWN_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
+        messages: [{ role: "user", content: input.prompt }],
+        ...fallbackParams(model),
+      },
+      { signal: input.signal },
+    );
+  } catch (error) {
+    if (error instanceof Anthropic.AnthropicError && !(error instanceof Anthropic.APIError)) {
+      throw new AiError("invalid_output", { cause: error });
+    }
+    throw toAiError(error);
+  }
+  if (response.stop_reason === "refusal") throw new AiError("refused");
+  if (response.stop_reason === "max_tokens" || response.parsed_output == null) {
+    throw new AiError("invalid_output", { message: `Breakdown unusable (stop_reason=${response.stop_reason})` });
+  }
+  return response.parsed_output;
 }

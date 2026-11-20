@@ -29,10 +29,11 @@ import {
 import type { LifeAreaRecord, Task, TaskPriority, TaskStatus } from "@/lib/domain/types";
 import { formatDuration } from "@/lib/scheduling/time";
 import { cn } from "@/lib/utils/cn";
-import { Check, CircleCheck, Clock, Flag, Plus, Target, Trash2 } from "lucide-react";
+import { Check, CircleCheck, Clock, Flag, ListTree, Plus, Target, Trash2 } from "lucide-react";
 import { useMemo, useOptimistic, useState, useTransition } from "react";
 import { removeTask, saveTask, setTaskDone } from "./actions";
 import { formatDue } from "./format";
+import { StepsPanel } from "./steps-panel";
 
 type GoalOption = { id: string; title: string };
 
@@ -71,6 +72,27 @@ export function TaskBoard({
     () => sortTasks(filterTasks(optimistic, filter, { todayKey, timeZone }), sort),
     [optimistic, filter, sort, todayKey, timeZone],
   );
+  // Steps sit right under their task (when both are shown), in due order.
+  const stepsOf = useMemo(() => {
+    const map = new Map<string, Task[]>();
+    for (const t of optimistic) {
+      if (!t.parentTaskId) continue;
+      map.set(t.parentTaskId, [...(map.get(t.parentTaskId) ?? []), t]);
+    }
+    for (const list of map.values()) list.sort((a, b) => (a.dueAt ?? "9999").localeCompare(b.dueAt ?? "9999") || a.title.localeCompare(b.title));
+    return map;
+  }, [optimistic]);
+  const rows = useMemo(() => {
+    const shown = new Set(visible.map((t) => t.id));
+    const out: { task: Task; step: boolean }[] = [];
+    for (const t of visible) {
+      if (t.parentTaskId && shown.has(t.parentTaskId)) continue; // listed under its task
+      out.push({ task: t, step: !!t.parentTaskId });
+      for (const s of stepsOf.get(t.id) ?? []) if (shown.has(s.id)) out.push({ task: s, step: true });
+    }
+    return out;
+  }, [visible, stepsOf]);
+  const parentTitle = (t: Task) => (t.parentTaskId ? optimistic.find((p) => p.id === t.parentTaskId)?.title ?? null : null);
   const openCount = optimistic.filter((t) => t.status !== "done").length;
   const overdueCount = optimistic.filter(
     (t) => t.status !== "done" && dueBucket(t, todayKey, timeZone) === "overdue",
@@ -178,10 +200,13 @@ export function TaskBoard({
             )
           ) : (
             <ul>
-              {visible.map((t) => (
+              {rows.map(({ task: t, step }) => (
                 <TaskRow
                   key={t.id}
                   task={t}
+                  step={step}
+                  steps={stepsOf.get(t.id) ?? []}
+                  parentTitle={step && !rows.some((r) => r.task.id === t.parentTaskId) ? parentTitle(t) : null}
                   area={findArea(areas, t.lifeAreaId)}
                   goal={goals.find((g) => g.id === t.goalId) ?? null}
                   timeZone={timeZone}
@@ -200,6 +225,8 @@ export function TaskBoard({
         {editing && (
           <TaskEditor
             task={editing.task}
+            steps={editing.task ? stepsOf.get(editing.task.id) ?? [] : []}
+            todayKey={todayKey}
             areas={areas}
             goals={goals}
             timeZone={timeZone}
@@ -232,6 +259,9 @@ function FilterSelect({
 
 function TaskRow({
   task: t,
+  step,
+  steps,
+  parentTitle,
   area,
   goal,
   timeZone,
@@ -241,6 +271,12 @@ function TaskRow({
   onOpen,
 }: {
   task: Task;
+  /** A step of a bigger task: indented under it. */
+  step: boolean;
+  /** This task's own steps. */
+  steps: Task[];
+  /** Shown when the step appears without its task (filtered out). */
+  parentTitle: string | null;
   area: LifeAreaRecord | null;
   goal: GoalOption | null;
   timeZone: string;
@@ -253,7 +289,7 @@ function TaskRow({
   const due = formatDue(t.dueAt, timeZone, todayKey);
   const overdue = !done && dueBucket(t, todayKey, timeZone) === "overdue";
   return (
-    <li className="group flex items-start gap-3 rounded-xl px-2 py-2.5 transition-colors hover:bg-surface-2">
+    <li className={cn("group flex items-start gap-3 rounded-xl px-2 py-2.5 transition-colors hover:bg-surface-2", step && !parentTitle && "ml-7")}>
       <button
         type="button"
         role="checkbox"
@@ -288,6 +324,12 @@ function TaskRow({
               <Target className="size-3 shrink-0" /> <span className="truncate">{goal.title}</span>
             </span>
           )}
+          {steps.length > 0 && (
+            <span className="inline-flex items-center gap-1 text-[12px] text-ink-3">
+              <ListTree className="size-3" /> {steps.filter((x) => x.status === "done").length} of {steps.length} steps
+            </span>
+          )}
+          {parentTitle && <span className="truncate text-[12px] text-ink-3">Step of {parentTitle}</span>}
           {t.status === "in_progress" && <Badge tone="accent">In progress</Badge>}
         </span>
       </button>
@@ -379,6 +421,8 @@ function QuickAdd({ areas, disabled, onMore }: { areas: LifeAreaRecord[]; disabl
 
 function TaskEditor({
   task,
+  steps,
+  todayKey,
   areas,
   goals,
   timeZone,
@@ -386,6 +430,8 @@ function TaskEditor({
   onDone,
 }: {
   task: Task | null;
+  steps: Task[];
+  todayKey: string;
   areas: LifeAreaRecord[];
   goals: GoalOption[];
   timeZone: string;
@@ -498,6 +544,10 @@ function TaskEditor({
             ))}
           </Select>
         </Field>
+      )}
+
+      {task && task.status !== "done" && (
+        <StepsPanel task={task} steps={steps} timeZone={timeZone} todayKey={todayKey} disabled={disabled} onSaved={onDone} />
       )}
 
       <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border pt-4">

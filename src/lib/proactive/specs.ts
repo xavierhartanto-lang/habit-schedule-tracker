@@ -1,7 +1,7 @@
 import type { RecommendationAction } from "@/features/proactive/types";
 import type { ActionSpec } from "@/lib/assistant/assess";
 import type { Commitment, Task } from "@/lib/domain/types";
-import { addDaysToKey, dateKeyInZone, isDateKey } from "@/lib/scheduling/zoned";
+import { addDaysToKey, dateKeyInZone, isDateKey, timeKeyInZone } from "@/lib/scheduling/zoned";
 import { REQUEST_LIMITS } from "@/lib/scheduling/planner";
 
 /**
@@ -22,8 +22,11 @@ export type SpecContext = {
   timeZone: string;
 };
 
+/** A task the plan left out on purpose, with why ("No room left today. Due Monday, and there's time before then."). */
+export type LeftOut = { title: string; minutes: number; reason: string };
+
 export type SpecResult =
-  | { ok: true; specs: ActionSpec[]; prompt: null }
+  | { ok: true; specs: ActionSpec[]; prompt: null; leftOut?: LeftOut[] }
   | { ok: true; specs: []; prompt: string }
   | { ok: false; error: string };
 
@@ -113,16 +116,28 @@ export function specsForAction(action: RecommendationAction, ctx: SpecContext): 
       if (!date || !isDateKey(date) || (date !== ctx.todayKey && date !== addDaysToKey(ctx.todayKey, 1))) {
         return { ok: false, error: "That day has passed. Refresh to plan today." };
       }
+      // Minutes per task come from the day plan (planDayPicks); older actions only carry task ids.
+      const minutes = Array.isArray(p.minutes) ? p.minutes.map((m) => Number(m)) : [];
       const specs: ActionSpec[] = [];
-      for (const id of ids(p.taskIds).slice(0, 3)) {
-        const t = ctx.tasks.get(id);
-        if (!t?.estimatedMinutes) continue;
-        const minutes = clamp(Math.min(t.estimatedMinutes, ctx.maxSessionMinutes), REQUEST_LIMITS.totalMinutes);
-        // Due later that day: finish before it's due. Overdue or due later: anywhere in that day.
-        const dueThatDay = !!t.dueAt && Date.parse(t.dueAt) > ctx.nowMs && dateKeyInZone(new Date(t.dueAt), ctx.timeZone) === date;
-        specs.push(planTime(t, { type: "total", minutes }, { window: date === ctx.todayKey ? "today" : "tomorrow", ...(dueThatDay ? {} : endOf(date)) }));
+      ids(p.taskIds)
+        .slice(0, 6)
+        .forEach((id, i) => {
+          const t = ctx.tasks.get(id);
+          if (!t?.estimatedMinutes) return;
+          const planned = Number.isFinite(minutes[i]) && minutes[i] > 0 ? minutes[i] : Math.min(t.estimatedMinutes, ctx.maxSessionMinutes);
+          const m = clamp(Math.min(planned, ctx.maxSessionMinutes), REQUEST_LIMITS.totalMinutes);
+          // Due later that day: finish before it's due. Overdue or due later: anywhere in that day.
+          const dueThatDay = !!t.dueAt && Date.parse(t.dueAt) > ctx.nowMs && dateKeyInZone(new Date(t.dueAt), ctx.timeZone) === date;
+          specs.push(planTime(t, { type: "total", minutes: m }, { window: date === ctx.todayKey ? "today" : "tomorrow", ...(dueThatDay ? {} : endOf(date)) }));
+        });
+      const leftOut: LeftOut[] = [];
+      for (const entry of ids(p.leftOut).slice(0, 4)) {
+        const cut = entry.indexOf("|");
+        const t = cut > 0 ? ctx.tasks.get(entry.slice(0, cut)) : undefined;
+        const reason = entry.slice(cut + 1).trim().slice(0, 160);
+        if (t && reason) leftOut.push({ title: t.title, minutes: 0, reason });
       }
-      return specs.length ? { ok: true, prompt: null, specs } : { ok: false, error: "Nothing left to plan for that day." };
+      return specs.length ? { ok: true, prompt: null, specs, leftOut } : { ok: false, error: "Nothing left to plan for that day." };
     }
     case "plan_week":
       return { ok: true, prompt: null, specs: [{ kind: "not_enough_time", window: "this_week" }] };
@@ -149,6 +164,35 @@ export function specsForAction(action: RecommendationAction, ctx: SpecContext): 
         return { ok: true, prompt: null, specs: [{ kind: "cant_make", date, blocks: [], event: drop, title: drop.title }] };
       }
       return { ok: true, prompt: null, specs: [{ kind: "remove_event", events: [drop], title: drop.title }] };
+    }
+    case "prep_exam": {
+      // Study sessions that end before the exam starts. Not tied to a task.
+      const exam = ctx.events.get(str(p.eventId) ?? "");
+      if (!exam || exam.kind !== "fixed" || exam.recurrenceRule || !exam.startsAt || Date.parse(exam.startsAt) <= ctx.nowMs) {
+        return { ok: false, error: "That exam has changed or already started. Refresh to see the latest." };
+      }
+      const count = num(p.sessions);
+      const each = num(p.minutesEach);
+      if (!count || !each) return { ok: false, error: "The study plan is missing." };
+      const start = new Date(exam.startsAt);
+      return {
+        ok: true,
+        prompt: null,
+        specs: [
+          {
+            kind: "plan_time",
+            title: `Study for ${exam.title}`.slice(0, 200),
+            amount: { type: "sessions", count: clamp(count, REQUEST_LIMITS.sessionCount), minutesEach: clamp(each, REQUEST_LIMITS.sessionMinutes) },
+            priority: "high",
+            deadlineDate: dateKeyInZone(start, ctx.timeZone),
+            deadlineTime: timeKeyInZone(start, ctx.timeZone),
+            window: "until_deadline",
+            preferredDays: [],
+            taskId: null,
+            lifeAreaId: exam.lifeAreaId ?? null,
+          },
+        ],
+      };
     }
     case "acknowledge":
       return { ok: false, error: "Nothing to change." };

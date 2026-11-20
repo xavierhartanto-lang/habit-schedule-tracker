@@ -31,6 +31,7 @@ function toTask(row: TaskRow): Task {
     // Optional until the Phase 5 migration has run.
     postponeCount: row.postpone_count ?? 0,
     lastPostponedAt: row.last_postponed_at ?? null,
+    parentTaskId: row.parent_task_id ?? null,
   };
 }
 
@@ -146,4 +147,48 @@ export async function deleteTask(userId: string, id: string): Promise<void> {
   const supabase = await requireDb();
   const { error } = await supabase.from("tasks").delete().eq("user_id", userId).eq("id", id);
   if (error) throw dbError(error);
+}
+
+export async function getTask(userId: string, id: string): Promise<Task> {
+  if (!isUuid(id)) throw new NotFoundError("Task");
+  const supabase = await requireDb();
+  const { data, error } = await supabase.from("tasks").select("*").eq("user_id", userId).eq("id", id).maybeSingle();
+  if (error) throw dbError(error);
+  if (!data) throw new NotFoundError("Task");
+  return toTask(data);
+}
+
+export type StepWrite = { title: string; estimatedMinutes: number; dueAt: string | null };
+
+/**
+ * Phase 7.3: saves the steps of a task as real tasks linked to it. They take
+ * the parent's life area, goal and priority. Needs migration 20261129000000.
+ */
+export async function createSteps(userId: string, parent: Task, steps: StepWrite[]): Promise<Task[]> {
+  const supabase = await requireDb();
+  const { data, error } = await supabase
+    .from("tasks")
+    .insert(
+      steps.map((s) => ({
+        user_id: userId,
+        title: s.title,
+        description: null,
+        life_area_id: parent.lifeAreaId ?? null,
+        goal_id: parent.goalId ?? null,
+        priority: parent.priority,
+        status: "todo" as const,
+        due_at: s.dueAt,
+        estimated_minutes: s.estimatedMinutes,
+        parent_task_id: parent.id,
+      })),
+    )
+    .select("*");
+  if (error) {
+    if (error.code === "42703" || /parent_task_id/.test(error.message)) {
+      throw new DataValidationError("Steps need the latest database update. Run migration 20261129000000 in Supabase.");
+    }
+    if (error.code === "23514") throw new DataValidationError("A step can't have its own steps.");
+    throw friendly(error);
+  }
+  return data.map(toTask);
 }

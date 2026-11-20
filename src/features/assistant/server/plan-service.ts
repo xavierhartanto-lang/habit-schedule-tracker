@@ -24,7 +24,7 @@ import { parsePayload, toOp, type Op } from "@/lib/assistant/ops";
 import { buildPlannerUserPrompt, namingContext, plannerResultBlock, type PlannerKnowledge } from "@/lib/assistant/planner-prompt";
 import { applyPreferenceChanges } from "@/lib/assistant/prefs";
 import { DataValidationError } from "@/lib/db/client";
-import { markPastSessionsDone } from "@/lib/db/events";
+import { linkSessionsToTask, markPastSessionsDone } from "@/lib/db/events";
 import { listGoals } from "@/lib/db/goals";
 import { listActiveHabits } from "@/lib/db/habits";
 import { listLifeAreas } from "@/lib/db/life-areas";
@@ -695,7 +695,30 @@ export async function approveItems(
       await markPastSessionsDone(userId, item.targetId, now).catch((e) => console.error("[plan] session outcomes not recorded", e));
     }
   }
+  await linkNewTaskSessions(userId, plan).catch((e) => console.error("[plan] sessions not linked to their new task", e));
   return { plan, results };
+}
+
+/**
+ * Sessions proposed on the same card as a new task (the reality check in
+ * buildPlan) carry no task id, because the task didn't exist yet. Once both
+ * are applied, in either order, the sessions are linked to it.
+ */
+async function linkNewTaskSessions(userId: string, plan: StoredPlan): Promise<void> {
+  const tasks = plan.items.filter((i) => i.action === "create_task" && i.status === "applied" && i.resultId);
+  if (!tasks.length) return;
+  for (const task of tasks) {
+    const sessions = plan.items.filter(
+      (i) =>
+        i.action === "schedule_block" &&
+        i.status === "applied" &&
+        i.resultId &&
+        i.payload.forNewTask === true &&
+        !i.payload.taskId &&
+        normalizeText(String(i.payload.title ?? "")) === normalizeText(task.title),
+    );
+    if (sessions.length) await linkSessionsToTask(userId, sessions.map((i) => i.resultId!), task.resultId!);
+  }
 }
 
 function friendlyDbMessage(message: string): string {

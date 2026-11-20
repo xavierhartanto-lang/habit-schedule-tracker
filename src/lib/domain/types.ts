@@ -102,6 +102,8 @@ export type Task = {
   /** Times the due date (or a Whitespace session for it) was pushed later while open. */
   postponeCount?: number;
   lastPostponedAt?: string | null;
+  /** Phase 7.3: set on a step of a bigger task. */
+  parentTaskId?: string | null;
 };
 
 export type HabitCadence =

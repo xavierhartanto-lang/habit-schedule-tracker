@@ -17,7 +17,10 @@ import {
   type ProposedSession,
   type SchedulingPreferences,
 } from "@/lib/scheduling/planner";
+import { analyze, capacityBefore, type Analysis } from "@/lib/proactive/analyze";
+import { examPrepPlan, hasPrep, isExam } from "@/lib/proactive/exam";
 import { pickKeeper } from "@/lib/proactive/conflict-pick";
+import { realityCheck } from "@/lib/proactive/reality";
 import type { ActionSpec, World } from "./assess";
 import { clockLabel, shortDate } from "./dates";
 
@@ -93,6 +96,9 @@ const AUTO_APPLY: ReadonlySet<ActionSpec["kind"]> = new Set([
 ]);
 
 const MAX_WINDOW_DAYS = 62;
+/** New tasks shorter than this get no sessions of their own: they fit in any gap. */
+const MIN_NEW_TASK_SESSION = 30;
+const normalizeTitle = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 const EMPTY_DISPLAY: ItemDisplay = {
   detail: null,
   timing: null,
@@ -367,6 +373,25 @@ export function buildPlan(input: BuildInput): BuiltPlan {
   for (const b of futureBlocks) book(b.taskId, b.startsAt!, b.endsAt!);
   for (const b of input.busy) if (Date.parse(b.end) > now.getTime()) book(b.taskId, b.start, b.end);
 
+  // Free time and competing work for the reality check, computed once.
+  let analysis: Analysis | null | undefined;
+  const getAnalysis = (): Analysis | null => {
+    if (analysis === undefined) {
+      try {
+        analysis = analyze({ now: input.now, timeZone: tz, weekStartsOn: input.world.weekStartsOn, events: input.events, tasks: input.openTasks, preferences: input.preferences, busy: input.busy });
+      } catch {
+        analysis = null; // invalid zone or preferences: skip the check, never the record
+      }
+    }
+    return analysis;
+  };
+  const realityFor = (title: string, dueMs: number, minutes: number) => {
+    const a = getAnalysis();
+    return a ? realityCheck(a, { title, dueMs, minutes }) : null;
+  };
+  /** Scheduling requests for tasks created on this same card: their sessions link to the task on approval. */
+  const newTaskRequests = new Set<string>();
+
   // ---- 1. Records and new events ----
   // Which conversation action produced each item and each scheduling request.
   const requestAction = new Map<string, string>();
@@ -455,6 +480,36 @@ export function buildPlan(input: BuildInput): BuiltPlan {
                 `${spec.title} overlaps ${other.event.title} (${whenLabel(other.start.toISOString(), tz)}). Recommend keeping ${pick.keep.id === "new" ? spec.title : other.event.title}: ${pick.why} After saving, Home offers a one-tap fix.`,
               );
             }
+          }
+        }
+        // An exam with nothing planned to study for it (7.3): study sessions before it, on this same card.
+        if (!spec.rrule && isExam(spec.title)) {
+          // Prep already exists: a task or session for the subject, or time asked for in this same message.
+          const titles = [
+            ...input.openTasks.map((t) => t.title),
+            ...futureBlocks.map((b) => b.title),
+            ...input.specs.flatMap((x) => (x.spec.kind === "plan_time" || x.spec.kind === "task_create" ? [x.spec.title] : [])),
+          ];
+          const a = getAnalysis();
+          const prep = a && !hasPrep(spec.title, titles)
+            ? examPrepPlan(
+                { title: spec.title, startMs: Date.parse(startsAt) },
+                { nowMs: now.getTime(), minSessionMinutes: input.preferences.minSessionMinutes, maxSessionMinutes: input.preferences.maxSessionMinutes, capacity: capacityBefore(a, Date.parse(startsAt)) },
+              )
+            : null;
+          if (prep) {
+            ctx.requests.push({
+              id: `r${ctx.requests.length}`,
+              title: prep.title.slice(0, 200),
+              amount: { type: "sessions", count: prep.sessions, minutesEach: prep.minutesEach },
+              priority: "high",
+              deadline: startsAt,
+              earliestStart: now.toISOString(),
+              lifeAreaId: spec.lifeAreaId,
+              taskId: null,
+            });
+            ctx.windows.push({ start: now, end: new Date(startsAt) });
+            ctx.notes.push(`${spec.title} is an exam with nothing planned to study for it, so ${prep.sessions} study session${prep.sessions === 1 ? "" : "s"} before it are proposed on the card. Mention it in one line; the user can reject them.`);
           }
         }
         // Sessions the assistant placed earlier that now collide get moved (with approval).
@@ -587,6 +642,28 @@ export function buildPlan(input: BuildInput): BuiltPlan {
         const detail = [dueLabel(dueAt, tz), spec.priority !== "medium" ? `${spec.priority[0].toUpperCase()}${spec.priority.slice(1)} priority` : null, spec.estimatedMinutes ? minutesLabel(spec.estimatedMinutes) : null]
           .filter(Boolean)
           .join(" · ");
+        // Reality check (7.3): does it fit before it's due? Then propose its sessions on the same card.
+        const check = dueAt && spec.estimatedMinutes ? realityFor(spec.title, Date.parse(dueAt), spec.estimatedMinutes) : null;
+        const plannedElsewhere = input.specs.some(
+          (x) => x.spec.kind === "plan_time" && normalizeTitle(x.spec.title) === normalizeTitle(spec.title),
+        );
+        if (check) ctx.notes.push(check.note);
+        if (check && dueAt && spec.estimatedMinutes && spec.estimatedMinutes >= MIN_NEW_TASK_SESSION && !plannedElsewhere) {
+          const id = `r${ctx.requests.length}`;
+          ctx.requests.push({
+            id,
+            title: spec.title,
+            amount: { type: "total", minutes: spec.estimatedMinutes },
+            priority: spec.priority,
+            deadline: dueAt,
+            earliestStart: now.toISOString(),
+            lifeAreaId: spec.lifeAreaId,
+            taskId: null,
+          });
+          ctx.windows.push({ start: now, end: new Date(dueAt) });
+          newTaskRequests.add(id);
+          ctx.notes.push(`Sessions for ${spec.title} are proposed on the card, before it's due. Present them as the recommended plan.`);
+        }
         ctx.items.push({
           action: "create_task",
           title: spec.title,
@@ -600,7 +677,7 @@ export function buildPlan(input: BuildInput): BuiltPlan {
             estimatedMinutes: spec.estimatedMinutes,
             priority: spec.priority,
           },
-          display: { ...EMPTY_DISPLAY, detail: detail || null, reason: "New task." },
+          display: { ...EMPTY_DISPLAY, detail: detail || null, reason: "New task.", warnings: check?.warning ? [check.warning] : [] },
         });
         break;
       }
@@ -887,8 +964,10 @@ export function buildPlan(input: BuildInput): BuiltPlan {
         const win = windowFor({ window: spec.window }, input, null);
         ctx.windows.push(win);
         const noEstimate: string[] = [];
+        const withSteps = new Set(input.openTasks.filter((t) => t.parentTaskId).map((t) => t.parentTaskId!));
         for (const task of input.openTasks) {
           if (task.dueAt && Date.parse(task.dueAt) > win.end.getTime() + 7 * 86_400_000) continue;
+          if (withSteps.has(task.id)) continue; // its steps carry the work
           const req = requestFromTask(task);
           if (!req) {
             if (task.dueAt) noEstimate.push(task.title);
@@ -960,6 +1039,7 @@ export function buildPlan(input: BuildInput): BuiltPlan {
         });
       } else {
         ctx.items.push(blockItem(s, numbers.get(s.id), request, tz, input.sourceMessageId));
+        if (newTaskRequests.has(s.requestId)) ctx.items[ctx.items.length - 1].payload.forNewTask = true;
       }
       ctx.items[ctx.items.length - 1].actionId = requestAction.get(s.requestId) ?? null;
     }
