@@ -95,8 +95,16 @@ export function collectDeadlines(input: Pick<SignalInput, "now" | "todayKey" | "
   }
   const from = startOfDayInZone(addDaysToKey(todayKey, 1), tz);
   const to = startOfDayInZone(addDaysToKey(todayKey, DEADLINE_LOOKAHEAD_DAYS + 1), tz);
-  for (const o of expandEvents(input.events, from, to, tz)) {
+  const occurrences = expandEvents(input.events, from, to, tz);
+  // A routine typed in as separate events ("School" every weekday) isn't a deadline either.
+  const seen = new Map<string, number>();
+  for (const o of occurrences) {
+    const t = o.event.title.trim().toLowerCase();
+    seen.set(t, (seen.get(t) ?? 0) + 1);
+  }
+  for (const o of occurrences) {
     if (o.event.kind !== "fixed" || o.event.recurrenceRule) continue;
+    if ((seen.get(o.event.title.trim().toLowerCase()) ?? 0) > 1) continue;
     const dateKey = dateKeyInZone(o.start, tz);
     items.push({
       id: o.key,

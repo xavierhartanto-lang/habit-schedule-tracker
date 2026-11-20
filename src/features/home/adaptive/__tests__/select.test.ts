@@ -275,3 +275,11 @@ describe("adaptive Home: reliability", () => {
     expect(section(layout, "progress")).toBeUndefined();
   });
 });
+
+describe("adaptive Home: routines are not deadlines", () => {
+  it("skips a fixed event repeated as separate entries", () => {
+    const school = [1, 2, 3].map((d) => event({ title: "School", date: addDaysToKey(TODAY, d), start: "07:30", end: "14:30" }));
+    const { layout } = scenario({ events: [...school, event({ title: "SAT", date: addDaysToKey(TODAY, 2), start: "09:00", end: "12:00" })] });
+    expect(section(layout, "deadlines")?.data.items.map((i) => i.title)).toEqual(["SAT"]);
+  });
+});

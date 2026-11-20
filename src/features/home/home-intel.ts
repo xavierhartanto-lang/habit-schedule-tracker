@@ -39,9 +39,10 @@ export type HomeIntel = {
 const RECENT_DONE_DAYS = 7;
 
 export const loadHomeIntel = cache(async (): Promise<HomeIntel> => {
+  // loadHomeData marks the request dynamic (connection()), so read the clock after it.
+  const { ctx, events, openTasks, preferences, error } = await loadHomeData();
   const now = new Date();
   const aiConfigured = isAiConfigured();
-  const { ctx, events, openTasks, preferences, error } = await loadHomeData();
   if (ctx.state !== "ready" || error) {
     return { now, aiConfigured, home: EMPTY_PROACTIVE, proactive: null, analysis: null, layout: null };
   }

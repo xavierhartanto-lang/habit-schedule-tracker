@@ -78,9 +78,6 @@ function FocusView({ section, ctx }: ViewProps<"focus">) {
           Then: <span className="text-ink-2">{f.then.map((t) => t.title).join(", ")}</span>
         </p>
       )}
-      {f.planLabel && (
-        <p className="mt-2 text-[12px] text-ink-3">Ask “{f.planLabel}” in the conversation to get sessions to approve.</p>
-      )}
     </div>
   );
 }
