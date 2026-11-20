@@ -20,7 +20,7 @@ import { getPlan, setPlanMessage, toPlanView } from "@/lib/db/plans";
 import { NotFoundError } from "@/lib/db/client";
 import { isUuid } from "@/lib/domain/context-items";
 import { fallbackReply } from "@/features/assistant/fallback-reply";
-import { proposeDailyPlanFor, proposeFromRecommendationFor } from "@/features/proactive/server/service";
+import { proposeCatchUpFor, proposeDailyPlanFor, proposeFromRecommendationFor } from "@/features/proactive/server/service";
 import {
   CHAT_MESSAGE_MAX,
   OPENING_MAX,
@@ -92,6 +92,7 @@ function parseProactive(raw: unknown): ChatProactive | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const p = raw as Record<string, unknown>;
   if (p.kind === "daily_plan") return { kind: "daily_plan" };
+  if (p.kind === "catch_up") return { kind: "catch_up" };
   if (p.kind === "recommendation" && isUuid(p.id) && typeof p.actionId === "string" && /^[\w-]{1,60}$/.test(p.actionId)) {
     return { kind: "recommendation", id: p.id, actionId: p.actionId };
   }
@@ -519,6 +520,10 @@ async function runProactive(
       const result = await proposeDailyPlanFor(userId, { conversationId, sourceMessageId: userMessage.id });
       plan = result.plan;
       note = `The user tapped "${userMessage.content}" on today's brief, which said: ${result.brief.message} Explain the plan for today briefly.`;
+    } else if (proactive.kind === "catch_up") {
+      const result = await proposeCatchUpFor(userId, { conversationId, sourceMessageId: userMessage.id });
+      plan = result.plan;
+      note = `The user tapped "${userMessage.content}": they feel behind. ${result.summary} Lead with the plan in one or two calm sentences, then what was left for later and why. No lecture.`;
     } else {
       const result = await proposeFromRecommendationFor(userId, {
         id: proactive.id,

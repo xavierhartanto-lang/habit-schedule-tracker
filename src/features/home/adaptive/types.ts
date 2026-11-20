@@ -60,6 +60,8 @@ export type FocusData = {
   then: { taskId: string; title: string; why: string }[];
   /** What to do with the time right now. Null when there is no usable window. */
   now: NowData | null;
+  /** Overdue work, or work that won't fit before it's due: offer "I'm behind" (7.5). */
+  behind?: boolean;
 };
 
 export type DeadlinesData = { items: DeadlineItem[]; more: number };

@@ -18,6 +18,7 @@ import {
   type SchedulingPreferences,
 } from "@/lib/scheduling/planner";
 import { analyze, capacityBefore, type Analysis } from "@/lib/proactive/analyze";
+import { catchUpPlan } from "@/lib/proactive/catch-up";
 import { examPrepPlan, hasPrep, isExam } from "@/lib/proactive/exam";
 import { pickKeeper } from "@/lib/proactive/conflict-pick";
 import { realityCheck } from "@/lib/proactive/reality";
@@ -400,6 +401,25 @@ export function buildPlan(input: BuildInput): BuiltPlan {
     const requestsBefore = ctx.requests.length;
     stampAction(ctx, itemsBefore, requestsBefore, requestAction, actionId ?? null, () => buildRecord(spec, explicit));
   }
+  /**
+   * Sessions the assistant placed earlier that a new or changed event now
+   * collides with are moved on the same card (with approval), so one change
+   * never leaves a broken plan behind (7.5 grouped repair).
+   */
+  function moveCollidingSessions(occ: { start: Date; end: Date }[]): void {
+    let moved = 0;
+    for (const block of futureBlocks) {
+      if (ctx.excludeEventIds.has(block.id)) continue;
+      const hit = occ.some((o) => o.start < new Date(block.endsAt!) && o.end > new Date(block.startsAt!));
+      if (hit) {
+        ctx.adaptive = true;
+        moveRequest(block, ctx, input, null, block.taskId ? tasksById.get(block.taskId) ?? null : null);
+        moved++;
+      }
+    }
+    if (moved) ctx.notes.push(`${moved} Whitespace session${moved === 1 ? "" : "s"} would collide with this change, so new times for ${moved === 1 ? "it are" : "them are"} on the same card.`);
+  }
+
   function buildRecord(spec: ActionSpec, explicit: boolean): void {
     const auto = explicit && AUTO_APPLY.has(spec.kind);
     switch (spec.kind) {
@@ -512,15 +532,7 @@ export function buildPlan(input: BuildInput): BuiltPlan {
             ctx.notes.push(`${spec.title} is an exam with nothing planned to study for it, so ${prep.sessions} study session${prep.sessions === 1 ? "" : "s"} before it are proposed on the card. Mention it in one line; the user can reject them.`);
           }
         }
-        // Sessions the assistant placed earlier that now collide get moved (with approval).
-        for (const block of futureBlocks) {
-          if (ctx.excludeEventIds.has(block.id)) continue;
-          const hit = occ.some((o) => o.start < new Date(block.endsAt!) && o.end > new Date(block.startsAt!));
-          if (hit) {
-            ctx.adaptive = true;
-            moveRequest(block, ctx, input, null, block.taskId ? tasksById.get(block.taskId) ?? null : null);
-          }
-        }
+        moveCollidingSessions(occ);
         break;
       }
       case "event_update": {
@@ -586,6 +598,7 @@ export function buildPlan(input: BuildInput): BuiltPlan {
               editable: true,
             },
           });
+          moveCollidingSessions([{ start: new Date(startsAt), end: new Date(endsAt) }]);
           break;
         }
 
@@ -634,6 +647,7 @@ export function buildPlan(input: BuildInput): BuiltPlan {
         if (timeChanged) {
           ctx.extraEvents.push(moved);
           ctx.excludeEventIds.add(e.id);
+          moveCollidingSessions(expandEvent(moved, now, new Date(now.getTime() + 28 * 86_400_000), etz));
         }
         break;
       }
@@ -961,6 +975,32 @@ export function buildPlan(input: BuildInput): BuiltPlan {
       }
       case "not_enough_time": {
         ctx.adaptive = true;
+        // "I'm behind" (7.5): one recovery plan for overdue work and the next week,
+        // most urgent first; what can't fit is left out on purpose, with why.
+        const a = spec.window !== "next_week" ? getAnalysis() : null;
+        if (a) {
+          const plan = catchUpPlan(a);
+          const noEstimate = input.openTasks.filter((t) => !t.estimatedMinutes && t.dueAt && Date.parse(t.dueAt) < now.getTime() + 7 * 86_400_000 && !t.parentTaskId);
+          for (const k of plan.keep) {
+            const left = Math.min(k.minutes, (k.t.task.estimatedMinutes ?? 0) - (bookedByTask.get(k.t.task.id) ?? 0));
+            if (left < 15) continue;
+            ctx.requests.push({
+              id: `r${ctx.requests.length}`,
+              title: k.t.task.title,
+              amount: { type: "total", minutes: Math.round(left) },
+              priority: k.t.task.priority,
+              deadline: new Date(k.deadlineMs).toISOString(),
+              earliestStart: now.toISOString(),
+              lifeAreaId: k.t.task.lifeAreaId ?? null,
+              taskId: k.t.task.id,
+            });
+            ctx.windows.push({ start: now, end: new Date(k.deadlineMs) });
+          }
+          for (const l of plan.leftOut) ctx.unscheduled.push({ title: l.title, minutes: 0, reason: l.reason });
+          ctx.notes.push(plan.summary);
+          if (noEstimate.length) ctx.notes.push(`These tasks have no time estimate, so they were not counted: ${noEstimate.slice(0, 5).map((t) => t.title).join(", ")}.`);
+          break;
+        }
         const win = windowFor({ window: spec.window }, input, null);
         ctx.windows.push(win);
         const noEstimate: string[] = [];
