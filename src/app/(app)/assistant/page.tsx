@@ -19,7 +19,8 @@ const SUGGESTIONS = [
   "I've changed my practice schedule",
 ];
 
-const FRAME = "flex h-[calc(100dvh-var(--topbar-h)-var(--tabbar-h))] overflow-hidden bg-surface lg:h-dvh";
+const FRAME =
+  "flex h-[calc(100dvh-var(--topbar-h)-var(--tabbar-h))] overflow-hidden bg-surface lg:mx-4 lg:my-3 lg:h-[calc(100dvh-1.5rem)] lg:rounded-[22px] lg:border lg:border-border/70 lg:shadow-card dark:lg:border-border";
 
 export default function AssistantPage(props: PageProps<"/assistant">) {
   return (

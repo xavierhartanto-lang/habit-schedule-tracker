@@ -20,15 +20,15 @@ function SectionSkeleton({ title }: { title: string }) {
 }
 
 /**
- * Home is the assistant. The brief, what needs attention and the
- * conversation fill the main column; a quiet rail beside it holds today's
- * schedule, what's coming up and open tasks. Below xl the rail drops under
+ * Home is the assistant. A hero card (greeting + the week in tiles) and the
+ * conversation card fill the main column; a rail of cards beside it holds
+ * today's schedule, what's coming up and open tasks. Below xl the rail drops under
  * the conversation as two columns, and a glance hub under the greeting puts
  * what's next, tasks, habits and insights one tap away.
  */
 export default function HomePage(props: PageProps<"/">) {
   return (
-    <div className="grid gap-x-12 gap-y-12 xl:grid-cols-[minmax(0,1fr)_288px]">
+    <div className="grid gap-4 lg:gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
       <Suspense fallback={null}>
         <OnboardingRedirect />
       </Suspense>
@@ -41,7 +41,7 @@ export default function HomePage(props: PageProps<"/">) {
 
       <aside
         aria-label="Your schedule at a glance"
-        className="grid min-w-0 content-start gap-10 border-t border-border pt-10 sm:grid-cols-2 sm:gap-x-10 xl:sticky xl:top-10 xl:max-h-[calc(100dvh-5rem)] xl:grid-cols-1 xl:self-start xl:overflow-y-auto xl:-mr-2 xl:border-l xl:border-t-0 xl:pb-6 xl:pl-10 xl:pr-2 xl:pt-1"
+        className="grid min-w-0 content-start gap-4 sm:grid-cols-2 lg:gap-5 xl:sticky xl:top-3 xl:max-h-[calc(100dvh-1.5rem)] xl:grid-cols-1 xl:self-start xl:overflow-y-auto xl:rounded-[20px] xl:pb-1"
       >
         <Suspense fallback={<TodayScheduleSkeleton />}>
           <TodaySchedule />

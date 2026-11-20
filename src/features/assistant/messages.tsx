@@ -7,7 +7,7 @@ export function UserMessage({ children, pending }: { children: ReactNode; pendin
     <div className="flex justify-end animate-fade-up">
       <div
         className={cn(
-          "max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md border border-border bg-surface-2 px-4 py-2.5 text-sm leading-relaxed text-ink transition-opacity sm:max-w-[70%]",
+          "max-w-[85%] whitespace-pre-wrap break-words rounded-[18px] rounded-br-md bg-accent px-4 py-2.5 text-[14.5px] font-medium leading-relaxed text-on-accent shadow-[0_8px_20px_-10px_var(--accent)] transition-opacity sm:max-w-[70%]",
           pending && "opacity-60",
         )}
       >
@@ -17,7 +17,7 @@ export function UserMessage({ children, pending }: { children: ReactNode; pendin
   );
 }
 
-/** Assistant turns read like notes from a planner, not chat bubbles. */
+/** Assistant turns read like notes from a planner, not chat bubbles: the mark, then the text. */
 export function AssistantMessage({ children, footer }: { children: ReactNode; footer?: ReactNode }) {
   return (
     <div className="flex gap-3 animate-fade-up">
@@ -32,7 +32,7 @@ export function AssistantMessage({ children, footer }: { children: ReactNode; fo
 
 export function AssistantAvatar() {
   return (
-    <span aria-hidden className="grid size-7 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent ring-1 ring-inset ring-accent/15">
+    <span aria-hidden className="brand-gradient grid size-7 shrink-0 place-items-center rounded-[9px] text-white shadow-[0_4px_12px_-4px_rgb(79_70_229/0.55)]">
       <Sparkles className="size-3.5" />
     </span>
   );

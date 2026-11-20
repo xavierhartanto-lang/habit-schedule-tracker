@@ -9,7 +9,7 @@ import type { Nudge, ProactiveChip } from "@/features/home/proactive";
  */
 
 const CHIP =
-  "rounded-full border px-3 py-1.5 text-[12.5px] pointer-coarse:px-3.5 pointer-coarse:py-2.5 pointer-coarse:text-[13.5px] transition-[background-color,border-color,color,transform] duration-150 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50";
+  "rounded-xl border px-3.5 py-2 text-[13px] font-semibold pointer-coarse:px-3.5 pointer-coarse:py-2.5 pointer-coarse:text-[13.5px] transition-[background-color,border-color,color,transform] duration-150 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50";
 
 export function ChipRow({
   chips,
@@ -34,10 +34,10 @@ export function ChipRow({
           className={cn(
             CHIP,
             c.primary
-              ? "border-accent/30 bg-accent-soft font-medium text-accent-ink hover:border-accent/60"
+              ? "border-transparent bg-accent text-on-accent shadow-[0_6px_16px_-8px_var(--accent)] hover:bg-accent-hover"
               : c.act.kind === "dismiss"
                 ? "border-transparent text-ink-3 hover:text-ink-2"
-                : "border-border bg-surface text-ink-2 hover:border-accent/40 hover:bg-accent-soft hover:text-accent-ink",
+                : "border-transparent bg-surface-2 text-ink hover:bg-accent-soft hover:text-accent-ink",
           )}
         >
           {c.label}

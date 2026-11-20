@@ -2,6 +2,7 @@ import { Skeleton } from "@/components/ui";
 import { buttonClasses } from "@/components/ui/button";
 import { Chat } from "@/features/assistant/chat";
 import { formatDateKey } from "@/lib/scheduling/zoned";
+import { cn } from "@/lib/utils/cn";
 import { ArrowUpRight, Database, LogIn, Plus, Sparkles } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
@@ -18,6 +19,8 @@ import type { WeekSummary } from "./week-summary";
 
 const GHOST_LINK = buttonClasses("ghost", "sm", "h-7 px-2 text-[12px] text-ink-3 pointer-coarse:h-9 pointer-coarse:px-2.5");
 
+const CARD = "rounded-[22px] border border-border/70 bg-surface shadow-card dark:border-border";
+
 function Header({
   date,
   greeting,
@@ -30,36 +33,39 @@ function Header({
   actions?: ReactNode;
 }) {
   return (
-    <header className="animate-fade-up">
-      <div className="flex min-h-7 items-center justify-between gap-3">
-        <p className="min-w-0 truncate text-[13px] tabular-nums text-ink-3">{date}</p>
-        {actions && <div className="-mr-2 flex shrink-0 items-center gap-0.5">{actions}</div>}
+    <header className={cn(CARD, "grid animate-fade-up gap-5 p-5 sm:p-7 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center lg:gap-8 lg:p-8")}>
+      <div className="min-w-0">
+        <div className="flex min-h-7 items-center justify-between gap-3">
+          <p className="min-w-0 truncate text-[13px] font-medium tabular-nums text-ink-3">{date}</p>
+          {actions && <div className="-mr-2 flex shrink-0 items-center gap-0.5">{actions}</div>}
+        </div>
+        <h1 className="mt-1.5 text-[32px] font-bold leading-[1.05] tracking-[-0.035em] text-ink sm:text-[40px]">
+          {greeting}
+        </h1>
       </div>
-      <h1 className="mt-1 text-[28px] font-semibold leading-[1.15] tracking-[-0.022em] text-ink sm:text-[32px]">
-        {greeting}
-      </h1>
-      {week && <WeekLine week={week} />}
+      {week && <WeekTiles week={week} />}
     </header>
   );
 }
 
-/** Three plain facts about the next seven days, inline under the greeting. */
-function WeekLine({ week }: { week: WeekSummary }) {
+/** Four plain facts about the next seven days, as tiles beside the greeting. */
+function WeekTiles({ week }: { week: WeekSummary }) {
+  const hours = Math.round(week.scheduledMinutes / 60);
   const facts: { value: string; label: string }[] = [
     { value: String(week.commitments), label: week.commitments === 1 ? "commitment" : "commitments" },
     { value: String(week.deadlines), label: week.deadlines === 1 ? "deadline" : "deadlines" },
+    { value: `${hours}h`, label: "scheduled" },
     week.busiestDay
       ? { value: formatDateKey(week.busiestDay, { weekday: "short" }), label: "busiest" }
       : { value: String(week.openDays), label: week.openDays === 1 ? "open day" : "open days" },
   ];
   return (
-    <dl aria-label="Next 7 days" className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-[13px] text-ink-3 sm:gap-x-4">
-      <dt className="text-ink-3">Next 7 days</dt>
+    <dl aria-label="Next 7 days" className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-2 lg:gap-2.5">
       {facts.map((f) => (
-        <dd key={f.label} className="flex items-baseline gap-1">
-          <span className="font-medium tabular-nums text-ink">{f.value}</span>
-          {f.label}
-        </dd>
+        <div key={f.label} className="flex min-w-0 flex-row-reverse items-baseline justify-end gap-1.5 rounded-2xl bg-surface-2 px-3.5 py-2.5 sm:flex-col-reverse sm:items-start sm:gap-0 sm:px-4 sm:py-3 lg:w-[124px]">
+          <dt className="truncate text-[12.5px] font-medium text-ink-3">{f.label}</dt>
+          <dd className="text-[20px] font-bold leading-tight tracking-[-0.03em] tabular-nums text-ink sm:text-[28px]">{f.value}</dd>
+        </div>
       ))}
     </dl>
   );
@@ -67,13 +73,12 @@ function WeekLine({ week }: { week: WeekSummary }) {
 
 export function HomeAssistantSkeleton() {
   return (
-    <div className="space-y-10">
-      <div>
+    <div className="space-y-4 lg:space-y-5">
+      <div className={cn(CARD, "p-5 sm:p-7 lg:p-8")}>
         <Skeleton className="h-4 w-40" />
-        <Skeleton className="mt-3 h-8 w-72" />
-        <Skeleton className="mt-4 h-4 w-60" />
+        <Skeleton className="mt-3 h-10 w-80 max-w-full" />
       </div>
-      <div className="space-y-3">
+      <div className={cn(CARD, "space-y-3 p-5 sm:p-7")}>
         <Skeleton className="h-3.5 w-20" />
         <Skeleton className="h-4 w-full max-w-xl" />
         <Skeleton className="h-4 w-4/5 max-w-lg" />
@@ -89,7 +94,7 @@ export function HomeAssistantSkeleton() {
 
 function Blocked({ icon, title, body, action }: { icon: ReactNode; title: string; body: string; action?: ReactNode }) {
   return (
-    <div className="flex flex-col items-center rounded-2xl border border-border bg-surface px-6 py-14 text-center">
+    <div className={cn(CARD, "flex flex-col items-center px-6 py-14 text-center")}>
       <span className="grid size-11 place-items-center rounded-xl bg-surface-2 text-ink-3">{icon}</span>
       <h2 className="mt-4 text-[15px] font-medium text-ink">{title}</h2>
       <p className="mt-1.5 max-w-sm text-[13px] leading-relaxed text-ink-2">{body}</p>
@@ -103,7 +108,7 @@ export async function HomeAssistant({ fresh, glance }: { fresh: boolean; glance?
 
   if (data.state === "preview") {
     return (
-      <div className="space-y-8">
+      <div className="space-y-4 lg:space-y-5">
         <Header date="Preview mode" greeting={data.greeting} />
         <Blocked
           icon={<Database className="size-5" />}
@@ -115,7 +120,7 @@ export async function HomeAssistant({ fresh, glance }: { fresh: boolean; glance?
   }
   if (data.state === "signed-out") {
     return (
-      <div className="space-y-8">
+      <div className="space-y-4 lg:space-y-5">
         <Header date={null} greeting={data.greeting} />
         <Blocked
           icon={<LogIn className="size-5" />}
@@ -132,7 +137,7 @@ export async function HomeAssistant({ fresh, glance }: { fresh: boolean; glance?
   }
   if (data.state === "error") {
     return (
-      <div className="space-y-8">
+      <div className="space-y-4 lg:space-y-5">
         <Header date={null} greeting={data.greeting} />
         <Blocked
           icon={<Sparkles className="size-5" />}
@@ -161,7 +166,7 @@ export async function HomeAssistant({ fresh, glance }: { fresh: boolean; glance?
     .slice(0, Math.max(0, (proactive.nudges.length ? 3 : 4) - actionChips.length));
 
   return (
-    <div className="flex flex-col gap-7 sm:gap-9">
+    <div className="flex flex-col gap-4 lg:gap-5">
       <Header
         date={formatDateKey(data.todayKey, { weekday: "long", month: "long", day: "numeric" })}
         greeting={data.opening.greeting}
@@ -180,7 +185,7 @@ export async function HomeAssistant({ fresh, glance }: { fresh: boolean; glance?
         }
       />
       {glance}
-      <section aria-label="Assistant" className="min-w-0">
+      <section aria-label="Assistant" className={cn(CARD, "min-w-0 px-5 pt-6 sm:px-7 sm:pt-7")}>
         <Chat
           key={conversationId ?? "home"}
           mode="assistant"

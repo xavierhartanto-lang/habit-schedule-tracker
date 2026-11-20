@@ -21,9 +21,9 @@ import type { Nudge, ProactiveChip } from "@/features/home/proactive";
 const HOME_RESUME_SHOWN = 6;
 
 const CHIP_BUTTON =
-  "rounded-full border border-border bg-surface px-3 py-1.5 text-[12.5px] text-ink-2 pointer-coarse:px-3.5 pointer-coarse:py-2.5 pointer-coarse:text-[13.5px] transition-[background-color,border-color,color,transform] duration-150 hover:border-accent/40 hover:bg-accent-soft hover:text-accent-ink active:scale-[0.97] disabled:pointer-events-none disabled:opacity-50";
+  "rounded-xl bg-surface-2 px-3.5 py-2 text-[13px] font-semibold text-ink pointer-coarse:px-3.5 pointer-coarse:py-2.5 pointer-coarse:text-[13.5px] transition-[background-color,border-color,color,transform] duration-150 hover:bg-accent-soft hover:text-accent-ink active:scale-[0.97] disabled:pointer-events-none disabled:opacity-50";
 
-const EYEBROW = "flex items-center gap-1.5 text-[12px] font-medium tracking-[0.01em] text-ink-3";
+const EYEBROW = "flex items-center gap-1.5 text-[11.5px] font-semibold uppercase tracking-[0.08em] text-ink-3";
 
 /** Approve and Undo change saved data, so the rest of the page (e.g. Home's task rail) refreshes after them. */
 function planActions(refresh: () => void): PlanCardActions {
@@ -390,7 +390,7 @@ export function Chat({
                 <h2 id="home-brief" className={EYEBROW}>
                   <Sparkles aria-hidden className="size-3.5 text-accent" /> Briefing
                 </h2>
-                <p className="mt-2.5 max-w-[60ch] text-[15.5px] leading-[1.65] tracking-[-0.005em] text-ink text-pretty sm:text-[16.5px]">{opening}</p>
+                <p className="mt-3 max-w-[60ch] text-[16px] leading-[1.6] tracking-[-0.01em] text-ink text-pretty sm:text-[17.5px]">{opening}</p>
                 {empty && !openingRecHandled && openingChips.length > 0 && (
                   <ChipRow chips={openingChips} onAct={(c) => act(c, null)} disabled={busy} className="mt-4" />
                 )}
@@ -570,7 +570,7 @@ export function Chat({
       <div
         className={cn(
           embedded
-            ? "sticky bottom-[var(--tabbar-h)] z-10 -mx-1 bg-bg px-1 pb-3 pt-2 before:pointer-events-none before:absolute before:inset-x-0 before:-top-6 before:h-6 before:bg-gradient-to-t before:from-bg before:to-transparent lg:bottom-0 lg:pb-6"
+            ? "sticky bottom-[var(--tabbar-h)] z-10 -mx-1 rounded-b-[22px] bg-surface px-1 pb-4 pt-2 before:pointer-events-none before:absolute before:inset-x-0 before:-top-6 before:h-6 before:bg-gradient-to-t before:from-surface before:to-transparent lg:bottom-0 sm:pb-6"
             : "border-t border-border bg-surface/80 backdrop-blur",
         )}
       >
@@ -611,8 +611,9 @@ export function Chat({
                   send();
                 }}
                 className={cn(
-                  "flex items-end gap-2 rounded-2xl border bg-surface p-2 shadow-card transition-[border-color,box-shadow] duration-200 focus-within:shadow-pop",
-                  tooLong ? "border-danger/60" : "border-border hover:border-border-strong focus-within:border-accent/60",
+                  "flex items-end gap-2 rounded-2xl border p-2 transition-[border-color,box-shadow,background-color] duration-200",
+                  embedded ? "bg-surface-2 focus-within:bg-surface focus-within:shadow-pop" : "bg-surface shadow-card focus-within:shadow-pop",
+                  tooLong ? "border-danger/60" : cn(embedded ? "border-transparent" : "border-border", "hover:border-border-strong focus-within:border-accent/60"),
                 )}
               >
                 <label htmlFor={`${mode}-input`} className="sr-only">
@@ -655,7 +656,7 @@ export function Chat({
                     type="submit"
                     disabled={!draft.trim() || tooLong}
                     aria-label="Send"
-                    className="grid size-9 shrink-0 place-items-center rounded-xl pointer-coarse:size-10 bg-accent text-on-accent transition-[background-color,transform] duration-150 hover:bg-accent-hover active:scale-95 disabled:bg-surface-2 disabled:text-ink-3"
+                    className="grid size-9 shrink-0 place-items-center rounded-xl pointer-coarse:size-10 bg-accent text-on-accent shadow-[0_6px_16px_-8px_var(--accent)] transition-[background-color,transform] duration-150 hover:bg-accent-hover active:scale-95 disabled:bg-border disabled:text-ink-3 disabled:shadow-none"
                   >
                     <ArrowUp className="size-4" strokeWidth={2.25} />
                   </button>

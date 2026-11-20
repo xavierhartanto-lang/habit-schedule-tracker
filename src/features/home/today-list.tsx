@@ -42,7 +42,7 @@ export function TodayList({ items, areas, timeZone }: { items: TodayItem[]; area
     );
   }
   return (
-    <ol className="-mx-2 space-y-0.5">
+    <ol className="-mx-2 space-y-1">
       {items.map((c) => {
         const start = new Date(c.start);
         const end = new Date(c.end);
@@ -52,7 +52,7 @@ export function TodayList({ items, areas, timeZone }: { items: TodayItem[]; area
           <li
             key={c.key}
             className={cn(
-              "flex items-center gap-3 rounded-lg px-2 py-1.5 transition-colors",
+              "flex items-center gap-3 rounded-[14px] px-2.5 py-2 transition-colors",
               live ? "bg-accent-soft" : "hover:bg-surface-2",
               past && "opacity-50",
             )}
@@ -61,18 +61,30 @@ export function TodayList({ items, areas, timeZone }: { items: TodayItem[]; area
               {c.allDay ? "All day" : formatTimeInZone(start, timeZone)}
             </div>
             <span
-              className={cn("h-7 w-[3px] shrink-0 rounded-full", c.kind === "flexible" && "opacity-40")}
+              className={cn("w-1 shrink-0 self-stretch rounded-full", c.kind === "flexible" && "opacity-40")}
               style={{ background: areaColors(findArea(areas, c.areaId)).color }}
             />
             <div className="min-w-0 flex-1">
-              <p className="truncate text-[13.5px] font-medium text-ink">{c.title}</p>
+              <p className="truncate text-[13.5px] font-semibold text-ink">{c.title}</p>
               <p className="truncate text-[12px] tabular-nums text-ink-3">
                 {c.allDay ? "All day" : `${formatTimeInZone(start, timeZone)} – ${formatTimeInZone(end, timeZone)}`}
                 {c.location && <> · {c.location}</>}
               </p>
+              {live && (
+                <div
+                  role="progressbar"
+                  aria-label="Time elapsed"
+                  aria-valuenow={Math.round(elapsed(start, end, now) * 100)}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  className="mt-2 h-1.5 overflow-hidden rounded-full bg-accent/15"
+                >
+                  <div className="h-full rounded-full bg-accent" style={{ width: `${elapsed(start, end, now) * 100}%` }} />
+                </div>
+              )}
             </div>
             {live && (
-              <span className="flex shrink-0 items-center gap-1 text-[11px] font-medium text-accent-ink">
+              <span className="flex shrink-0 items-center gap-1 self-start pt-0.5 text-[11px] font-bold uppercase tracking-wide text-accent-ink">
                 <span aria-hidden className="size-1.5 rounded-full bg-accent" />
                 Now
               </span>
@@ -82,4 +94,9 @@ export function TodayList({ items, areas, timeZone }: { items: TodayItem[]; area
       })}
     </ol>
   );
+}
+
+function elapsed(start: Date, end: Date, now: Date) {
+  const span = end.getTime() - start.getTime();
+  return span > 0 ? Math.min(1, Math.max(0, (now.getTime() - start.getTime()) / span)) : 0;
 }
