@@ -26,6 +26,14 @@ const CHIP_BUTTON =
 
 const EYEBROW = "flex items-center gap-1.5 text-[11.5px] font-semibold uppercase tracking-[0.08em] text-ink-3";
 
+function deviceTimeZone(): string | undefined {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Approve and Undo change saved data, so the rest of the page (e.g. Home's task rail) refreshes after them. */
 function planActions(refresh: () => void): PlanCardActions {
   const thenRefresh =
@@ -209,6 +217,7 @@ export function Chat({
       for await (const event of streamChat(
         {
           mode,
+          timeZone: mode === "onboarding" || !conversationId ? deviceTimeZone() : undefined,
           conversationId,
           message: request.message,
           retry: request.retry,

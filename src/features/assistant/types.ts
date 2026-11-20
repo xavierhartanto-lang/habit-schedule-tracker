@@ -63,6 +63,8 @@ export type ChatStreamEvent =
 
 export type ChatRequestBody = {
   mode: ConversationKind;
+  /** This device's time zone. Adopted only while the profile is still on the UTC default. */
+  timeZone?: string;
   conversationId?: string | null;
   /** The user's new message. Omit to let the assistant open (onboarding) or with `retry`. */
   message?: string;

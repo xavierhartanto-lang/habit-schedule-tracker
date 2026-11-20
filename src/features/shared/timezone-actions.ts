@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { getSessionUser } from "@/lib/auth/session";
 import { getProfile, updateProfile } from "@/lib/db/profiles";
+import { moveUtcTimesToZone } from "@/lib/db/rezone";
 import { isValidTimeZone } from "@/lib/scheduling/zoned";
 
 /**
@@ -24,6 +25,8 @@ export async function adoptBrowserTimeZone(timeZone: string): Promise<{ changed:
       school: profile.school,
       timezone: timeZone,
     });
+    // Events and due dates saved so far were read as UTC. Keep their wall clock times in the real zone.
+    await moveUtcTimesToZone(user.id, timeZone).catch((error) => console.error("[timezone] repair failed", error));
   } catch {
     return { changed: false };
   }
