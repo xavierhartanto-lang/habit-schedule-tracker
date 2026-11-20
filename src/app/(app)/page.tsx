@@ -1,10 +1,10 @@
 import { Skeleton } from "@/components/ui";
+import { AdaptiveLead, AdaptiveRail } from "@/features/home/adaptive/adaptive-rail";
 import { GlanceSkeleton, HomeGlance } from "@/features/home/glance";
 import { HomeAssistant, HomeAssistantSkeleton } from "@/features/home/home-assistant";
 import { PriorityTasks } from "@/features/home/priority-tasks";
 import { RailSection } from "@/features/home/rail-section";
 import { TodaySchedule, TodayScheduleSkeleton } from "@/features/home/today-schedule";
-import { Upcoming } from "@/features/home/upcoming";
 import { OnboardingRedirect } from "@/features/onboarding/onboarding-redirect";
 import { Suspense } from "react";
 
@@ -20,11 +20,14 @@ function SectionSkeleton({ title }: { title: string }) {
 }
 
 /**
- * Home is the assistant. A hero card (greeting + the week in tiles) and the
- * conversation card fill the main column; a rail of cards beside it holds
- * today's schedule, what's coming up and open tasks. Below xl the rail drops under
- * the conversation as two columns, and a glance hub under the greeting puts
- * what's next, tasks, habits and insights one tap away.
+ * Home is the assistant, in a hybrid layout (Phase 7.1):
+ *  - Stable workspace: greeting + week tiles, the conversation, Today and
+ *    Tasks in the rail, navigation. Always in the same place.
+ *  - Adaptive sections between Today and Tasks: chosen by
+ *    features/home/adaptive/select.ts from the Phase 5 engine's output,
+ *    in fixed slots, only when they matter.
+ * Below xl the rail drops under the conversation as two columns, and the
+ * lead adaptive section moves up into the glance hub.
  */
 export default function HomePage(props: PageProps<"/">) {
   return (
@@ -46,8 +49,8 @@ export default function HomePage(props: PageProps<"/">) {
         <Suspense fallback={<TodayScheduleSkeleton />}>
           <TodaySchedule />
         </Suspense>
-        <Suspense fallback={<SectionSkeleton title="Coming up" />}>
-          <Upcoming />
+        <Suspense fallback={<SectionSkeleton title="What matters now" />}>
+          <AdaptiveRail />
         </Suspense>
         <Suspense fallback={<SectionSkeleton title="Tasks" />}>
           <PriorityTasks />
@@ -63,9 +66,14 @@ async function HomeAssistantFromParams({ searchParams }: { searchParams: PagePro
     <HomeAssistant
       fresh={fresh === "1"}
       glance={
-        <Suspense fallback={<GlanceSkeleton />}>
-          <HomeGlance />
-        </Suspense>
+        <>
+          <Suspense fallback={<GlanceSkeleton />}>
+            <HomeGlance />
+          </Suspense>
+          <Suspense fallback={null}>
+            <AdaptiveLead />
+          </Suspense>
+        </>
       }
     />
   );
