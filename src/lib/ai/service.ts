@@ -176,7 +176,7 @@ export type InterpretInput = {
  * follow-ups and builds proposals from the result.
  */
 export async function interpretMessage(input: InterpretInput): Promise<PlannerResult> {
-  const empty: PlannerResult = { intents: [], consumedDrafts: [], question: null, dropped: [], retitled: [] };
+  const empty: PlannerResult = { intents: [], consumedDrafts: [], confirmed: [], cancelled: [], question: null, dropped: [], retitled: [] };
   if (!input.userMessage.trim()) return empty;
   const { client, model } = getAiClient();
 

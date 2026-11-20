@@ -65,6 +65,29 @@ export const PAYLOAD_SCHEMAS = {
   remove_block: z.object({ commitmentId: zUuid }),
   remove_event: z.object({ commitmentId: zUuid }),
   skip_occurrence: z.object({ commitmentId: zUuid, date: zDateKey }),
+  update_event: z.object({
+    commitmentId: zUuid,
+    patch: z
+      .object({
+        title: zText(200).optional(),
+        starts_at: zIso.optional(),
+        ends_at: zIso.optional(),
+        recurrence_rule: z.string().nullable().refine((v) => v === null || isRecurrenceRule(v), "Unsupported repeat rule.").optional(),
+        location: zOptText(200).optional(),
+      })
+      .strict()
+      .refine((p) => Object.keys(p).length > 0, "Nothing to change.")
+      .refine((p) => !("starts_at" in p) || ("ends_at" in p && Date.parse(p.ends_at!) > Date.parse(p.starts_at!)), "The end must be after the start."),
+    expect: z.object({
+      title: z.string(),
+      starts_at: z.string().nullable(),
+      ends_at: z.string().nullable(),
+      recurrence_rule: z.string().nullable(),
+    }),
+    startsAt: zIso,
+    endsAt: zIso,
+    timezone: zTimeZone,
+  }),
   create_task: z.object({
     title: zText(300),
     description: zOptText(2000),
@@ -205,6 +228,11 @@ export function toOp(item: { id: string; action: PlanItemAction; payload: unknow
       const p = parsePayload("skip_occurrence", item.payload);
       if (!p.ok) return p;
       return { ok: true, op: { ...base, op: "skip_occurrence", id: p.value.commitmentId, date: p.value.date } };
+    }
+    case "update_event": {
+      const p = parsePayload("update_event", item.payload);
+      if (!p.ok) return p;
+      return { ok: true, op: { ...base, op: "update_event", id: p.value.commitmentId, patch: p.value.patch, expect: p.value.expect } };
     }
     case "create_task": {
       const p = parsePayload("create_task", item.payload);

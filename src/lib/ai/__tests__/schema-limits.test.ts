@@ -56,10 +56,10 @@ describe("structured-output schemas fit the API limits", () => {
 describe("fromApiWire", () => {
   const none = { iso_date: "", weekday: "none", week: "none", day_offset: -1 };
   const api = (o: Record<string, unknown>) => ({
-    draft_id: "", explicit: false, title: "", area: "", target_ref: "", date: none, start_time: "", end_time: "",
+    draft_id: "", explicit: false, title: "", area: "", target_ref: "", target_name: "", date: none, start_time: "", start_in_minutes: -1, end_time: "",
     duration_minutes: -1, recurrence: "none", days: [], deadline: none, deadline_time: "", amount_kind: "none",
     amount_minutes: -1, session_count: -1, session_minutes: -1, window: "none", priority: "none", cadence: "none",
-    times_per_week: -1, progress: -1, target_date: none, location: "", fact_category: "none", details: "",
+    times_per_week: -1, progress: -1, target_date: none, location: "", scope: "none", fact_category: "none", details: "",
     pref_day_start: "", pref_day_end: "", pref_max_session_minutes: -1, pref_buffer_minutes: -1, pref_protected_label: "",
     ...o,
   });

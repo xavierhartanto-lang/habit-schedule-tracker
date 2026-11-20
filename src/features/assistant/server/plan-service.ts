@@ -1,14 +1,25 @@
 import "server-only";
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import type { ChatTurn } from "@/lib/ai/prompts";
 import { interpretMessage } from "@/lib/ai/service";
 import { normalizeText } from "@/lib/ai/extraction";
-import { assessIntent, type RefTable, type World } from "@/lib/assistant/assess";
+import {
+  advanceActions,
+  attachItems,
+  isOpen,
+  linkCorrection,
+  pruneActions,
+  sameAs,
+  syncActions,
+  type ActionContext,
+} from "@/lib/assistant/action-state";
+import { assessIntent, occursOn, type Assessment, type KnownActivity, type RefTable, type World } from "@/lib/assistant/assess";
 import { buildPlan, timingFor, type ItemDisplay } from "@/lib/assistant/build-plan";
-import { DRAFT_TTL_MS, nextDrafts } from "@/lib/assistant/drafts";
-import { dedupeIntents } from "@/lib/assistant/intents";
+import { clockLabel, shortDate } from "@/lib/assistant/dates";
+import { dedupeIntents, mergeIntent, type Intent } from "@/lib/assistant/intents";
+import { nameScore, nameTokens, isGenericToken } from "@/lib/assistant/resolve";
 import { parsePayload, toOp, type Op } from "@/lib/assistant/ops";
 import { buildPlannerUserPrompt, namingContext, plannerResultBlock, type PlannerKnowledge } from "@/lib/assistant/planner-prompt";
 import { applyPreferenceChanges } from "@/lib/assistant/prefs";
@@ -19,12 +30,14 @@ import { listLifeAreas } from "@/lib/db/life-areas";
 import {
   applyPlanItems,
   createPlan,
-  getDrafts,
+  getActions,
+  getItemStates,
   getPlan,
   listOpenItemsInConversation,
   listPendingBlocks,
   markAutoApplied,
-  setDrafts,
+  rejectItems,
+  setActions,
   supersedeItems,
   toPlanView,
   undoPlanItem,
@@ -37,7 +50,7 @@ import { loadSchedulingBase } from "@/lib/db/scheduling";
 import { getSchedulingPreferences, saveSchedulingPreferences } from "@/lib/db/scheduling-preferences";
 import type { Commitment } from "@/lib/domain/types";
 import { checkPlacements, planSchedule, type PlanRequest, type SchedulingPreferences } from "@/lib/scheduling/planner";
-import { addDaysToKey, dateKeyInZone, startOfDayInZone } from "@/lib/scheduling/zoned";
+import { addDaysToKey, dateKeyInZone, startOfDayInZone, timeKeyInZone } from "@/lib/scheduling/zoned";
 import type { Clarify, PlanItemOutcome, PlanView } from "../plan-types";
 
 /**
@@ -100,7 +113,7 @@ export async function loadWorld(userId: string, now: Date): Promise<LoadedWorld>
   goals.slice(0, 30).forEach((g, i) => refs.goals.set(`g${i + 1}`, g));
 
   return {
-    world: { todayKey, timeZone, weekStartsOn, areas, refs },
+    world: { todayKey, timeZone, weekStartsOn, areas, refs, known: knownActivities(base.events, timeZone), nowTime: timeKeyInZone(now, timeZone) },
     events: base.events,
     openTasks: base.openTasks,
     preferences: base.preferences,
@@ -120,7 +133,123 @@ export type PlanTurnResult = {
   clarify: Clarify | null;
   /** For the reply model: exactly what happened. */
   actions: string | null;
+  /** Earlier cards this message changed (approved by "yes", replaced by a correction, cancelled), so they update live. */
+  touched?: PlanView[];
 };
+
+/** Usual time and length of activities already on the calendar (repeating ones first). */
+export function knownActivities(events: Commitment[], timeZone: string): KnownActivity[] {
+  const out: KnownActivity[] = [];
+  const seen = new Set<string>();
+  const sorted = [...events].filter((e) => e.kind === "fixed" && e.startsAt && e.endsAt).sort((a, b) => Number(!!b.recurrenceRule) - Number(!!a.recurrenceRule));
+  for (const e of sorted) {
+    const key = nameTokens(e.title).sort().join("+");
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    const tz = e.timezone ?? timeZone;
+    out.push({
+      title: e.title,
+      startTime: timeKeyInZone(new Date(e.startsAt!), tz),
+      durationMinutes: Math.round((Date.parse(e.endsAt!) - Date.parse(e.startsAt!)) / 60_000),
+      source: "event",
+    });
+  }
+  return out.slice(0, 60);
+}
+
+/** Ref of each record by id, for this turn's numbering. */
+function refIndex(refs: RefTable): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const map of [refs.tasks, refs.events, refs.blocks, refs.habits, refs.goals] as Map<string, { id: string }>[]) {
+    for (const [ref, item] of map) if (!out.has(item.id)) out.set(item.id, ref);
+  }
+  return out;
+}
+
+function titleOf(refs: RefTable, ref: string): string | null {
+  const item = refs.tasks.get(ref) ?? refs.events.get(ref) ?? refs.blocks.get(ref) ?? refs.habits.get(ref) ?? refs.goals.get(ref);
+  return item?.title ?? null;
+}
+
+/**
+ * What "it" / "that" can mean right now: records the latest actions touched
+ * (newest first), then records named in the last few messages.
+ */
+export function focusRefs(refs: RefTable, actions: ActionContext[], recentText: string[]): string[] {
+  const byId = refIndex(refs);
+  const out: string[] = [];
+  const add = (ref: string | undefined) => {
+    if (ref && !out.includes(ref)) out.push(ref);
+  };
+  const recent = [...actions].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+  for (const a of recent.slice(0, 3)) {
+    for (const id of [...a.resultIds, a.targetId]) if (id) add(byId.get(id));
+  }
+  const words = new Set(nameTokens(recentText.join(" ")));
+  for (const ref of byId.values()) {
+    const title = titleOf(refs, ref);
+    if (!title) continue;
+    const tokens = nameTokens(title);
+    const specific = tokens.filter((t) => !isGenericToken(t));
+    const need = specific.length ? specific : tokens;
+    if (need.length && need.every((t) => words.has(t))) add(ref);
+  }
+  return out.slice(0, 6);
+}
+
+/** Refs in an action's intent go stale when numbering changes; re-point them at today's refs. */
+function remapTargets(actions: ActionContext[], refs: RefTable): ActionContext[] {
+  const byId = refIndex(refs);
+  return actions.map((a) => (a.targetId ? { ...a, intent: { ...a.intent, targetRef: byId.get(a.targetId) ?? null } } : a));
+}
+
+/** Deterministic request id for a chat approval, so a retried message never applies twice. */
+function chatRequestId(messageId: string, planId: string): string {
+  const hex = createHash("sha256").update(`chat-approve:${messageId}:${planId}`).digest("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
+/** One line for an action's card: "Math Tutoring · Thu Nov 19, 5:00 PM-6:00 PM". */
+function cardSummary(items: { title: string; timing: ItemDisplay["timing"]; action: string }[]): string | null {
+  const first = items[0];
+  if (!first) return null;
+  const t = first.timing;
+  const when = t ? ` · ${shortDate(t.date)}, ${clockLabel(t.startTime)}-${clockLabel(t.endTime)}${t.recurrence ? `, ${t.recurrence}` : ""}` : "";
+  const more = items.length > 1 ? ` (+${items.length - 1} more)` : "";
+  return `${first.action.replace("_", " ")}: ${first.title}${when}${more}`;
+}
+
+/**
+ * Duplicate prevention: a creation that matches something already saved
+ * (on the calendar, on the task list, or saved earlier in this chat) or
+ * already on an open card does not get a second card.
+ */
+function duplicateNote(a: Assessment, actions: ActionContext[], loaded: LoadedWorld): string | null {
+  if (a.status !== "ready") return null;
+  const spec = a.spec;
+  const twin = sameAs(actions, spec, a.intent.draftId ?? "");
+  if (twin) {
+    return twin.status === "saved"
+      ? `"${twin.summary ?? spec.kind}" was already saved earlier in this conversation. Nothing new was added; say it's already there.`
+      : `"${twin.summary ?? spec.kind}" is already on an approval card above. No second card was made; point to that one.`;
+  }
+  if (spec.kind === "event") {
+    const tz = loaded.world.timeZone;
+    const same = loaded.events.find(
+      (e) =>
+        e.startsAt &&
+        nameScore(spec.title, e.title) >= 0.99 &&
+        occursOn(e, spec.date, tz) &&
+        timeKeyInZone(new Date(e.startsAt), e.timezone ?? tz) === spec.startTime,
+    );
+    if (same) return `${same.title} is already on the calendar on ${shortDate(spec.date)} at ${clockLabel(spec.startTime)}. Nothing new was added; say so.`;
+  }
+  if (spec.kind === "task_create") {
+    const same = loaded.openTasks.find((t) => nameScore(spec.title, t.title) >= 0.99);
+    if (same) return `"${same.title}" is already on the task list. No duplicate was added; say so.`;
+  }
+  return null;
+}
 
 export async function planTurn(input: {
   userId: string;
@@ -134,14 +263,24 @@ export async function planTurn(input: {
   now?: Date;
 }): Promise<PlanTurnResult> {
   const now = input.now ?? new Date();
-  const [previousDrafts, loaded] = await Promise.all([getDrafts(input.userId, input.conversationId), loadWorld(input.userId, now)]);
-  const drafts = previousDrafts.filter((d) => now.getTime() - Date.parse(d.createdAt) < DRAFT_TTL_MS);
+  const [stored, loaded] = await Promise.all([getActions(input.userId, input.conversationId), loadWorld(input.userId, now)]);
   const { world } = loaded;
 
+  // 1. Action state follows the database: approved cards are saved only when applied.
+  const states = await getItemStates(input.userId, stored.flatMap((a) => a.itemIds));
+  let actions = remapTargets(pruneActions(syncActions(stored, states, now), now), world.refs);
   const recentHistory = input.history.slice(-6);
+  world.focus = focusRefs(world.refs, actions, [...recentHistory.slice(-4).map((t) => t.content), input.userText]);
+  const byRecord = refIndex(world.refs);
+  const savedRefs = new Map(
+    actions.flatMap((a) => (a.status === "saved" && a.resultIds[0] && byRecord.has(a.resultIds[0]) ? [[a.id, byRecord.get(a.resultIds[0])!] as const] : [])),
+  );
+  const continuable = actions.filter(isOpen);
+
+  // 2. Understand the message (model), then validate it (server).
   const interpreted = await interpretMessage({
     userMessage: input.userText,
-    drafts,
+    drafts: continuable,
     signal: input.signal,
     naming: namingContext({ refs: world.refs, areas: world.areas, recentHistory, knowledge: input.knowledge }),
     prompt: buildPlannerUserPrompt({
@@ -150,7 +289,8 @@ export async function planTurn(input: {
       timeZone: world.timeZone,
       areas: world.areas,
       refs: world.refs,
-      drafts,
+      actions,
+      savedRefs,
       recentHistory,
       newUserText: input.userText,
       knowledge: input.knowledge,
@@ -159,16 +299,78 @@ export async function planTurn(input: {
   if (interpreted.dropped.length) console.info("[plan] dropped intents", interpreted.dropped);
   if (interpreted.retitled.length) console.info("[plan] unsupported title details removed", interpreted.retitled);
 
-  const assessments = dedupeIntents(interpreted.intents).map((i) => assessIntent(i, world));
-  const next = nextDrafts(drafts, interpreted.consumedDrafts, assessments, now);
-  const notes = next.givenUp.map((about) => `Stopped asking about ${about}; the user can add it from the calendar.`);
+  // 3. Corrections the model didn't link ("It's math tutoring") still join their action.
+  const consumed = [...interpreted.consumedDrafts];
+  const intents: Intent[] = dedupeIntents(interpreted.intents).map((intent) => {
+    const linked = linkCorrection(intent, input.userText, actions);
+    if (!linked) return intent;
+    const action = actions.find((a) => a.id === linked)!;
+    consumed.push(linked);
+    return { ...mergeIntent(action.intent, intent), draftId: linked };
+  });
+  // The user picked from our own "which one?" options: trust that pick.
+  const prepared = intents.map((intent) => {
+    const prior = intent.draftId ? actions.find((a) => a.id === intent.draftId) : undefined;
+    return prior?.asked.at(-1) === "target" && intent.targetRef ? { ...intent, targetConfirmed: true } : intent;
+  });
+
+  const notes: string[] = [];
+  const assessments = prepared.map((intent) => {
+    const a = assessIntent(intent, world);
+    if (a.status === "skip" && a.note) notes.push(a.note);
+    const dup = duplicateNote(a, actions, loaded);
+    if (dup) {
+      notes.push(dup);
+      return { status: "skip" as const, intent, reason: "Duplicate." };
+    }
+    return a;
+  });
+
+  // 4. Approvals and cancels said in words. The database decides what happened.
+  const approvedHere: string[] = [];
+  const touchedPlanIds = new Set<string>();
+  if (interpreted.confirmed.length) {
+    const targets = interpreted.confirmed.flatMap((id) => {
+      if (id !== "latest") return actions.filter((a) => a.id === id && a.status === "proposed");
+      const latest = actions.filter((a) => a.status === "proposed").sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0];
+      return latest ? [latest] : [];
+    });
+    if (!targets.length) notes.push("The user said yes, but nothing is waiting for approval. Nothing was changed.");
+    const byPlan = new Map<string, string[]>();
+    for (const a of targets) if (a.planId) byPlan.set(a.planId, [...(byPlan.get(a.planId) ?? []), ...a.itemIds]);
+    for (const [planId, itemIds] of byPlan) {
+      touchedPlanIds.add(planId);
+      try {
+        const { results } = await approveItems(input.userId, planId, { itemIds, requestId: chatRequestId(input.userMessageId, planId), now });
+        approvedHere.push(...targets.filter((a) => a.planId === planId).map((a) => a.id));
+        const bad = results.filter((r) => r.outcome !== "applied" && r.outcome !== "already_applied");
+        if (bad.length) notes.push(`Approved in chat, but not everything saved: ${bad.map((r) => r.message ?? r.outcome).join("; ")}.`);
+      } catch (error) {
+        console.error("[plan] chat approval failed", error);
+        notes.push("The user approved in chat, but saving failed. Nothing changed. Say so and suggest tapping Approve on the card.");
+      }
+    }
+  }
+
+  const advance = advanceActions(actions, { consumed, cancelled: interpreted.cancelled, assessments, userText: input.userText }, now);
+  actions = advance.actions;
+  const givenUp = advance.givenUp.map((about) => `Stopped asking about ${about}; the user can add it from the calendar.`);
+  notes.push(...givenUp);
   const clarify: Clarify | null =
-    next.clarify ?? (interpreted.question ? { about: "Your message", field: "other", question: interpreted.question, choices: [] } : null);
+    advance.clarify ?? (interpreted.question ? { about: "Your message", field: "other", question: interpreted.question, choices: [] } : null);
 
-  const ready = assessments.flatMap((a) => (a.status === "ready" ? [{ spec: a.spec, explicit: a.intent.explicit }] : []));
+  // Cancelled cards close; corrected ones are replaced.
+  for (const a of actions) {
+    if (a.planId && a.itemIds.some((i) => advance.supersede.includes(i))) touchedPlanIds.add(a.planId);
+  }
+  for (const a of stored) if (a.planId && a.itemIds.some((i) => advance.supersede.includes(i))) touchedPlanIds.add(a.planId);
+  for (const a of stored.filter((x) => interpreted.cancelled.includes(x.id) && x.status === "proposed" && x.planId)) {
+    touchedPlanIds.add(a.planId!);
+    await rejectItems(input.userId, a.planId!, a.itemIds).catch((error) => console.error("[plan] could not close card", error));
+  }
+
   let plan: StoredPlan | null = null;
-
-  if (ready.length) {
+  if (advance.ready.length) {
     const busy = await listPendingBlocks(input.userId, { now });
     const built = buildPlan({
       now: now.toISOString(),
@@ -177,7 +379,7 @@ export async function planTurn(input: {
       events: loaded.events,
       openTasks: loaded.openTasks,
       busy,
-      specs: ready,
+      specs: advance.ready.map((r) => ({ spec: r.spec, explicit: r.explicit, actionId: r.actionId })),
       sourceMessageId: input.userMessageId,
     });
     notes.push(...built.notes);
@@ -188,6 +390,8 @@ export async function planTurn(input: {
         built,
         now,
       });
+      // A corrected action replaces its old card (by action id), never adds a second one.
+      await supersedeItems(input.userId, advance.supersede);
       await supersedeOlder(input.userId, input.conversationId, plan);
       const auto = plan.items.filter((i, idx) => built.items[idx]?.autoApply).map((i) => i.id);
       if (auto.length) {
@@ -198,15 +402,61 @@ export async function planTurn(input: {
         );
       }
       plan = await getPlan(input.userId, plan.id);
+    } else if (advance.supersede.length) {
+      await supersedeItems(input.userId, advance.supersede);
+    }
+    const tagged = plan
+      ? plan.items.map((item, idx) => ({ ...item, actionId: built.items[idx]?.actionId ?? null }))
+      : [];
+    const summaries = new Map<string, string>();
+    for (const r of advance.ready) {
+      const mine = tagged.filter((i) => i.actionId === r.actionId);
+      const line = cardSummary(mine.map((i) => ({ title: i.title, timing: i.display.timing, action: i.action })));
+      if (line) summaries.set(r.actionId, line);
+    }
+    actions = attachItems(
+      actions,
+      advance.ready,
+      tagged.map((i) => ({ id: i.id, actionId: i.actionId, status: i.status, resultId: i.resultId, targetId: i.targetId, error: i.error })),
+      plan?.id ?? null,
+      summaries,
+      now,
+    );
+  }
+
+  // Chat approvals: read back what the database did.
+  if (approvedHere.length) {
+    const fresh = await getItemStates(input.userId, actions.filter((a) => approvedHere.includes(a.id)).flatMap((a) => a.itemIds));
+    actions = syncActions(actions, fresh, now);
+    for (const a of actions.filter((x) => approvedHere.includes(x.id))) {
+      notes.push(
+        a.status === "saved"
+          ? `The user approved "${a.summary ?? a.intent.title}" in chat. The database confirmed it is saved.`
+          : `The user approved "${a.summary ?? a.intent.title}" in chat, but it was NOT saved${a.error ? `: ${a.error}` : ""}. Say so plainly.`,
+      );
     }
   }
 
-  await setDrafts(input.userId, input.conversationId, next.drafts);
+  await setActions(input.userId, input.conversationId, actions);
   const view = plan ? toPlanView(plan, now) : null;
+  if (plan) touchedPlanIds.delete(plan.id);
+  const touched: PlanView[] = [];
+  for (const planId of touchedPlanIds) {
+    const p = await getPlan(input.userId, planId).catch(() => null);
+    if (p) touched.push(toPlanView(p, now));
+  }
+  const thisTurn = new Set([...advance.ready.map((r) => r.actionId), ...approvedHere]);
   return {
     plan: view,
     clarify,
-    actions: plannerResultBlock({ plan: view, question: clarify?.question ?? null, notes, failed: null }),
+    actions: plannerResultBlock({
+      plan: view,
+      question: clarify?.question ?? null,
+      notes,
+      failed: null,
+      state: actions.filter((a) => !thisTurn.has(a.id)),
+    }),
+    touched,
   };
 }
 
@@ -228,7 +478,7 @@ async function supersedeOlder(userId: string, conversationId: string, plan: Stor
 
 export type ItemResult = { itemId: string; outcome: PlanItemOutcome; message?: string };
 
-const TIMED: ReadonlySet<string> = new Set(["create_event", "schedule_block", "move_block"]);
+const TIMED: ReadonlySet<string> = new Set(["create_event", "schedule_block", "move_block", "update_event"]);
 const BLOCKING: ReadonlySet<string> = new Set(["schedule_block", "move_block"]);
 const OPEN: ReadonlySet<string> = new Set(["pending", "conflict", "failed"]);
 
@@ -270,7 +520,8 @@ async function recheck(
     end: new Date(Math.max(...ends) + 86_400_000).toISOString(),
   };
   const base = await loadSchedulingBase(userId, window);
-  const moving = new Set(timed.filter((i) => i.action === "move_block").map((i) => String(i.payload.commitmentId)));
+  // An event being moved or changed never conflicts with its own old time.
+  const moving = new Set(timed.filter((i) => i.action === "move_block" || i.action === "update_event").map((i) => String(i.payload.commitmentId)));
   const check = checkPlacements(
     {
       now: now.toISOString(),

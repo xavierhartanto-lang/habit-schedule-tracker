@@ -88,7 +88,7 @@ const SMALL = new Set(["a", "an", "the", "and", "or", "of", "for", "with", "to",
 const DANGLING = new Set([...SMALL, "due", "my", "our", "some", "about", "around", "until", "till", "&", "+", "-"]);
 
 /** Common student shorthand. Expanding is always safe: the user said the short form. */
-const ABBREVIATIONS: Record<string, string> = {
+export const ABBREVIATIONS: Record<string, string> = {
   hw: "Homework",
   hmwk: "Homework",
   chem: "Chemistry",

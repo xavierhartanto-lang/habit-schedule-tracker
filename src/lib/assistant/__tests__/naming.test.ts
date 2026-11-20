@@ -205,7 +205,7 @@ describe("what the planner sees", () => {
       timeZone: TZ,
       areas: AREAS,
       refs: emptyRefs(),
-      drafts: [],
+      actions: [],
       recentHistory: [],
       newUserText: "I have to tutor a kid tomorrow",
       knowledge: k,
@@ -219,7 +219,7 @@ describe("what the planner sees", () => {
 
   it("personalization off: no facts or recaps in the prompt or the naming sources", () => {
     const k = { ...knowledge([{ category: "activity", title: "HoopVision", area: "creative" as const }], ["secret recap"]), personalizationEnabled: false };
-    const prompt = buildPlannerUserPrompt({ todayKey: TODAY, weekday: "Wednesday", timeZone: TZ, areas: AREAS, refs: emptyRefs(), drafts: [], recentHistory: [], newUserText: "work on my app", knowledge: k });
+    const prompt = buildPlannerUserPrompt({ todayKey: TODAY, weekday: "Wednesday", timeZone: TZ, areas: AREAS, refs: emptyRefs(), actions: [], recentHistory: [], newUserText: "work on my app", knowledge: k });
     expect(prompt).not.toContain("HoopVision");
     expect(prompt).not.toContain("secret recap");
     const out = plan("work on my app", [wire({ type: "plan_time", title: "HoopVision Development", evidence: "work on my app" })], k);

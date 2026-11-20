@@ -51,6 +51,8 @@ export type NewPlanItem = {
   targetId: string | null;
   /** Apply right away (explicit, simple, organizational). Never true for calendar items. */
   autoApply: boolean;
+  /** The conversation action this item belongs to (see action-state.ts). */
+  actionId?: string | null;
 };
 
 export type BuiltPlan = {
@@ -73,14 +75,14 @@ export type BuildInput = {
   openTasks: Task[];
   /** Blocks proposed in other open plans, so plans never double-book. */
   busy: { start: string; end: string; title?: string; taskId?: string | null }[];
-  specs: { spec: ActionSpec; explicit: boolean }[];
+  specs: { spec: ActionSpec; explicit: boolean; actionId?: string | null }[];
   sourceMessageId: string | null;
 };
 
+// Marking something done waits for a tap (or a "yes"): the user confirms it's the right task.
 const AUTO_APPLY: ReadonlySet<ActionSpec["kind"]> = new Set([
   "task_create",
   "task_update",
-  "task_complete",
   "habit_create",
   "habit_update",
   "goal_create",
@@ -320,6 +322,21 @@ function moveRequest(block: Commitment, ctx: Ctx, input: BuildInput, avoidDay: s
   ctx.windows.push({ start: new Date(input.now), end: deadline });
 }
 
+/** Tags the items and scheduling requests one spec produced with its conversation action. */
+function stampAction(
+  ctx: Ctx,
+  itemsBefore: number,
+  requestsBefore: number,
+  requestAction: Map<string, string>,
+  actionId: string | null,
+  build: () => void,
+): void {
+  build();
+  if (!actionId) return;
+  for (let i = itemsBefore; i < ctx.items.length; i++) ctx.items[i].actionId = actionId;
+  for (let i = requestsBefore; i < ctx.requests.length; i++) requestAction.set(ctx.requests[i].id, actionId);
+}
+
 export function buildPlan(input: BuildInput): BuiltPlan {
   const tz = input.world.timeZone;
   const now = new Date(input.now);
@@ -350,7 +367,14 @@ export function buildPlan(input: BuildInput): BuiltPlan {
   for (const b of input.busy) if (Date.parse(b.end) > now.getTime()) book(b.taskId, b.start, b.end);
 
   // ---- 1. Records and new events ----
-  for (const { spec, explicit } of input.specs) {
+  // Which conversation action produced each item and each scheduling request.
+  const requestAction = new Map<string, string>();
+  for (const { spec, explicit, actionId } of input.specs) {
+    const itemsBefore = ctx.items.length;
+    const requestsBefore = ctx.requests.length;
+    stampAction(ctx, itemsBefore, requestsBefore, requestAction, actionId ?? null, () => buildRecord(spec, explicit));
+  }
+  function buildRecord(spec: ActionSpec, explicit: boolean): void {
     const auto = explicit && AUTO_APPLY.has(spec.kind);
     switch (spec.kind) {
       case "event": {
@@ -381,7 +405,7 @@ export function buildPlan(input: BuildInput): BuiltPlan {
             ...EMPTY_DISPLAY,
             timing: timingFor(startsAt, endsAt, tz, { recurrence: spec.recurrenceText }),
             detail: spec.location ? `At ${spec.location}` : null,
-            reason: spec.recurrenceText ? `${spec.recurrenceText}, as you described.` : "As you described.",
+            reason: [spec.recurrenceText ? `${spec.recurrenceText}, as you described.` : "As you described.", spec.assumed ?? null].filter(Boolean).join(" "),
             conflicts,
             tradeoffs: conflicts.map((c) => `Overlaps ${c.title} (${whenLabel(c.start, tz)}).`),
             editable: true,
@@ -396,6 +420,120 @@ export function buildPlan(input: BuildInput): BuiltPlan {
             ctx.adaptive = true;
             moveRequest(block, ctx, input, null, block.taskId ? tasksById.get(block.taskId) ?? null : null);
           }
+        }
+        break;
+      }
+      case "event_update": {
+        const e = spec.event;
+        const etz = e.timezone ?? tz;
+        const oldStart = new Date(e.startsAt!);
+        const oldEnd = new Date(e.endsAt!);
+        const c = spec.change;
+        const baseDate = spec.scope === "one" && spec.occurrenceDate ? spec.occurrenceDate : dateKeyInZone(oldStart, etz);
+        const date = c.date ?? baseDate;
+        const startTime = c.startTime ?? timeKeyInZone(oldStart, etz);
+        const endTime = c.endTime ?? timeKeyInZone(oldEnd, etz);
+        const startsAt = zonedToUtc(date, startTime, etz).toISOString();
+        let endsAt = zonedToUtc(date, endTime, etz).toISOString();
+        if (Date.parse(endsAt) <= Date.parse(startsAt)) endsAt = new Date(Date.parse(startsAt) + (oldEnd.getTime() - oldStart.getTime())).toISOString();
+        const title = c.title ?? e.title;
+        const rrule = c.rrule !== undefined ? c.rrule : e.recurrenceRule ?? null;
+        const what = [
+          c.title ? `Rename to "${c.title}"` : null,
+          c.date || c.startTime || c.endTime ? `${whenLabel(spec.scope === "one" ? zonedToUtc(baseDate, timeKeyInZone(oldStart, etz), etz).toISOString() : e.startsAt!, etz)} → ${whenLabel(startsAt, etz)}` : null,
+          c.rrule !== undefined ? (c.rrule ? c.recurrenceText ?? "Repeats" : "One time only") : null,
+          c.location ? `At ${c.location}` : null,
+        ].filter(Boolean);
+
+        if (spec.scope === "one" && e.recurrenceRule && spec.occurrenceDate) {
+          // One day of a repeating event: skip that day, add a one-time event with the change.
+          ctx.items.push({
+            action: "skip_occurrence",
+            title: e.title,
+            targetId: e.id,
+            autoApply: false,
+            payload: { commitmentId: e.id, date: spec.occurrenceDate },
+            display: { ...EMPTY_DISPLAY, detail: `Skip ${shortDate(spec.occurrenceDate)} only. The rest of the series stays.`, reason: "Replaced by the changed time below." },
+          });
+          const payload: ItemPayload = {
+            title,
+            lifeAreaId: e.lifeAreaId ?? null,
+            kind: "fixed",
+            startsAt,
+            endsAt,
+            timezone: etz,
+            rrule: null,
+            location: c.location ?? e.location ?? null,
+            notes: e.notes ?? null,
+            sourceMessageId: input.sourceMessageId,
+          };
+          const asEvent = asCommitment(`new-${ctx.items.length}`, payload);
+          const conflicts = eventConflicts(asEvent, input.events.filter((x) => x.id !== e.id), now, tz);
+          ctx.extraEvents.push(asEvent);
+          ctx.items.push({
+            action: "create_event",
+            title,
+            targetId: null,
+            autoApply: false,
+            payload,
+            display: {
+              ...EMPTY_DISPLAY,
+              timing: timingFor(startsAt, endsAt, etz),
+              detail: what.join(" · ") || null,
+              reason: `Just ${shortDate(spec.occurrenceDate)}. Every other ${e.title} stays as it is.`,
+              conflicts,
+              tradeoffs: conflicts.map((x) => `Overlaps ${x.title} (${whenLabel(x.start, tz)}).`),
+              editable: true,
+            },
+          });
+          break;
+        }
+
+        const patch: Record<string, unknown> = {};
+        if (c.title) patch.title = c.title;
+        if (c.date || c.startTime || c.endTime) {
+          patch.starts_at = startsAt;
+          patch.ends_at = endsAt;
+        }
+        if (c.rrule !== undefined) patch.recurrence_rule = c.rrule;
+        if (c.location !== undefined) patch.location = c.location;
+        const moved = asCommitment(e.id, {
+          title,
+          startsAt: patch.starts_at ?? e.startsAt,
+          endsAt: patch.ends_at ?? e.endsAt,
+          rrule,
+          timezone: etz,
+        });
+        const timeChanged = "starts_at" in patch || "recurrence_rule" in patch;
+        const conflicts = timeChanged ? eventConflicts(moved, input.events.filter((x) => x.id !== e.id), now, tz) : [];
+        const recurrence = rrule ? (parseRRule(rrule) ? describeRecurrence(parseRRule(rrule)!) : null) : null;
+        ctx.items.push({
+          action: "update_event",
+          title: e.title,
+          targetId: e.id,
+          autoApply: false,
+          payload: {
+            commitmentId: e.id,
+            patch,
+            // What it looked like when suggested. If it changed since, approving refuses instead of overwriting.
+            expect: { title: e.title, starts_at: e.startsAt, ends_at: e.endsAt, recurrence_rule: e.recurrenceRule ?? null },
+            startsAt: String(patch.starts_at ?? e.startsAt),
+            endsAt: String(patch.ends_at ?? e.endsAt),
+            timezone: etz,
+          },
+          display: {
+            ...EMPTY_DISPLAY,
+            timing: timingFor(String(patch.starts_at ?? e.startsAt), String(patch.ends_at ?? e.endsAt), etz, { recurrence }),
+            previous: "starts_at" in patch ? { start: e.startsAt!, end: e.endsAt! } : null,
+            detail: what.join(" · ") || null,
+            reason: "Only what you asked changes. Undo puts it back.",
+            conflicts,
+            tradeoffs: conflicts.map((x) => `Overlaps ${x.title} (${whenLabel(x.start, tz)}).`),
+          },
+        });
+        if (timeChanged) {
+          ctx.extraEvents.push(moved);
+          ctx.excludeEventIds.add(e.id);
         }
         break;
       }
@@ -672,7 +810,7 @@ export function buildPlan(input: BuildInput): BuiltPlan {
             action: "complete_task",
             title: spec.task.title,
             targetId: spec.task.id,
-            autoApply: explicit,
+            autoApply: false,
             payload: { taskId: spec.task.id },
             display: { ...EMPTY_DISPLAY, detail: "Mark as done", reason: "You finished it." },
           });
@@ -778,6 +916,7 @@ export function buildPlan(input: BuildInput): BuiltPlan {
       } else {
         ctx.items.push(blockItem(s, numbers.get(s.id), request, tz, input.sourceMessageId));
       }
+      ctx.items[ctx.items.length - 1].actionId = requestAction.get(s.requestId) ?? null;
     }
 
     for (const outcome of result.outcomes) {
@@ -798,6 +937,7 @@ export function buildPlan(input: BuildInput): BuiltPlan {
             tradeoffs: [outcome.issue?.message ?? "No free time left."],
           },
         });
+        ctx.items[ctx.items.length - 1].actionId = requestAction.get(outcome.requestId) ?? null;
         continue;
       }
       ctx.unscheduled.push({
