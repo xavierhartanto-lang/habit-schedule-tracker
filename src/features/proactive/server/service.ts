@@ -51,13 +51,21 @@ type Fresh = {
   settings: AssistantSettings;
 };
 
-async function loadFresh(userId: string, now: Date): Promise<Fresh> {
-  const window = {
+/** What loadSchedulingBase returns. Callers that already loaded it can pass it in. */
+export type SchedulingBase = Awaited<ReturnType<typeof loadSchedulingBase>>;
+
+/** The window a preloaded base must cover: [now - 3 days, now + 16 days]. */
+export function proactiveWindow(now: Date): { start: string; end: string } {
+  return {
     start: new Date(now.getTime() - LOOKBACK_MS).toISOString(),
     end: new Date(now.getTime() + LOOKAHEAD_MS).toISOString(),
   };
+}
+
+async function loadFresh(userId: string, now: Date, preloaded?: SchedulingBase): Promise<Fresh> {
+  const window = proactiveWindow(now);
   const [base, prefs, settings, busy] = await Promise.all([
-    loadSchedulingBase(userId, window),
+    preloaded ?? loadSchedulingBase(userId, window),
     getPreferences(userId),
     getAssistantSettings(userId),
     listPendingBlocks(userId, { now }).catch(() => []),
@@ -95,10 +103,23 @@ function emptyBrief(timeZone: string, now: Date): DailyBrief {
 /** Detect, sync the table, return what to show. Never throws for missing data or a missing migration. */
 export async function loadProactive(
   userId: string,
-  options: { now?: Date; surface?: "home" | "all" } = {},
+  options: { now?: Date; surface?: "home" | "all"; base?: SchedulingBase } = {},
 ): Promise<ProactiveState> {
+  return (await loadProactiveWithAnalysis(userId, options)).state;
+}
+
+/**
+ * Same as loadProactive, plus the engine's analysis (per-task work left,
+ * per-day free time). Home's adaptive sections read it instead of
+ * recomputing. Pass `base` (covering proactiveWindow(now)) to skip a second
+ * read of events and tasks.
+ */
+export async function loadProactiveWithAnalysis(
+  userId: string,
+  options: { now?: Date; surface?: "home" | "all"; base?: SchedulingBase } = {},
+): Promise<{ state: ProactiveState; analysis: Analysis | null }> {
   const now = options.now ?? new Date();
-  const { analysis, settings } = await loadFresh(userId, now);
+  const { analysis, settings } = await loadFresh(userId, now, options.base);
   const timeZone = analysis?.timeZone ?? "UTC";
   const today = analysis ? buildBrief(analysis) : emptyBrief(timeZone, now);
   const candidates: Candidate[] = analysis ? detectFromAnalysis(analysis) : [];
@@ -112,13 +133,14 @@ export async function loadProactive(
   }
 
   const open = recommendations.filter((r) => r.status === "open");
-  return {
+  const state: ProactiveState = {
     settings,
     quiet: isQuietTime(now, timeZone, settings),
     today,
     recommendations: surfaceRecommendations(open, { settings, now, timeZone, mode: options.surface ?? "home" }),
     openCount: open.length,
   };
+  return { state, analysis };
 }
 
 async function sync(userId: string, candidates: Candidate[], settings: AssistantSettings, now: Date): Promise<Recommendation[]> {

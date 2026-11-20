@@ -18,9 +18,9 @@ import {
 } from "@/lib/scheduling/zoned";
 import { dueParts } from "@/lib/domain/tasks";
 import { toChatMessage, type ChatMessage } from "@/features/assistant/types";
-import { loadProactive } from "@/features/proactive/server/service";
 import { HOME_DAYS_AHEAD, LOOKAHEAD_DAYS, loadHomeData } from "./home-data";
-import { EMPTY_PROACTIVE, homeProactive, type HomeProactive } from "./proactive";
+import { loadHomeIntel } from "./home-intel";
+import type { HomeProactive } from "./proactive";
 import { buildOpening, partOfDay, type Opening, type OpeningDeadline } from "./opening";
 import { summarizeWeek, type WeekSummary } from "./week-summary";
 
@@ -63,16 +63,13 @@ export async function loadHomeAssistant(): Promise<HomeAssistantData> {
   const tz = ctx.timeZone;
   const today = ctx.todayKey;
   const aiConfigured = isAiConfigured();
-  const [profile, conversations, proactiveState] = await Promise.all([
+  const [profile, conversations, intel] = await Promise.all([
     getProfile(ctx.userId).catch(() => null),
     listConversations(ctx.userId, { kind: "assistant", limit: 1 }).catch(() => []),
-    // Suggestions are a bonus: if the engine fails, Home still opens normally.
-    loadProactive(ctx.userId, { now, surface: "all" }).catch((error) => {
-      console.error("[home] proactive suggestions failed", error);
-      return null;
-    }),
+    // Shared with the adaptive rail; the engine runs once per page load.
+    loadHomeIntel(),
   ]);
-  const proactive = proactiveState ? homeProactive(proactiveState, aiConfigured, now) : EMPTY_PROACTIVE;
+  const proactive = intel.home;
 
   // ---- Occurrences: today and the next week ----
   const from = startOfDayInZone(today, tz);
