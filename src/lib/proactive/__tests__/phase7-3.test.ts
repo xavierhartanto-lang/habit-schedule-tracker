@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { buildPlan } from "@/lib/assistant/build-plan";
+import { finishBreakdown, spreadDueDates } from "@/lib/assistant/breakdown";
 import type { ActionSpec } from "@/lib/assistant/assess";
 import { event, NOW, PREFS, task, TZ, uuid, weekCalendar, world } from "@/lib/assistant/__tests__/fixtures";
 import type { Commitment, Task } from "@/lib/domain/types";
@@ -240,5 +241,45 @@ describe("exam prep", () => {
   it("a stale exam id fails cleanly", () => {
     const spec = specs({ id: "prep_exam", kind: "prep_exam", label: "x", params: { eventId: uuid(), sessions: 2, minutesEach: 45 } }, input());
     expect(spec.ok).toBe(false);
+  });
+});
+
+describe("task breakdown", () => {
+  const essay = task({ title: "History essay", dueAt: due("2026-11-25"), estimatedMinutes: 240 });
+
+  it("keeps the model's names, scales minutes to the task's estimate and spreads due dates itself", () => {
+    const steps = finishBreakdown(
+      {
+        steps: [
+          { title: "1. Pick a Thesis", minutes: 30 },
+          { title: "Outline the Argument", minutes: 60 },
+          { title: "Draft the Essay", minutes: 120 },
+          { title: "Draft the Essay", minutes: 60 }, // duplicate
+          { title: "Revise and Proofread", minutes: 30 },
+        ],
+      },
+      essay,
+      { now: NOW, timeZone: TZ },
+    );
+    expect(steps.map((s) => s.title)).toEqual(["Pick a Thesis", "Outline the Argument", "Draft the Essay", "Revise and Proofread"]);
+    expect(steps.reduce((m, s) => m + s.minutes, 0)).toBe(240);
+    // Wed Nov 18 -> due Wed Nov 25: steps finish Fri, Sun, Mon, then with the essay.
+    expect(steps.map((s) => s.dueAt)).toEqual([due("2026-11-19"), due("2026-11-21"), due("2026-11-23"), essay.dueAt]);
+  });
+
+  it("refuses fewer than two usable steps, and leaves dates empty without a due date", () => {
+    expect(() => finishBreakdown({ steps: [{ title: "History essay", minutes: 30 }, { title: "Do it", minutes: 30 }] }, essay, { now: NOW, timeZone: TZ })).toThrow();
+    expect(spreadDueDates(3, null, { now: NOW, timeZone: TZ })).toEqual([null, null, null]);
+  });
+
+  it("a task with open steps is carried by its steps, never counted twice", () => {
+    const parent = task({ title: "Science fair", dueAt: due("2026-11-24"), estimatedMinutes: 300 });
+    const s1 = task({ title: "Build the model", dueAt: due("2026-11-20"), estimatedMinutes: 120, parentTaskId: parent.id });
+    const s2 = task({ title: "Make the poster", dueAt: due("2026-11-24"), estimatedMinutes: 90, parentTaskId: parent.id, status: "done" });
+    const a = analyze(input({ tasks: [parent, s1, s2] }));
+    expect(a.tasks.map((t) => t.task.title)).toEqual(["Build the model"]);
+    // Once every step is done, the task itself counts again.
+    const later = analyze(input({ tasks: [parent, { ...s1, status: "done" }, s2] }));
+    expect(later.tasks.map((t) => t.task.title)).toEqual(["Science fair"]);
   });
 });

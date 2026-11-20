@@ -964,8 +964,10 @@ export function buildPlan(input: BuildInput): BuiltPlan {
         const win = windowFor({ window: spec.window }, input, null);
         ctx.windows.push(win);
         const noEstimate: string[] = [];
+        const withSteps = new Set(input.openTasks.filter((t) => t.parentTaskId).map((t) => t.parentTaskId!));
         for (const task of input.openTasks) {
           if (task.dueAt && Date.parse(task.dueAt) > win.end.getTime() + 7 * 86_400_000) continue;
+          if (withSteps.has(task.id)) continue; // its steps carry the work
           const req = requestFromTask(task);
           if (!req) {
             if (task.dueAt) noEstimate.push(task.title);

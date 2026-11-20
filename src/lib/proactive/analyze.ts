@@ -99,8 +99,11 @@ export function analyze(input: ProactiveInput): Analysis {
     .filter((b) => Date.parse(b.endsAt!) > nowMs && Date.parse(b.startsAt!) < Date.parse(horizonEnd))
     .sort((a, b) => Date.parse(a.startsAt!) - Date.parse(b.startsAt!));
 
+  // A task broken into steps is carried by its open steps (they have their own
+  // estimates and dates), so its own estimate isn't counted twice.
+  const withOpenSteps = new Set(input.tasks.filter((t) => t.status !== "done" && t.parentTaskId).map((t) => t.parentTaskId!));
   const tasks: TaskLoad[] = input.tasks
-    .filter((t) => t.status !== "done")
+    .filter((t) => t.status !== "done" && !withOpenSteps.has(t.id))
     .map((task) => {
       const mine = sessions.filter((b) => b.taskId === task.id);
       const pastBlocks = mine.filter((b) => Date.parse(b.endsAt!) <= nowMs);
