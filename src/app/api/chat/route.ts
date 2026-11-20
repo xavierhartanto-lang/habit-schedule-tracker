@@ -6,6 +6,7 @@ import type { Clarification, KnownFactRef } from "@/lib/ai/extraction";
 import type { ChatTurn } from "@/lib/ai/prompts";
 import { extractFacts, streamReply } from "@/lib/ai/service";
 import { getSessionUser } from "@/lib/auth/session";
+import { adoptBrowserTimeZone } from "@/features/shared/timezone-actions";
 import { createConversation, getConversation, updateConversation } from "@/lib/db/conversations";
 import { appendMessage, listMessages, updateMessageMetadata } from "@/lib/db/messages";
 import type { Conversation, Message, MessageMetadata } from "@/lib/domain/types";
@@ -76,6 +77,7 @@ function parseBody(raw: unknown): ChatRequestBody | null {
   if (b.proactive != null && !proactive) return null;
   return {
     mode: b.mode,
+    timeZone: typeof b.timeZone === "string" && b.timeZone.length <= 64 ? b.timeZone : undefined,
     conversationId: (b.conversationId as string | null | undefined) ?? null,
     message: typeof b.message === "string" ? b.message.trim() : undefined,
     retry: b.retry === true,
@@ -123,6 +125,10 @@ export async function POST(request: Request) {
       retryable: false,
     });
   }
+
+  // New users chat before any page has told us their zone. Learn it before
+  // anything is saved, or "debate Saturday 9 AM" is stored as 9 AM UTC.
+  if (body.timeZone) await adoptBrowserTimeZone(body.timeZone).catch(() => undefined);
 
   // No key: refuse before saving anything. Never fake a reply. Proactive
   // buttons are the exception: their plan is built without the AI, and the

@@ -176,3 +176,13 @@ export function formatMinutes(minutes: number): string {
   const suffix = h < 12 ? "AM" : "PM";
   return m === 0 ? `${hour12} ${suffix}` : `${hour12}:${String(m).padStart(2, "0")} ${suffix}`;
 }
+
+/**
+ * Same wall-clock date and time, read in another zone. "9:00 AM Sat in UTC"
+ * becomes "9:00 AM Sat in Los Angeles". Used to repair times that were saved
+ * while the profile was still on the UTC default.
+ */
+export function rezoneWallClock(iso: string, fromZone: string, toZone: string): string {
+  const at = new Date(iso);
+  return zonedToUtc(dateKeyInZone(at, fromZone), timeKeyInZone(at, fromZone), toZone).toISOString();
+}
