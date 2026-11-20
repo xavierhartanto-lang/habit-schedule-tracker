@@ -251,6 +251,35 @@ function duplicateNote(a: Assessment, actions: ActionContext[], loaded: LoadedWo
   return null;
 }
 
+/** A failed action is retried for an hour after it failed. */
+const RETRY_WINDOW_MS = 60 * 60 * 1000;
+
+/**
+ * Which failed actions a "yes" or "try again" means. A named action, or with
+ * "latest" the newest failed one, but only when no card is waiting (then the
+ * yes is for that card).
+ */
+export function retryTargets(confirmed: string[], actions: ActionContext[], now = new Date()): ActionContext[] {
+  const recent = (a: ActionContext) => a.status === "failed" && now.getTime() - Date.parse(a.updatedAt) < RETRY_WINDOW_MS;
+  const out: ActionContext[] = [];
+  for (const id of confirmed) {
+    if (id !== "latest") {
+      const a = actions.find((x) => x.id === id && recent(x));
+      if (a && !out.includes(a)) out.push(a);
+      continue;
+    }
+    if (actions.some((a) => a.status === "proposed")) continue;
+    const newest = actions.filter(recent).sort((x, y) => Date.parse(y.updatedAt) - Date.parse(x.updatedAt))[0];
+    if (newest && !out.includes(newest)) out.push(newest);
+  }
+  return out;
+}
+
+function describeError(error: unknown): Record<string, unknown> {
+  if (!(error instanceof Error)) return { error };
+  return { name: error.name, message: error.message, code: (error as { code?: unknown }).code };
+}
+
 export async function planTurn(input: {
   userId: string;
   conversationId: string;
@@ -309,10 +338,18 @@ export async function planTurn(input: {
     return { ...mergeIntent(action.intent, intent), draftId: linked };
   });
   // The user picked from our own "which one?" options: trust that pick.
-  const prepared = intents.map((intent) => {
+  const prepared: Intent[] = intents.map((intent) => {
     const prior = intent.draftId ? actions.find((a) => a.id === intent.draftId) : undefined;
     return prior?.asked.at(-1) === "target" && intent.targetRef ? { ...intent, targetConfirmed: true } : intent;
   });
+
+  // "Yes" / "try again" after a save failed: rebuild that action's card from what it knew.
+  const retry = retryTargets(interpreted.confirmed, actions, now);
+  for (const a of retry) {
+    if (!prepared.some((i) => i.draftId === a.id)) prepared.push({ ...a.intent, draftId: a.id, targetConfirmed: a.intent.targetRef ? true : a.intent.targetConfirmed });
+  }
+  const reapprove = new Set(retry.filter((a) => a.itemIds.length).map((a) => a.id));
+  interpreted.confirmed = interpreted.confirmed.filter((id) => !retry.some((a) => a.id === id) && !(id === "latest" && retry.length));
 
   const notes: string[] = [];
   const assessments = prepared.map((intent) => {
@@ -371,57 +408,86 @@ export async function planTurn(input: {
 
   let plan: StoredPlan | null = null;
   if (advance.ready.length) {
-    const busy = await listPendingBlocks(input.userId, { now });
-    const built = buildPlan({
-      now: now.toISOString(),
-      world,
-      preferences: loaded.preferences,
-      events: loaded.events,
-      openTasks: loaded.openTasks,
-      busy,
-      specs: advance.ready.map((r) => ({ spec: r.spec, explicit: r.explicit, actionId: r.actionId })),
-      sourceMessageId: input.userMessageId,
-    });
-    notes.push(...built.notes);
-    if (built.items.length || built.unscheduled.length) {
-      plan = await createPlan(input.userId, {
-        conversationId: input.conversationId,
+    try {
+      const busy = await listPendingBlocks(input.userId, { now });
+      const built = buildPlan({
+        now: now.toISOString(),
+        world,
+        preferences: loaded.preferences,
+        events: loaded.events,
+        openTasks: loaded.openTasks,
+        busy,
+        specs: advance.ready.map((r) => ({ spec: r.spec, explicit: r.explicit, actionId: r.actionId })),
         sourceMessageId: input.userMessageId,
-        built,
-        now,
       });
-      // A corrected action replaces its old card (by action id), never adds a second one.
-      await supersedeItems(input.userId, advance.supersede);
-      await supersedeOlder(input.userId, input.conversationId, plan);
-      const auto = plan.items.filter((i, idx) => built.items[idx]?.autoApply).map((i) => i.id);
-      if (auto.length) {
-        const { results } = await approveItems(input.userId, plan.id, { itemIds: auto, requestId: randomUUID(), now });
-        await markAutoApplied(
-          input.userId,
-          results.filter((r) => r.outcome === "applied").map((r) => r.itemId),
-        );
+      notes.push(...built.notes);
+      if (built.items.length || built.unscheduled.length) {
+        plan = await createPlan(input.userId, {
+          conversationId: input.conversationId,
+          sourceMessageId: input.userMessageId,
+          built,
+          now,
+        });
+        // A corrected action replaces its old card (by action id), never adds a second one.
+        await supersedeItems(input.userId, advance.supersede);
+        await supersedeOlder(input.userId, input.conversationId, plan);
+        // A retried action's old failed card closes, so it can't be approved twice.
+        for (const a of retry.filter((x) => x.planId && x.itemIds.length)) {
+          touchedPlanIds.add(a.planId!);
+          await rejectItems(input.userId, a.planId!, a.itemIds).catch((error) => console.error("[plan] could not close failed card", error));
+        }
+        const auto = plan.items.filter((i, idx) => built.items[idx]?.autoApply).map((i) => i.id);
+        if (auto.length) {
+          const { results } = await approveItems(input.userId, plan.id, { itemIds: auto, requestId: randomUUID(), now });
+          await markAutoApplied(
+            input.userId,
+            results.filter((r) => r.outcome === "applied").map((r) => r.itemId),
+          );
+        }
+        plan = await getPlan(input.userId, plan.id);
+      } else if (advance.supersede.length) {
+        await supersedeItems(input.userId, advance.supersede);
       }
-      plan = await getPlan(input.userId, plan.id);
-    } else if (advance.supersede.length) {
-      await supersedeItems(input.userId, advance.supersede);
+      const tagged = plan
+        ? plan.items.map((item, idx) => ({ ...item, actionId: built.items[idx]?.actionId ?? null }))
+        : [];
+      const summaries = new Map<string, string>();
+      for (const r of advance.ready) {
+        const mine = tagged.filter((i) => i.actionId === r.actionId);
+        const line = cardSummary(mine.map((i) => ({ title: i.title, timing: i.display.timing, action: i.action })));
+        if (line) summaries.set(r.actionId, line);
+      }
+      actions = attachItems(
+        actions,
+        advance.ready,
+        tagged.map((i) => ({ id: i.id, actionId: i.actionId, status: i.status, resultId: i.resultId, targetId: i.targetId, error: i.error })),
+        plan?.id ?? null,
+        summaries,
+        now,
+      );
+      // The user already approved these once; the retry finishes the job.
+      const again = plan ? tagged.filter((i) => i.actionId && reapprove.has(i.actionId) && i.status === "pending") : [];
+      if (plan && again.length) {
+        touchedPlanIds.add(plan.id);
+        const { results } = await approveItems(input.userId, plan.id, { itemIds: again.map((i) => i.id), requestId: chatRequestId(input.userMessageId, plan.id), now });
+        approvedHere.push(...new Set(again.map((i) => i.actionId!)));
+        const bad = results.filter((r) => r.outcome !== "applied" && r.outcome !== "already_applied");
+        if (bad.length) notes.push(`Retried, but not everything saved: ${bad.map((r) => r.message ?? r.outcome).join("; ")}.`);
+        plan = await getPlan(input.userId, plan.id);
+      }
+    } catch (error) {
+      // Keep the action so "try again" can rebuild it. Nothing was saved.
+      console.error("[plan] could not create the card", describeError(error));
+      if (plan) touchedPlanIds.add(plan.id);
+      plan = null;
+      const failedIds = new Set(advance.ready.map((r) => r.actionId));
+      actions = actions.map((a) =>
+        failedIds.has(a.id) ? { ...a, status: "failed" as const, itemIds: [], planId: null, error: "storage error while preparing the card", updatedAt: now.toISOString() } : a,
+      );
+      notes.push(
+        'Whitespace hit a storage error while preparing this, so no card was made and nothing changed. Say so in one line. The details are kept: if the user says "try again" or "yes", it is rebuilt.',
+      );
     }
-    const tagged = plan
-      ? plan.items.map((item, idx) => ({ ...item, actionId: built.items[idx]?.actionId ?? null }))
-      : [];
-    const summaries = new Map<string, string>();
-    for (const r of advance.ready) {
-      const mine = tagged.filter((i) => i.actionId === r.actionId);
-      const line = cardSummary(mine.map((i) => ({ title: i.title, timing: i.display.timing, action: i.action })));
-      if (line) summaries.set(r.actionId, line);
-    }
-    actions = attachItems(
-      actions,
-      advance.ready,
-      tagged.map((i) => ({ id: i.id, actionId: i.actionId, status: i.status, resultId: i.resultId, targetId: i.targetId, error: i.error })),
-      plan?.id ?? null,
-      summaries,
-      now,
-    );
   }
 
   // Chat approvals: read back what the database did.

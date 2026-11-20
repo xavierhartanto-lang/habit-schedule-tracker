@@ -32,6 +32,7 @@ type Db = {
   planningState: unknown;
   approvals: Map<string, { item_id: string; outcome: string; message?: string; result_id?: string | null }[]>;
   failApply: boolean;
+  failCreate: boolean;
 };
 
 let db: Db;
@@ -40,7 +41,7 @@ const id = () => `10000000-0000-4000-8000-${String(++seq).padStart(12, "0")}`;
 const clone = <T>(v: T): T => structuredClone(v);
 
 function resetDb() {
-  db = { events: [], tasks: [], plans: new Map(), planningState: null, approvals: new Map(), failApply: false };
+  db = { events: [], tasks: [], plans: new Map(), planningState: null, approvals: new Map(), failApply: false, failCreate: false };
 }
 
 function applyOp(op: Record<string, unknown>): string | null {
@@ -130,6 +131,7 @@ vi.mock("@/lib/db/plans", async (importOriginal) => {
       return clone(p);
     },
     createPlan: async (_u: string, input: { conversationId: string | null; sourceMessageId: string | null; built: BuiltPlan; now?: Date }) => {
+      if (db.failCreate) throw Object.assign(new Error('new row for relation "plan_items" violates check constraint "plan_items_action_check"'), { name: "DatabaseError", code: "23514" });
       const planId = id();
       const plan: StoredPlan = {
         id: planId,
@@ -485,6 +487,55 @@ describe("Scenario H: failure handling", () => {
   });
 });
 
+describe("Scenario H2: retrying after a storage error", () => {
+  it("a card that couldn't be stored is kept, and 'try again' rebuilds it", async () => {
+    const tutor = addEvent("Tutor a kid", "2026-11-14", "17:00", "18:00", "FREQ=WEEKLY;BYDAY=SA");
+    const t1 = await say("Rename tutor a kid to math tutoring and move it to Friday", [
+      wire({ type: "update_event", target_ref: "e1", target_name: "tutor a kid", title: "Math Tutoring", evidence: "Rename tutor a kid to math tutoring and move it to Friday", date: date({ weekday: "fr" }) }),
+    ]);
+    expect(t1.clarify?.question).toBe("Just this week, or every week?");
+
+    db.failCreate = true;
+    const t2 = await say("just this week", (a) => [wire({ type: "update_event", draft_id: a[0].id, evidence: "just this week", scope: "one" })]);
+    expect(t2.plan).toBeNull();
+    expect(t2.actions).toContain("storage error");
+    expect(actions()).toHaveLength(1);
+    expect(actions()[0]).toMatchObject({ status: "failed", itemIds: [] });
+
+    db.failCreate = false;
+    const t3 = await say("try again", [wire({ type: "confirm_action", evidence: "try again" })]);
+    expect(t3.actions).not.toContain("nothing is waiting");
+    expect(t3.plan?.items.map((i) => i.action)).toEqual(["skip_occurrence", "create_event"]);
+    expect(t3.plan?.items[1].title).toBe("Math Tutoring");
+    expect(local(t3.plan!.items[1].timing!.start)).toBe("2026-11-20, 17:00");
+    expect(actions()[0].status).toBe("proposed");
+    // Shown again for approval, not saved without a tap.
+    expect(tutor.recurrenceExceptions ?? []).toEqual([]);
+    expect(db.events).toHaveLength(1);
+  });
+
+  it("'try again' after an approval failed saves it, and the old card closes", async () => {
+    await say("Add math tutoring tomorrow at 5 for an hour", [
+      wire({ type: "create_event", title: "Math Tutoring", evidence: "math tutoring tomorrow at 5 for an hour", date: date({ day_offset: 1 }), start_time: "17:00", duration_minutes: 60 }),
+    ]);
+    db.failApply = true;
+    await say("yes", (a) => [wire({ type: "confirm_action", draft_id: a[0].id, evidence: "yes" })]);
+    expect(actions()[0].status).toBe("failed");
+    const oldItems = actions()[0].itemIds;
+
+    db.failApply = false;
+    const again = await say("try again", [wire({ type: "confirm_action", evidence: "try again" })]);
+    expect(db.events).toHaveLength(1);
+    expect(local(db.events[0].startsAt!)).toBe("2026-11-19, 17:00");
+    expect(again.actions).toContain("database confirmed it is saved");
+    expect(allItems().filter((i) => oldItems.includes(i.id)).map((i) => i.status)).toEqual(["rejected"]);
+
+    // A second "try again" adds nothing.
+    await say("try again", [wire({ type: "confirm_action", evidence: "try again" })]);
+    expect(db.events).toHaveLength(1);
+  });
+});
+
 describe("Beyond the scenarios", () => {
   it("fills time and length from the user's usual activity instead of asking", async () => {
     addEvent("Basketball Practice", "2026-09-01", "17:00", "19:00", "FREQ=WEEKLY;BYDAY=TU,TH");
@@ -532,5 +583,24 @@ describe("Beyond the scenarios", () => {
       wire({ type: "create_event", title: "Study Session", evidence: "Study session in two hours for 45 minutes", start_in_minutes: 120, duration_minutes: 45 }),
     ]);
     expect(local(t.plan!.items[0].timing!.start)).toBe("2026-11-18, 18:00");
+  });
+});
+
+describe("Stored conversation state", () => {
+  it("stays under the database's size cap, keeping open actions", async () => {
+    const { writeActions, STATE_BUDGET_CHARS } = await import("@/lib/assistant/action-state");
+    await say("Add math tutoring tomorrow at 5 for an hour", [
+      wire({ type: "create_event", title: "Math Tutoring", evidence: "math tutoring tomorrow at 5 for an hour", date: date({ day_offset: 1 }), start_time: "17:00", duration_minutes: 60 }),
+    ]);
+    const base = actions()[0];
+    const long = "x".repeat(400);
+    const many: ActionContext[] = [
+      { ...base, id: "open1", status: "proposed", corrections: [long, long] },
+      ...Array.from({ length: 7 }, (_, i) => ({ ...base, id: `done${i}`, status: "saved" as const, corrections: [long, long, long] })),
+    ];
+    const written = writeActions(many);
+    expect(JSON.stringify(written).length).toBeLessThanOrEqual(STATE_BUDGET_CHARS);
+    expect(written.actions[0].id).toBe("open1");
+    expect(written.actions.length).toBeGreaterThan(1);
   });
 });
