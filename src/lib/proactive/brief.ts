@@ -13,7 +13,7 @@ import { about, clockAt, dayPhrase, duePhrase, periodPhrase, plural, quote, shor
 const MAX_FOCUS = 3;
 const MIN_PLAN_MINUTES = 30;
 
-type Ranked = { t: TaskLoad; rank: number; why: string };
+export type Ranked = { t: TaskLoad; rank: number; why: string };
 
 function rankTask(t: TaskLoad, a: Analysis): Ranked | null {
   const p = t.task.priority;
@@ -35,12 +35,16 @@ function rankTask(t: TaskLoad, a: Analysis): Ranked | null {
   return null;
 }
 
-export function focusTasks(a: Analysis): Ranked[] {
+/** Every task worth attention, ranked by the Phase 5 rules. Focus is the first three. */
+export function rankTasks(a: Analysis): Ranked[] {
   return a.tasks
     .map((t) => rankTask(t, a))
     .filter((r): r is Ranked => !!r)
-    .sort((x, y) => x.rank - y.rank || (x.t.dueMs ?? Infinity) - (y.t.dueMs ?? Infinity))
-    .slice(0, MAX_FOCUS);
+    .sort((x, y) => x.rank - y.rank || (x.t.dueMs ?? Infinity) - (y.t.dueMs ?? Infinity));
+}
+
+export function focusTasks(a: Analysis): Ranked[] {
+  return rankTasks(a).slice(0, MAX_FOCUS);
 }
 
 /** Minutes worth planning for a focus task in one day: what's left, at most one long session. */

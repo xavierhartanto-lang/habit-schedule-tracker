@@ -91,6 +91,10 @@ export type CommitmentRow = Timestamps & {
   notes: string | null;
   task_id: string | null;
   plan_item_id: string | null;
+  /** Phase 7 (20261128000000). Missing until that migration runs. */
+  outcome?: "done" | "partial" | "missed" | null;
+  outcome_at?: string | null;
+  outcome_source?: "user" | "task_done" | null;
 } & Provenance;
 
 export type TaskRow = Timestamps & {

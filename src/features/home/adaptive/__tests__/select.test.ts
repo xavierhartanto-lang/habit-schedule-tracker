@@ -283,3 +283,29 @@ describe("adaptive Home: routines are not deadlines", () => {
     expect(section(layout, "deadlines")?.data.items.map((i) => i.title)).toEqual(["SAT"]);
   });
 });
+
+describe("adaptive Home: now / next (Phase 7.2)", () => {
+  const practice = event({ title: "Practice", date: TODAY, start: "17:00", end: "18:30" });
+
+  it("adds the Now line to the focus section, with the task that fits the window", () => {
+    const big = task({ title: "History essay", dueAt: due(1), estimatedMinutes: 90 });
+    const lab = task({ title: "Chem lab report", dueAt: due(2), estimatedMinutes: 30 });
+    const { layout } = scenario({ events: [...weekCalendar(), practice], tasks: [big, lab] });
+    const focus = section(layout, "focus")!;
+    expect(focus.data.title).toBe("History essay");
+    expect(focus.data.now?.task?.title).toBe("Chem lab report");
+    expect(focus.data.now?.message).toMatch(/^Free until Practice at 5 PM\./);
+  });
+
+  it("on a calm day, offers a task that fits the window quietly, without the lead", () => {
+    const undated = task({ title: "Clean desk", estimatedMinutes: 20 });
+    const { layout } = scenario({ events: [...weekCalendar(), practice], tasks: [undated] });
+    const focus = section(layout, "focus")!;
+    expect(focus.data.why).toBe("Fits your free time now");
+    expect(focus.priority).toBe(45);
+    expect(focus.lead).toBe(false);
+    expect(layout.calm).toBe(true);
+    // Open time doesn't list the same task again.
+    expect(section(layout, "open_time")?.data.ideas.some((i) => i.id === undated.id) ?? false).toBe(false);
+  });
+});

@@ -324,7 +324,7 @@ export function Chat({
     switch (a.kind) {
       case "dismiss":
         done(a.id);
-        void dismissRecommendation({ id: a.id, reason: "not_now" }).catch(() => undefined);
+        void dismissRecommendation({ id: a.id, reason: a.reason ?? "not_now" }).catch(() => undefined);
         return;
       case "ask":
         if (!aiConfigured) return;

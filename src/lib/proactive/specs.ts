@@ -126,6 +126,32 @@ export function specsForAction(action: RecommendationAction, ctx: SpecContext): 
     }
     case "plan_week":
       return { ok: true, prompt: null, specs: [{ kind: "not_enough_time", window: "this_week" }] };
+    case "schedule_tasks": {
+      // Plan every task's remaining work in one engine call: the planner spreads it
+      // over the free days before each deadline, so a cluster starts earlier on its own.
+      const specs: ActionSpec[] = [];
+      for (const id of ids(p.taskIds).slice(0, 6)) {
+        const t = ctx.tasks.get(id);
+        if (!t?.estimatedMinutes) continue;
+        const opts = !t.dueAt || Date.parse(t.dueAt) <= ctx.nowMs ? endOf(addDaysToKey(ctx.todayKey, 6)) : {};
+        specs.push(planTime(t, { type: "total", minutes: clamp(t.estimatedMinutes, REQUEST_LIMITS.totalMinutes) }, opts));
+      }
+      return specs.length ? { ok: true, prompt: null, specs } : { ok: false, error: "Those tasks are done or have no time estimate." };
+    }
+    case "resolve_conflict": {
+      // The user picked which event is right. The other one goes, through an approval card:
+      // a repeating event skips only that day, a one-off is removed (Undo brings it back).
+      const drop = ctx.events.get(str(p.dropId) ?? "");
+      const date = str(p.date);
+      if (!drop || drop.kind !== "fixed" || drop.planItemId) return { ok: false, error: "That event has already changed. Refresh to see the latest." };
+      if (drop.recurrenceRule) {
+        if (!date || !isDateKey(date)) return { ok: false, error: "Unknown day." };
+        return { ok: true, prompt: null, specs: [{ kind: "cant_make", date, blocks: [], event: drop, title: drop.title }] };
+      }
+      return { ok: true, prompt: null, specs: [{ kind: "remove_event", events: [drop], title: drop.title }] };
+    }
+    case "acknowledge":
+      return { ok: false, error: "Nothing to change." };
     case "change_priority": {
       const t = task();
       if (!t) return gone;

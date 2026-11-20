@@ -1,11 +1,12 @@
 import type { AssistantSettings, DailyBrief, Recommendation } from "@/features/proactive/types";
 import type { Commitment, Goal, Task } from "@/lib/domain/types";
 import { dayCapacity, type Analysis } from "@/lib/proactive/analyze";
+import { nowNext } from "@/lib/proactive/now";
 import { surface } from "@/lib/proactive/surface";
 import { expandEvents } from "@/lib/scheduling/recurrence";
 import { addDaysToKey, dateKeyInZone, daysBetweenKeys, startOfDayInZone } from "@/lib/scheduling/zoned";
 import { toNudge, type Nudge } from "../proactive";
-import { WORKLOAD_KINDS, type DayLoad, type DeadlineItem, type FocusData, type GoalsData, type OpenTimeData, type ProgressData } from "./types";
+import { WORKLOAD_KINDS, type DayLoad, type DeadlineItem, type FocusData, type GoalsData, type NowData, type OpenTimeData, type ProgressData } from "./types";
 
 /**
  * Step 2 of the adaptive Home: plain facts from data already loaded.
@@ -134,9 +135,38 @@ function weekFrom(a: Analysis, overloadedDates: ReadonlySet<string>): DayLoad[] 
   }));
 }
 
-function focusFrom(brief: DailyBrief, tasks: Map<string, Task>, nextFreeAt: string | null): FocusData | null {
+function nowFrom(a: Analysis | null, tasks: Map<string, Task>): NowData | null {
+  if (!a) return null;
+  const n = nowNext(a);
+  if (!n) return null;
+  return {
+    state: n.state,
+    until: n.until,
+    minutes: n.minutes,
+    message: n.message,
+    task: n.task ? { taskId: n.task.taskId, title: n.task.title, fit: n.task.fit, areaId: tasks.get(n.task.taskId)?.lifeAreaId ?? null } : null,
+  };
+}
+
+function focusFrom(brief: DailyBrief, tasks: Map<string, Task>, nextFreeAt: string | null, now: NowData | null): FocusData | null {
   const [first, ...rest] = brief.focus;
-  if (!first) return null;
+  if (!first) {
+    // Nothing pressing, but a real window and a task that fits it: offer that, quietly.
+    const t = now?.task ? tasks.get(now.task.taskId) : undefined;
+    if (!now?.task || !t) return null;
+    return {
+      taskId: t.id,
+      title: t.title,
+      why: NOW_ONLY_WHY,
+      estimatedMinutes: t.estimatedMinutes,
+      areaId: t.lifeAreaId ?? null,
+      freeMinutesToday: brief.freeMinutes,
+      nextFreeAt,
+      planLabel: null,
+      then: [],
+      now,
+    };
+  }
   return {
     taskId: first.taskId,
     title: first.title,
@@ -147,11 +177,15 @@ function focusFrom(brief: DailyBrief, tasks: Map<string, Task>, nextFreeAt: stri
     nextFreeAt,
     planLabel: brief.action?.kind === "plan_day" ? brief.action.label : null,
     then: rest.map((f) => ({ taskId: f.taskId, title: f.title, why: f.why })),
+    now,
   };
 }
 
+/** Focus built only from the Now line (nothing pressing). */
+export const NOW_ONLY_WHY = "Fits your free time now";
+
 function urgencyOf(focus: FocusData | null, tasks: Map<string, Task>, input: SignalInput): HomeSignals["focusUrgency"] {
-  if (!focus) return 0;
+  if (!focus || focus.why === NOW_ONLY_WHY) return 0;
   const task = tasks.get(focus.taskId);
   if (task?.dueAt) {
     const dueMs = Date.parse(task.dueAt);
@@ -190,7 +224,7 @@ export function evaluateSignals(input: SignalInput): HomeSignals {
   const chatShown = new Set(input.chatShownIds);
   const overloadedDates = new Set(open.filter((r) => r.kind === "overload_day" && r.target.date).map((r) => r.target.date!));
 
-  const focus = input.brief ? focusFrom(input.brief, tasks, nextFreeAt) : null;
+  const focus = input.brief ? focusFrom(input.brief, tasks, nextFreeAt, nowFrom(a, tasks)) : null;
 
   // What the assistant may raise on its own: the user's level and quiet hours
   // apply to the rail exactly as they do to the conversation (the engine's rules).
@@ -228,7 +262,10 @@ export function evaluateSignals(input: SignalInput): HomeSignals {
       .filter((t) => !t.dueAt && t.status !== "done")
       .sort((x, y) => (x.priority === y.priority ? 0 : x.priority === "high" ? -1 : y.priority === "high" ? 1 : 0) || x.id.localeCompare(y.id))
       .map((t) => ({ kind: "task" as const, id: t.id, title: t.title, areaId: t.lifeAreaId ?? null })),
-  ].slice(0, MAX_IDEAS);
+  ]
+    // The focus section already offers its task.
+    .filter((i) => !(i.kind === "task" && i.id === focus?.taskId))
+    .slice(0, MAX_IDEAS);
 
   const progress = progressFrom(input.recentlyDone, input.todayKey, tz);
   const usedRecs = [...warningsAll, ...raisable];

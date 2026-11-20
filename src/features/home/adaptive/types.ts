@@ -33,6 +33,16 @@ export type DeadlineItem = {
   priority: "high" | "medium" | "low" | null;
 };
 
+/** Phase 7.2 Now / Next: the free window in front of the user and what fits it (engine, deterministic). */
+export type NowData = {
+  state: "free" | "session";
+  until: string;
+  minutes: number;
+  message: string;
+  /** The task that fits the window. May differ from the focus task when that one doesn't fit. */
+  task: { taskId: string; title: string; fit: "whole" | "progress"; areaId: string | null } | null;
+};
+
 export type FocusData = {
   taskId: string;
   title: string;
@@ -48,6 +58,8 @@ export type FocusData = {
   planLabel: string | null;
   /** Other focus tasks after this one (titles only). */
   then: { taskId: string; title: string; why: string }[];
+  /** What to do with the time right now. Null when there is no usable window. */
+  now: NowData | null;
 };
 
 export type DeadlinesData = { items: DeadlineItem[]; more: number };

@@ -35,7 +35,7 @@ export type TaskLoad = {
   /** Local due date. */
   dueDate: string | null;
   estimate: number | null;
-  /** Whitespace sessions for this task that already ended (assumed done). */
+  /** Whitespace sessions for this task that already ended (assumed done unless recorded as missed). */
   pastBlocks: Commitment[];
   /** Whitespace sessions still ahead (or in progress). */
   futureBlocks: Commitment[];
@@ -105,7 +105,8 @@ export function analyze(input: ProactiveInput): Analysis {
       const mine = sessions.filter((b) => b.taskId === task.id);
       const pastBlocks = mine.filter((b) => Date.parse(b.endsAt!) <= nowMs);
       const future = mine.filter((b) => Date.parse(b.endsAt!) > nowMs);
-      const pastBlockMinutes = pastBlocks.reduce((s, b) => s + minutesOf(b), 0);
+      // A session the user said was missed did no work. Unrecorded ones are assumed done.
+      const pastBlockMinutes = pastBlocks.filter((b) => b.outcome !== "missed").reduce((s, b) => s + minutesOf(b), 0);
       const futureBlockMinutes = future.reduce((s, b) => s + minutesOf(b), 0);
       const estimate = task.estimatedMinutes && task.estimatedMinutes > 0 ? task.estimatedMinutes : null;
       const remaining = estimate === null ? null : Math.max(0, estimate - pastBlockMinutes);

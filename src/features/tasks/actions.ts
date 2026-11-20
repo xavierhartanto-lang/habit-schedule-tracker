@@ -1,6 +1,7 @@
 "use server";
 
 import { DataValidationError } from "@/lib/db/client";
+import { markPastSessionsDone } from "@/lib/db/events";
 import { createTask, deleteTask, setTaskStatus, updateTask } from "@/lib/db/tasks";
 import { validateTaskForm } from "@/lib/domain/tasks";
 import type { TaskStatus } from "@/lib/domain/types";
@@ -25,7 +26,11 @@ export async function saveTask(id: string | null, form: unknown): Promise<Action
 
 export async function setTaskDone(id: string, done: boolean): Promise<ActionResult> {
   const status: TaskStatus = done ? "done" : "todo";
-  return runAction(PATHS, (userId) => setTaskStatus(userId, id, status));
+  return runAction(PATHS, async (userId) => {
+    await setTaskStatus(userId, id, status);
+    // Plan vs reality: finishing the task means its past sessions happened. Never blocks the check-off.
+    if (done) await markPastSessionsDone(userId, id).catch((e) => console.error("[tasks] session outcomes not recorded", e));
+  });
 }
 
 export async function removeTask(id: string): Promise<ActionResult> {

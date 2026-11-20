@@ -1,4 +1,5 @@
 import { Skeleton } from "@/components/ui";
+import { isSession } from "@/lib/proactive/analyze";
 import { expandEvents } from "@/lib/scheduling/recurrence";
 import { addDaysToKey, startOfDayInZone } from "@/lib/scheduling/zoned";
 import { loadHomeData } from "./home-data";
@@ -31,6 +32,8 @@ export async function TodaySchedule() {
     start: o.start.toISOString(),
     end: o.end.toISOString(),
     areaId: o.event.lifeAreaId ?? null,
+    sessionId: isSession(o.event) ? o.event.id : null,
+    outcome: o.event.outcome ?? null,
   }));
 
   return (
