@@ -93,7 +93,8 @@ export function selectSections(s: HomeSignals): HomeLayout {
     adaptive.push(
       make({
         kind: "focus",
-        priority: [0, 60, 80, 90][s.focusUrgency],
+        // Urgency 0 = only the Now line (a calm day with a window that fits a task): quiet.
+        priority: [45, 60, 80, 90][s.focusUrgency],
         reason: s.focus.why,
         data: s.focus,
       }),

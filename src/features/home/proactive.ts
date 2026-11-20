@@ -14,8 +14,8 @@ export type ProactiveAct =
   | { kind: "recommendation"; id: string; actionId: string }
   /** Sends `prompt` as the user's message (needs the AI). */
   | { kind: "ask"; prompt: string }
-  /** "Not now": snoozes until tomorrow. */
-  | { kind: "dismiss"; id: string };
+  /** "Not now": snoozes until tomorrow. reason "not_relevant" ("Both are right"): never again for this situation. */
+  | { kind: "dismiss"; id: string; reason?: "not_now" | "not_relevant" };
 
 export type ProactiveChip = { label: string; primary?: boolean; act: ProactiveAct };
 
@@ -52,7 +52,9 @@ const clean = (s: string) => s.replace(/\s+/g, " ").trim();
 
 function chipsFor(rec: Recommendation, aiConfigured: boolean): ProactiveChip[] {
   const chips: ProactiveChip[] = [];
+  const ack = rec.actions.find((a) => a.kind === "acknowledge");
   for (const a of rec.actions) {
+    if (a.kind === "acknowledge") continue;
     if (chips.length >= MAX_ACTIONS) break;
     const label = clean(a.label);
     if (!label) continue;
@@ -66,7 +68,9 @@ function chipsFor(rec: Recommendation, aiConfigured: boolean): ProactiveChip[] {
     }
   }
   if (chips[0]) chips[0] = { ...chips[0], primary: true };
-  chips.push({ label: "Not now", act: { kind: "dismiss", id: rec.id } });
+  // "Both are right" settles it for good, so it replaces "Not now".
+  if (ack) chips.push({ label: clean(ack.label) || "Both are right", act: { kind: "dismiss", id: rec.id, reason: "not_relevant" } });
+  else chips.push({ label: "Not now", act: { kind: "dismiss", id: rec.id } });
   return chips;
 }
 

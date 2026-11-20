@@ -24,6 +24,7 @@ import { parsePayload, toOp, type Op } from "@/lib/assistant/ops";
 import { buildPlannerUserPrompt, namingContext, plannerResultBlock, type PlannerKnowledge } from "@/lib/assistant/planner-prompt";
 import { applyPreferenceChanges } from "@/lib/assistant/prefs";
 import { DataValidationError } from "@/lib/db/client";
+import { markPastSessionsDone } from "@/lib/db/events";
 import { listGoals } from "@/lib/db/goals";
 import { listActiveHabits } from "@/lib/db/habits";
 import { listLifeAreas } from "@/lib/db/life-areas";
@@ -687,6 +688,13 @@ export async function approveItems(
     results.push({ itemId: r.item_id, outcome, message: r.message ? friendlyDbMessage(r.message) : undefined });
   }
   plan = await getPlan(userId, planId);
+  // Plan vs reality: a task marked done means its past sessions happened.
+  const appliedIds = new Set(results.filter((r) => r.outcome === "applied").map((r) => r.itemId));
+  for (const item of plan.items) {
+    if (item.action === "complete_task" && appliedIds.has(item.id) && item.targetId) {
+      await markPastSessionsDone(userId, item.targetId, now).catch((e) => console.error("[plan] session outcomes not recorded", e));
+    }
+  }
   return { plan, results };
 }
 

@@ -2,6 +2,7 @@ import "server-only";
 
 import { buildPlan } from "@/lib/assistant/build-plan";
 import { DataValidationError, NotFoundError } from "@/lib/db/client";
+import { setSessionOutcome } from "@/lib/db/events";
 import { createPlan, listPendingBlocks, toPlanView } from "@/lib/db/plans";
 import { getPreferences, getProfile } from "@/lib/db/profiles";
 import {
@@ -27,7 +28,7 @@ import { isQuietTime, surface as surfaceRecommendations } from "@/lib/proactive/
 import { addDaysToKey, dateKeyInZone, isValidTimeZone, zonedToUtc } from "@/lib/scheduling/zoned";
 import type { PlanView } from "@/features/assistant/plan-types";
 import { loadWorld } from "@/features/assistant/server/plan-service";
-import type { AssistantSettings, DailyBrief, ProactiveState, Recommendation, RecommendationAction } from "../types";
+import { PHASE7_KINDS, type AssistantSettings, type DailyBrief, type ProactiveState, type Recommendation, type RecommendationAction } from "../types";
 
 /**
  * Phase 5 proactive assistant, server side.
@@ -153,7 +154,13 @@ async function sync(userId: string, candidates: Candidate[], settings: Assistant
   );
   const result = reconcile({ stored, candidates, plans, now });
   if (result.inserts.length || result.updates.length) {
-    const written = await applyReconcile(userId, result);
+    const written = await applyReconcile(userId, result).catch((error) => {
+      // Before the Phase 7 migration the table rejects the new kinds (check violation).
+      // Keep everything else working: retry without them.
+      if ((error as { code?: string }).code !== "23514" || !result.inserts.some((c) => PHASE7_KINDS.has(c.kind))) throw error;
+      console.warn("[proactive] new recommendation kinds need the Phase 7 migration (20261128000000)");
+      return applyReconcile(userId, { ...result, inserts: result.inserts.filter((c) => !PHASE7_KINDS.has(c.kind)) });
+    });
     // Occasional cleanup, piggybacking on a load that already wrote something.
     if (result.updates.some((u) => u.patch.status === "resolved")) await pruneResolved(userId, now).catch(() => undefined);
     // Merge in memory; a second identical list would be memoized (see applyReconcile).
@@ -224,6 +231,10 @@ export async function proposeFromRecommendationFor(
   if (!action) throw new NotFoundError("Action");
 
   const out = await planFromActions(userId, action, { conversationId: input.conversationId, sourceMessageId: input.sourceMessageId, now });
+  // "Find another time" on "did it happen?" answers the question: it was missed (plan vs reality).
+  if (rec.kind === "missed_session" && action.kind === "schedule_work" && rec.target.commitmentIds[0]) {
+    await setSessionOutcome(userId, rec.target.commitmentIds[0], "missed", now).catch(() => undefined);
+  }
   if (!out.plan) return { ...out, recommendation: rec };
   const updated = await updateRecommendation(userId, rec.id, { status: "proposed", planId: out.plan.id, snoozedUntil: null });
   return { ...out, recommendation: toRecommendation(updated, settings.proactivity, now) };

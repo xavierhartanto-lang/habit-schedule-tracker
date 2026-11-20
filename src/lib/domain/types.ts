@@ -73,7 +73,12 @@ export type Commitment = {
   taskId?: string | null;
   /** Set when the assistant created this row from an approved plan. */
   planItemId?: string | null;
+  /** Work sessions: what actually happened. Null = not recorded (assumed done once past). */
+  outcome?: SessionOutcome | null;
 };
+
+/** Plan vs reality for a Whitespace work session. */
+export type SessionOutcome = "done" | "partial" | "missed";
 
 export type TaskPriority = "high" | "medium" | "low";
 export type TaskStatus = "todo" | "in_progress" | "done";

@@ -4,7 +4,8 @@ import type {
   RecommendationPriority,
 } from "@/features/proactive/types";
 import { checkPlacements } from "@/lib/scheduling/planner";
-import { addDaysToKey, dateKeyInZone, daysBetweenKeys, startOfWeekKey } from "@/lib/scheduling/zoned";
+import { addDaysToKey, dateKeyInZone, daysBetweenKeys, startOfDayInZone, startOfWeekKey } from "@/lib/scheduling/zoned";
+import type { Occurrence } from "@/lib/scheduling/recurrence";
 import type { Commitment } from "@/lib/domain/types";
 import { analyze, capacityBefore, dayCapacity, HORIZON_DAYS, type Analysis, type DayLoad, type ProactiveInput, type TaskLoad } from "./analyze";
 import {
@@ -255,6 +256,9 @@ function missedSession(t: TaskLoad, a: Analysis): Candidate | null {
     .filter((b) => Date.parse(b.endsAt!) > a.nowMs - MISSED_LOOKBACK_MS)
     .sort((x, y) => Date.parse(y.startsAt!) - Date.parse(x.startsAt!))[0];
   if (!recent) return null;
+  // The user already said it happened: nothing to ask.
+  if (recent.outcome === "done" || recent.outcome === "partial") return null;
+  const missed = recent.outcome === "missed";
   const minutes = Math.round((Date.parse(recent.endsAt!) - Date.parse(recent.startsAt!)) / 60_000);
   const key = dateKeyInZone(new Date(recent.startsAt!), a.timeZone);
   const when = `${dayPhrase(key, a.todayKey)} at ${clockAt(recent.startsAt!, a.timeZone)}`;
@@ -263,9 +267,11 @@ function missedSession(t: TaskLoad, a: Analysis): Candidate | null {
     dedupeKey: `missed_session:${recent.id}`,
     kind: "missed_session",
     priority: taskPriority(t, dueSoon ? "high" : "medium"),
-    title: `Did the ${t.task.title} session happen?`,
-    reason: `A session was planned ${when} and the task is still open.`,
-    message: `Did ${quote(t.task.title)} happen ${when}? If not, I'll find another slot.`,
+    title: missed ? `${t.task.title} needs a new slot` : `Did the ${t.task.title} session happen?`,
+    reason: missed ? `The session ${when} was missed and nothing else is planned.` : `A session was planned ${when} and the task is still open.`,
+    message: missed
+      ? `The ${quote(t.task.title)} session ${when} didn't happen. Want me to find another slot?`
+      : `Did ${quote(t.task.title)} happen ${when}? If not, I'll find another slot.`,
     facts: factsFor(t, [`${duration(minutes)} session ${when}`]),
     actions: [scheduleWork(t, minutes, "Find another time"), markComplete(t, "I finished it")],
     taskId: t.task.id,
@@ -479,6 +485,155 @@ function overloadedWeek(a: Analysis): Candidate | null {
 }
 
 // ---------------------------------------------------------------------------
+// Phase 7: fixed commitments that overlap each other
+// ---------------------------------------------------------------------------
+
+/** Overlaps shorter than this are back-to-back events with sloppy times, not conflicts. */
+const MIN_CONFLICT_MINUTES = 10;
+const MAX_CONFLICTS = 5;
+
+function short(title: string, max = 24): string {
+  return title.length > max ? `${title.slice(0, max - 1).trimEnd()}…` : title;
+}
+
+function keepAction(keep: Occurrence, drop: Occurrence, date: string): RecommendationAction {
+  return {
+    id: `keep:${keep.event.id}`,
+    kind: "resolve_conflict",
+    label: `Keep ${short(keep.event.title)}`,
+    params: { keepId: keep.event.id, dropId: drop.event.id, date },
+  };
+}
+
+export function commitmentConflicts(a: Analysis): Candidate[] {
+  const out: Candidate[] = [];
+  const seenPairs = new Set<string>();
+  for (const day of a.days) {
+    // Timed, fixed calendar events only. Whitespace sessions are handled by plan_broken.
+    const fixed = day.commitments
+      .filter((o) => o.event.kind === "fixed" && !o.allDay && o.end.getTime() > a.nowMs)
+      .sort((x, y) => x.start.getTime() - y.start.getTime() || x.event.id.localeCompare(y.event.id));
+    for (let i = 0; i < fixed.length; i++) {
+      for (let j = i + 1; j < fixed.length; j++) {
+        const x = fixed[i];
+        const y = fixed[j];
+        if (y.start >= x.end) break;
+        if (x.event.id === y.event.id) continue;
+        const overlap = Math.round((Math.min(x.end.getTime(), y.end.getTime()) - y.start.getTime()) / 60_000);
+        if (overlap < MIN_CONFLICT_MINUTES) continue;
+        const [first, second] = x.event.id < y.event.id ? [x, y] : [y, x];
+        const pair = `${first.event.id}:${second.event.id}`;
+        // Two repeating events that always overlap are one situation, not one per week.
+        const bothRepeat = x.recurring && y.recurring;
+        const dedupeKey = bothRepeat ? `commitment_conflict:${pair}` : `commitment_conflict:${pair}:${day.date}`;
+        if (seenPairs.has(dedupeKey)) continue;
+        seenPairs.add(dedupeKey);
+        const at = clockAt(y.start.toISOString(), a.timeZone);
+        const name = dayName(day.date, a.todayKey);
+        const span = (o: Occurrence) => `${o.event.title}: ${clockAt(o.start.toISOString(), a.timeZone)}–${clockAt(o.end.toISOString(), a.timeZone)}`;
+        const same = x.event.title.trim().toLowerCase() === y.event.title.trim().toLowerCase();
+        const soon = daysBetweenKeys(a.todayKey, day.date) <= 1;
+        out.push({
+          dedupeKey,
+          kind: "commitment_conflict",
+          priority: soon ? "high" : bothRepeat ? "low" : "medium",
+          title: same ? `${x.event.title} is on the calendar twice` : `${x.event.title} overlaps ${y.event.title}`,
+          reason: `Both are fixed and overlap by ${duration(overlap)}${bothRepeat ? " every time they repeat" : ""}.`,
+          message: same
+            ? `${name} at ${at}: ${quote(x.event.title)} is on your calendar twice. Remove one?`
+            : `${name} at ${at}: ${quote(x.event.title)} overlaps ${quote(y.event.title)}. Which one is happening?`,
+          facts: [span(x), span(y), bothRepeat ? "Both repeat" : shortDate(day.date)],
+          actions: same
+            ? [keepAction(x, y, day.date), { id: "acknowledge", kind: "acknowledge", label: "Both are right", params: {} }]
+            : [keepAction(x, y, day.date), keepAction(y, x, day.date), { id: "acknowledge", kind: "acknowledge", label: "Both are right", params: {} }],
+          taskId: null,
+          commitmentIds: [x.event.id, y.event.id],
+          date: day.date,
+        });
+        if (out.length >= MAX_CONFLICTS) return out;
+      }
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 7: deadline clusters that only fit if work starts earlier
+// ---------------------------------------------------------------------------
+
+/** Deadlines within this many days of the first one form a cluster. */
+const CLUSTER_SPAN_DAYS = 2;
+const CLUSTER_LOOKAHEAD_DAYS = 10;
+
+/**
+ * Several deadlines bunched together. overload_week already covers "not
+ * enough time at all"; this catches the softer case: there is enough time
+ * overall, but not if the work waits until those days.
+ */
+export function deadlineClusters(a: Analysis): Candidate[] {
+  const due = a.tasks
+    .filter(
+      (t) =>
+        t.dueMs !== null &&
+        t.dueMs > a.nowMs &&
+        t.dueDate !== null &&
+        (t.unscheduled ?? 0) > 0 &&
+        daysBetweenKeys(a.todayKey, t.dueDate) <= CLUSTER_LOOKAHEAD_DAYS,
+    )
+    .sort((x, y) => x.dueMs! - y.dueMs!);
+  const out: Candidate[] = [];
+  let i = 0;
+  while (i < due.length) {
+    const last = addDaysToKey(due[i].dueDate!, CLUSTER_SPAN_DAYS);
+    let j = i;
+    while (j + 1 < due.length && due[j + 1].dueDate! <= last) j++;
+    const group = due.slice(i, j + 1);
+    i = j + 1;
+    if (group.length < 2) continue;
+    const firstDay = group[0].dueDate!;
+    if (firstDay <= a.todayKey) continue; // nothing earlier to move work into
+    const lastDue = group[group.length - 1];
+    const need = group.reduce((s, t) => s + t.unscheduled!, 0);
+    const startMs = startOfDayInZone(firstDay, a.timeZone).getTime();
+    const before = capacityBefore(a, startMs);
+    const total = capacityBefore(a, lastDue.dueMs!);
+    const during = Math.max(0, total - before);
+    if (need <= during + SLACK_MINUTES) continue; // fits even if it waits
+    if (need > total + SLACK_MINUTES) continue; // doesn't fit at all: overload_week / deadline_at_risk say so
+    if (before < 30) continue;
+    const from = weekdayLong(firstDay);
+    const to = weekdayLong(lastDue.dueDate!);
+    const range = firstDay === lastDue.dueDate ? `on ${from}` : `between ${from} and ${to}`;
+    const days = daysBetweenKeys(a.todayKey, firstDay);
+    out.push({
+      dedupeKey: `deadline_cluster:${firstDay}:${lastDue.dueDate}`,
+      kind: "deadline_cluster",
+      priority: days <= 2 ? "high" : "medium",
+      title: `${plural(group.length, "deadline")} ${range}`,
+      reason: `They need ${about(need)} of work, and those days only have ${about(during)} free.`,
+      message: `You have ${plural(group.length, "deadline")} ${range}, about ${duration(roughly(need))} of work, with ${about(during)} free then. Start earlier?`,
+      facts: [
+        group.map((t) => t.task.title).slice(0, 4).join(", "),
+        `About ${duration(roughly(need))} of work left`,
+        `About ${duration(roughly(before))} free before ${from}`,
+      ],
+      actions: [
+        {
+          id: "schedule_tasks",
+          kind: "schedule_tasks",
+          label: "Start earlier",
+          params: { taskIds: group.map((t) => t.task.id).slice(0, 6) },
+        },
+      ],
+      taskId: null,
+      commitmentIds: [],
+      date: firstDay,
+    });
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 
 export function detectFromAnalysis(a: Analysis): Candidate[] {
   const out: Candidate[] = [];
@@ -494,6 +649,7 @@ export function detectFromAnalysis(a: Analysis): Candidate[] {
   out.push(...brokenPlans(a), ...overloadedDays(a));
   const week = overloadedWeek(a);
   if (week) out.push(week);
+  out.push(...commitmentConflicts(a), ...deadlineClusters(a));
   // Unique keys, even if two detectors ever agree.
   const seen = new Set<string>();
   return out.filter((c) => (seen.has(c.dedupeKey) ? false : (seen.add(c.dedupeKey), true)));

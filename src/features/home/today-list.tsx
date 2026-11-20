@@ -2,11 +2,12 @@
 
 import { Skeleton } from "@/components/ui";
 import { areaColors, findArea } from "@/lib/domain/life-areas";
-import type { CommitmentKind, LifeAreaRecord } from "@/lib/domain/types";
+import type { CommitmentKind, LifeAreaRecord, SessionOutcome } from "@/lib/domain/types";
 import { useNow } from "@/lib/hooks/use-now";
 import { formatTimeInZone } from "@/lib/scheduling/zoned";
 import { cn } from "@/lib/utils/cn";
 import Link from "next/link";
+import { SessionOutcomeChips } from "./session-outcome";
 
 export type TodayItem = {
   key: string;
@@ -17,6 +18,9 @@ export type TodayItem = {
   start: string;
   end: string;
   areaId: string | null;
+  /** Set for a Whitespace work session: its id, so the user can say whether it happened. */
+  sessionId?: string | null;
+  outcome?: SessionOutcome | null;
 };
 
 /** Highlights what is happening now; needs the client clock. */
@@ -52,19 +56,18 @@ export function TodayList({ items, areas, timeZone }: { items: TodayItem[]; area
           <li
             key={c.key}
             className={cn(
-              "flex items-center gap-3 rounded-[14px] px-2.5 py-2 transition-colors",
+              "flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-[14px] px-2.5 py-2 transition-colors",
               live ? "bg-accent-soft" : "hover:bg-surface-2",
-              past && "opacity-50",
             )}
           >
-            <div className={cn("w-[58px] shrink-0 text-right text-[12px] tabular-nums", live ? "text-accent-ink" : "text-ink-3")}>
+            <div className={cn("w-[58px] shrink-0 text-right text-[12px] tabular-nums", live ? "text-accent-ink" : "text-ink-3", past && "opacity-50")}>
               {c.allDay ? "All day" : formatTimeInZone(start, timeZone)}
             </div>
             <span
-              className={cn("w-1 shrink-0 self-stretch rounded-full", c.kind === "flexible" && "opacity-40")}
+              className={cn("w-1 shrink-0 self-stretch rounded-full", (c.kind === "flexible" || past) && "opacity-40")}
               style={{ background: areaColors(findArea(areas, c.areaId)).color }}
             />
-            <div className="min-w-0 flex-1">
+            <div className={cn("min-w-0 flex-1", past && "opacity-50")}>
               <p className="truncate text-[13.5px] font-semibold text-ink">{c.title}</p>
               <p className="truncate text-[12px] tabular-nums text-ink-3">
                 {c.allDay ? "All day" : `${formatTimeInZone(start, timeZone)} – ${formatTimeInZone(end, timeZone)}`}
@@ -89,6 +92,8 @@ export function TodayList({ items, areas, timeZone }: { items: TodayItem[]; area
                 Now
               </span>
             )}
+            {/* Plan vs reality: once a work session has started, the user can say how it went. */}
+            {c.sessionId && (live || past) && <SessionOutcomeChips id={c.sessionId} outcome={c.outcome ?? null} />}
           </li>
         );
       })}

@@ -38,7 +38,16 @@ export type RecommendationKind =
   | "overload_day"
   | "overload_week"
   /** A scheduled session now collides with an event: the user became unavailable. */
-  | "plan_broken";
+  | "plan_broken"
+  /** Phase 7: two fixed events overlap. Which one is right? */
+  | "commitment_conflict"
+  /** Phase 7: several deadlines close together that only fit if work starts earlier. */
+  | "deadline_cluster"
+  /** Phase 7.6: a life area with no time lately, and a real window for it. Low priority. */
+  | "neglected_area";
+
+/** Kinds added by the Phase 7 migration (20261128000000). Older databases reject them. */
+export const PHASE7_KINDS: ReadonlySet<RecommendationKind> = new Set(["commitment_conflict", "deadline_cluster", "neglected_area"]);
 
 export type RecommendationPriority = "high" | "medium" | "low";
 
@@ -61,6 +70,12 @@ export type RecommendationActionKind =
   | "change_priority"
   /** { taskId } */
   | "mark_complete"
+  /** { taskIds } plan the remaining work of several tasks together (deadline cluster) */
+  | "schedule_tasks"
+  /** { dropId, keepId, date } one of two overlapping fixed events goes: skip that day (repeating) or remove (one-off) */
+  | "resolve_conflict"
+  /** {} "Both are right": the situation is fine, never raise it again */
+  | "acknowledge"
   /** { prompt } no plan: send `prompt` as the user's chat message */
   | "ask";
 

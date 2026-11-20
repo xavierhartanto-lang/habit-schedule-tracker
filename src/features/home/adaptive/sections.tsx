@@ -72,7 +72,14 @@ function FocusView({ section, ctx }: ViewProps<"focus">) {
           </p>
         </div>
       </div>
-      <p className="mt-3 rounded-xl bg-surface-2 px-3 py-2 text-[12.5px] tabular-nums text-ink-2">{free}</p>
+      {f.now ? (
+        <p className="mt-3 rounded-xl bg-surface-2 px-3 py-2 text-[12.5px] leading-relaxed tabular-nums text-ink-2">
+          <span className="mr-1.5 text-[10.5px] font-bold uppercase tracking-wide text-accent-ink">Now</span>
+          {f.now.message}
+        </p>
+      ) : (
+        <p className="mt-3 rounded-xl bg-surface-2 px-3 py-2 text-[12.5px] tabular-nums text-ink-2">{free}</p>
+      )}
       {f.then.length > 0 && (
         <p className="mt-3 text-[12.5px] text-ink-3">
           Then: <span className="text-ink-2">{f.then.map((t) => t.title).join(", ")}</span>

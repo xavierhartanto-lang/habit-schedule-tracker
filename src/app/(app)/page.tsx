@@ -4,6 +4,7 @@ import { GlanceSkeleton, HomeGlance } from "@/features/home/glance";
 import { HomeAssistant, HomeAssistantSkeleton } from "@/features/home/home-assistant";
 import { PriorityTasks } from "@/features/home/priority-tasks";
 import { RailSection } from "@/features/home/rail-section";
+import { RefreshOnReturn } from "@/features/home/refresh-on-return";
 import { TodaySchedule, TodayScheduleSkeleton } from "@/features/home/today-schedule";
 import { OnboardingRedirect } from "@/features/onboarding/onboarding-redirect";
 import { Suspense } from "react";
@@ -35,6 +36,7 @@ export default function HomePage(props: PageProps<"/">) {
       <Suspense fallback={null}>
         <OnboardingRedirect />
       </Suspense>
+      <RefreshOnReturn />
 
       <div className="flex min-w-0 flex-col">
         <Suspense fallback={<HomeAssistantSkeleton />}>
