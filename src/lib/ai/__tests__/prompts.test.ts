@@ -30,6 +30,14 @@ describe("buildSystemPrompt", () => {
     expect(a).toBe(b);
   });
 
+  it("shows open tasks to the reply model, so it never says a real task doesn't exist", () => {
+    const [, user] = buildSystemPrompt("assistant", { ...ctx, openTasks: ["training (due 2026-11-19 15:59)"] }, { actions: null });
+    expect(user).toContain("<open_tasks>");
+    expect(user).toContain("- training (due 2026-11-19 15:59)");
+    const [, off] = buildSystemPrompt("assistant", { ...ctx, personalizationEnabled: false, openTasks: ["training"] }, { actions: null });
+    expect(off).not.toContain("<open_tasks>");
+  });
+
   it("hides saved facts when personalization is off", () => {
     const [, user] = buildSystemPrompt("assistant", { ...ctx, personalizationEnabled: false });
     expect(user).not.toContain("Make varsity");

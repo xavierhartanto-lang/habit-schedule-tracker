@@ -6,7 +6,7 @@ import { TimeZoneSync } from "./timezone-sync";
 
 export function AppShell({ children }: { children: ReactNode }) {
   return (
-    <div className="min-h-dvh lg:pl-64">
+    <div className="min-h-dvh lg:pl-[15.75rem]">
       <Sidebar
         footer={
           <Suspense fallback={<SidebarAccountSkeleton />}>
@@ -15,7 +15,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         }
       />
       <MobileTopBar />
-      <main className="mx-auto w-full max-w-6xl px-4 pb-[calc(var(--tabbar-h)+2.5rem)] pt-6 sm:px-6 lg:px-10 lg:pb-12 lg:pt-10 has-[[data-fullbleed]]:max-w-none has-[[data-fullbleed]]:p-0">
+      <main className="mx-auto w-full max-w-6xl lg:max-w-[1360px] px-4 pb-[calc(var(--tabbar-h)+2.5rem)] pt-6 sm:px-6 lg:px-4 lg:pb-3 lg:pt-3 has-[[data-fullbleed]]:max-w-none has-[[data-fullbleed]]:p-0">
         {children}
       </main>
       <MobileTabBar />

@@ -4,12 +4,13 @@ import { buttonClasses } from "@/components/ui/button";
 import { cn } from "@/lib/utils/cn";
 import { ArrowUp, ChevronUp, KeyRound, RotateCcw, Sparkles, Square } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AssistantMessage, SystemNotice, ThinkingState, UserMessage } from "./messages";
 import { ProposalGroup } from "./proposal-cards";
 import { RichText } from "./rich-text";
 import { streamChat } from "./stream";
 import { PlanCard, type PlanCardActions } from "./plan-card";
+import type { PlanActionResult } from "./plan-types";
 import { approvePlanItems, editPlanItem, rejectPlanItems, requestAlternatives, undoPlanItem } from "./plan-actions";
 import { CHAT_MESSAGE_MAX, type ChatMessage, type ChatProactive, type ClientAiError, type Proposal } from "./types";
 import { ChipRow, NudgeList } from "./proactive-nudges";
@@ -20,17 +21,27 @@ import type { Nudge, ProactiveChip } from "@/features/home/proactive";
 const HOME_RESUME_SHOWN = 6;
 
 const CHIP_BUTTON =
-  "rounded-full border border-border bg-surface px-3 py-1.5 text-[12.5px] text-ink-2 pointer-coarse:px-3.5 pointer-coarse:py-2.5 pointer-coarse:text-[13.5px] transition-[background-color,border-color,color,transform] duration-150 hover:border-accent/40 hover:bg-accent-soft hover:text-accent-ink active:scale-[0.97] disabled:pointer-events-none disabled:opacity-50";
+  "rounded-xl bg-surface-2 px-3.5 py-2 text-[13px] font-semibold text-ink pointer-coarse:px-3.5 pointer-coarse:py-2.5 pointer-coarse:text-[13.5px] transition-[background-color,border-color,color,transform] duration-150 hover:bg-accent-soft hover:text-accent-ink active:scale-[0.97] disabled:pointer-events-none disabled:opacity-50";
 
-const EYEBROW = "flex items-center gap-1.5 text-[12px] font-medium tracking-[0.01em] text-ink-3";
+const EYEBROW = "flex items-center gap-1.5 text-[11.5px] font-semibold uppercase tracking-[0.08em] text-ink-3";
 
-const PLAN_ACTIONS: PlanCardActions = {
-  approve: approvePlanItems,
-  reject: rejectPlanItems,
-  edit: editPlanItem,
-  alternatives: requestAlternatives,
-  undo: undoPlanItem,
-};
+/** Approve and Undo change saved data, so the rest of the page (e.g. Home's task rail) refreshes after them. */
+function planActions(refresh: () => void): PlanCardActions {
+  const thenRefresh =
+    <A,>(fn: (input: A) => Promise<PlanActionResult>) =>
+    async (input: A) => {
+      const result = await fn(input);
+      if (result.ok) refresh();
+      return result;
+    };
+  return {
+    approve: thenRefresh(approvePlanItems),
+    reject: rejectPlanItems,
+    edit: editPlanItem,
+    alternatives: requestAlternatives,
+    undo: thenRefresh(undoPlanItem),
+  };
+}
 
 /**
  * The live conversation: persisted history, streaming replies, proposal
@@ -94,6 +105,7 @@ export function Chat({
   const [opening] = useState(openingProp);
   const embedded = variant === "embedded";
   const router = useRouter();
+  const planCardActions = useMemo(() => planActions(() => router.refresh()), [router]);
   const [conversationId, setConversationId] = useState(initialConversationId);
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
   const [streaming, setStreaming] = useState<string | null>(null);
@@ -186,6 +198,8 @@ export function Chat({
       let createdConversation = false;
       let userSaved = !request.message;
       let gotReply = false;
+      // Changes applied during the turn (e.g. "it's done") must show up in the rest of the page.
+      let applied = false;
 
       // The opening line is shown before the conversation exists. Send it with
       // the first message so the assistant knows what it "said".
@@ -206,6 +220,7 @@ export function Chat({
       )) {
         switch (event.type) {
           case "plan":
+            if (event.plan?.items.some((i) => i.status === "applied")) applied = true;
             setMessages((m) => m.map((x) => (x.id === event.messageId ? { ...x, plan: event.plan } : x)));
             break;
           case "clarify":
@@ -272,7 +287,7 @@ export function Chat({
         });
       }
       // Pick up the new conversation in the history list.
-      if (createdConversation) router.refresh();
+      if (createdConversation || applied) router.refresh();
     },
     [busy, conversationId, mode, router, embedded, opening],
   );
@@ -375,7 +390,7 @@ export function Chat({
                 <h2 id="home-brief" className={EYEBROW}>
                   <Sparkles aria-hidden className="size-3.5 text-accent" /> Briefing
                 </h2>
-                <p className="mt-2.5 max-w-[60ch] text-[15.5px] leading-[1.65] tracking-[-0.005em] text-ink text-pretty sm:text-[16.5px]">{opening}</p>
+                <p className="mt-3 max-w-[60ch] text-[16px] leading-[1.6] tracking-[-0.01em] text-ink text-pretty sm:text-[17.5px]">{opening}</p>
                 {empty && !openingRecHandled && openingChips.length > 0 && (
                   <ChipRow chips={openingChips} onAct={(c) => act(c, null)} disabled={busy} className="mt-4" />
                 )}
@@ -461,7 +476,7 @@ export function Chat({
                 )}
                 {m.role === "assistant" && m.plan && (
                   <div className="sm:pl-10">
-                    <PlanCard key={`${m.plan.id}:${m.plan.version}`} plan={m.plan} actions={PLAN_ACTIONS} disabled={busy} />
+                    <PlanCard key={`${m.plan.id}:${m.plan.version}`} plan={m.plan} actions={planCardActions} disabled={busy} />
                   </div>
                 )}
                 {m.role === "assistant" && m.clarify && i === messages.length - 1 && !busy && aiConfigured && m.clarify.choices.length > 0 && (
@@ -555,7 +570,7 @@ export function Chat({
       <div
         className={cn(
           embedded
-            ? "sticky bottom-[var(--tabbar-h)] z-10 -mx-1 bg-bg px-1 pb-3 pt-2 before:pointer-events-none before:absolute before:inset-x-0 before:-top-6 before:h-6 before:bg-gradient-to-t before:from-bg before:to-transparent lg:bottom-0 lg:pb-6"
+            ? "sticky bottom-[var(--tabbar-h)] z-10 -mx-1 rounded-b-[22px] bg-surface px-1 pb-4 pt-2 before:pointer-events-none before:absolute before:inset-x-0 before:-top-6 before:h-6 before:bg-gradient-to-t before:from-surface before:to-transparent lg:bottom-0 sm:pb-6"
             : "border-t border-border bg-surface/80 backdrop-blur",
         )}
       >
@@ -596,8 +611,9 @@ export function Chat({
                   send();
                 }}
                 className={cn(
-                  "flex items-end gap-2 rounded-2xl border bg-surface p-2 shadow-card transition-[border-color,box-shadow] duration-200 focus-within:shadow-pop",
-                  tooLong ? "border-danger/60" : "border-border hover:border-border-strong focus-within:border-accent/60",
+                  "flex items-end gap-2 rounded-2xl border p-2 transition-[border-color,box-shadow,background-color] duration-200",
+                  embedded ? "bg-surface-2 focus-within:bg-surface focus-within:shadow-pop" : "bg-surface shadow-card focus-within:shadow-pop",
+                  tooLong ? "border-danger/60" : cn(embedded ? "border-transparent" : "border-border", "hover:border-border-strong focus-within:border-accent/60"),
                 )}
               >
                 <label htmlFor={`${mode}-input`} className="sr-only">
@@ -640,7 +656,7 @@ export function Chat({
                     type="submit"
                     disabled={!draft.trim() || tooLong}
                     aria-label="Send"
-                    className="grid size-9 shrink-0 place-items-center rounded-xl pointer-coarse:size-10 bg-accent text-on-accent transition-[background-color,transform] duration-150 hover:bg-accent-hover active:scale-95 disabled:bg-surface-2 disabled:text-ink-3"
+                    className="grid size-9 shrink-0 place-items-center rounded-xl pointer-coarse:size-10 bg-accent text-on-accent shadow-[0_6px_16px_-8px_var(--accent)] transition-[background-color,transform] duration-150 hover:bg-accent-hover active:scale-95 disabled:bg-border disabled:text-ink-3 disabled:shadow-none"
                   >
                     <ArrowUp className="size-4" strokeWidth={2.25} />
                   </button>

@@ -5,7 +5,8 @@ import { buildUserContext } from "@/lib/ai/context-builder";
 import { localDateKey } from "@/lib/ai/context-helpers";
 import type { KnownFactRef } from "@/lib/ai/extraction";
 import { onboardingCoverage, type KnownFact, type OnboardingCoverage, type PromptContext } from "@/lib/ai/prompts";
-import type { Commitment, ContextItem } from "@/lib/domain/types";
+import { dueParts } from "@/lib/domain/tasks";
+import type { Commitment, ContextItem, Task } from "@/lib/domain/types";
 
 /**
  * Turns the user's saved context (built by the data layer, which already
@@ -81,6 +82,11 @@ export function toKnownFacts(ctx: UserContext): KnownFact[] {
   return facts;
 }
 
+function taskLine(t: Task, timeZone: string): string {
+  const due = dueParts(t.dueAt, timeZone);
+  return due ? `${t.title} (due ${due.date}${due.time ? ` ${due.time}` : ""})` : t.title;
+}
+
 function todayIn(timeZone: string, now: Date): { date: string; weekday: string } {
   let weekday: string;
   try {
@@ -105,6 +111,7 @@ export async function loadChatContext(
       profile: ctx.profile,
       preferences: { dayStartTime: ctx.preferences.dayStartTime, dayEndTime: ctx.preferences.dayEndTime },
       facts,
+      openTasks: ctx.openTasks.slice(0, 40).map((t) => taskLine(t, ctx.profile.timezone)),
       personalizationEnabled: ctx.permissions.personalization,
       today,
     },

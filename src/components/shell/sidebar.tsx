@@ -11,9 +11,9 @@ export function Sidebar({ footer }: { footer: ReactNode }) {
   const pathname = usePathname();
 
   return (
-    <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-border bg-bg px-4 py-5 lg:flex">
+    <aside className="fixed inset-y-3 left-3 z-30 hidden w-60 flex-col rounded-[22px] bg-sidebar px-3.5 py-5 text-sidebar-ink shadow-card ring-1 ring-inset ring-white/[0.04] lg:flex">
       <div className="px-2">
-        <Brand />
+        <Brand onDark />
       </div>
 
       <nav aria-label="Primary" className="mt-8 flex flex-col gap-0.5">
@@ -26,14 +26,14 @@ export function Sidebar({ footer }: { footer: ReactNode }) {
               href={item.href}
               aria-current={active ? "page" : undefined}
               className={cn(
-                "group relative flex h-9 items-center gap-3 rounded-lg px-3 text-[13.5px] transition-colors duration-150",
+                "group relative flex h-10 items-center gap-3 rounded-xl px-3 text-[13.5px] font-medium transition-colors duration-150",
                 active
-                  ? "bg-accent-soft/70 font-medium text-ink"
-                  : "text-ink-2 hover:bg-surface-2 hover:text-ink",
+                  ? "bg-sidebar-active text-sidebar-ink"
+                  : "text-sidebar-ink-2 hover:bg-sidebar-hover hover:text-sidebar-ink",
               )}
             >
               <Icon
-                className={cn("size-4 transition-colors", active ? "text-accent" : "text-ink-3 group-hover:text-ink-2")}
+                className={cn("size-4 transition-colors", active ? "text-[var(--brand-from)]" : "text-sidebar-ink-2 group-hover:text-sidebar-ink")}
                 strokeWidth={2}
               />
               {item.label}

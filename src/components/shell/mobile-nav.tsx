@@ -171,7 +171,7 @@ export function MobileTabBar() {
       )}
     >
       <div className="bg-gradient-to-t from-bg via-bg/80 to-transparent px-3 pb-[max(env(safe-area-inset-bottom),0.75rem)] pt-4">
-        <ul className="pointer-events-auto mx-auto grid h-[3.75rem] max-w-md grid-cols-5 items-stretch rounded-[22px] border border-border/80 bg-surface/85 px-1 shadow-[0_10px_30px_-10px_rgb(5_7_12/0.35),0_1px_2px_rgb(5_7_12/0.06)] backdrop-blur-xl backdrop-saturate-150">
+        <ul className="pointer-events-auto mx-auto grid h-[3.75rem] max-w-md grid-cols-5 items-stretch rounded-[22px] bg-sidebar px-1 shadow-[0_14px_34px_-12px_rgb(5_7_12/0.55),0_1px_2px_rgb(5_7_12/0.1)] ring-1 ring-inset ring-white/[0.06]">
           {left.map((item) => (
             <TabLink key={item.href} item={item} active={isActive(pathname, item.href)} />
           ))}
@@ -181,7 +181,7 @@ export function MobileTabBar() {
               onClick={onAsk}
               aria-label="Ask Whitespace"
               aria-current={assistantActive ? "page" : undefined}
-              className="group grid size-12 place-items-center rounded-full bg-accent text-on-accent shadow-[0_6px_16px_-4px_color-mix(in_srgb,var(--accent)_60%,transparent)] ring-4 ring-surface/70 transition-transform duration-150 ease-out active:scale-90"
+              className="brand-gradient group grid size-12 place-items-center rounded-full text-white shadow-[0_6px_16px_-4px_rgb(79_70_229/0.7)] transition-transform duration-150 ease-out active:scale-90"
             >
               <Sparkles className="size-[22px] transition-transform duration-300 ease-out group-active:rotate-12" strokeWidth={2} />
             </Link>
@@ -204,10 +204,10 @@ function TabLink({ item, active }: { item: NavItem; active: boolean }) {
         aria-current={active ? "page" : undefined}
         className={cn(
           "flex h-full flex-col items-center justify-center gap-0.5 rounded-2xl text-[10.5px] font-medium tracking-[0.01em] transition-[color,transform] duration-150 active:scale-95",
-          active ? "text-ink" : "text-ink-3",
+          active ? "text-sidebar-ink" : "text-sidebar-ink-2",
         )}
       >
-        <span className={cn("grid h-7 w-12 place-items-center rounded-full transition-colors duration-200", active && "bg-accent-soft text-accent")}>
+        <span className={cn("grid h-7 w-12 place-items-center rounded-full transition-colors duration-200", active && "bg-sidebar-active text-[var(--brand-from)]")}>
           <Icon className="size-[20px]" strokeWidth={active ? 2.2 : 1.8} />
         </span>
         <span className="truncate">{item.shortLabel ?? item.label}</span>

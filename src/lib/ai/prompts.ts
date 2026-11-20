@@ -29,6 +29,8 @@ export type PromptContext = {
   };
   preferences?: { dayStartTime: string; dayEndTime: string } | null;
   facts: KnownFact[];
+  /** The user's open to-dos (not on the calendar), e.g. "History essay (due 2026-11-20 15:59)". */
+  openTasks?: string[];
   personalizationEnabled: boolean;
   /** "YYYY-MM-DD" and weekday in the user's timezone. */
   today: { date: string; weekday: string };
@@ -231,6 +233,13 @@ export function buildSystemPrompt(mode: ConversationMode, ctx: PromptContext, ex
     const open = coverage.topics.filter((t) => !t.covered).map((t) => t.label);
     sections.push(
       `<onboarding_progress>\nTopics with nothing saved yet: ${open.length ? open.join("; ") : "none, all covered"}.\nTopics may also be answered earlier in this conversation; check before asking.\n</onboarding_progress>`,
+    );
+  }
+
+  if (phase4 && ctx.personalizationEnabled) {
+    const tasks = ctx.openTasks ?? [];
+    sections.push(
+      `<open_tasks>\nThe user's to-do list. Tasks are not calendar events.\n${tasks.length ? tasks.map((t) => `- ${t}`).join("\n") : "No open tasks."}\n</open_tasks>`,
     );
   }
 
