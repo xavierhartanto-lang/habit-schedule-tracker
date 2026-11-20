@@ -197,7 +197,49 @@
   40% { opacity: 1; transform: scale(1); }
 }
 
-html { color-scheme: light dark; }
+html {
+  color-scheme: light dark;
+  /* Phones: no grey flash on tap, no font inflation in landscape. */
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/*
+  Mobile chrome heights, shared by the shell, Home's sticky composer and the
+  full-height Assistant page. Both are 0 from lg up, where the sidebar takes over.
+  The tab bar floats: 60px pill plus the home indicator (or a 12px margin).
+*/
+:root {
+  --topbar-h: calc(3.5rem + env(safe-area-inset-top));
+  --tabbar-h: calc(3.75rem + max(env(safe-area-inset-bottom), 0.75rem));
+}
+/* While typing on a phone the tab bar steps aside for the keyboard (mobile-nav.tsx). */
+:root[data-typing] {
+  --tabbar-h: 0px;
+}
+@media (min-width: 64rem) {
+  :root {
+    --topbar-h: 0px;
+    --tabbar-h: 0px;
+  }
+}
+
+/* A focused field scrolls clear of the floating tab bar and sticky composer. */
+input,
+select,
+textarea {
+  scroll-margin-bottom: calc(var(--tabbar-h) + 1.5rem);
+}
+
+/* Momentum scrolling rows (chips, tiles) without a visible scrollbar. */
+.scroll-row {
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+}
+.scroll-row::-webkit-scrollbar {
+  display: none;
+}
 
 body {
   background: var(--bg);
@@ -228,4 +270,21 @@ body {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/*
+  Touch hit area for small controls (checkboxes, icon buttons): the visual
+  stays compact, the tappable area grows to at least 44×44 around it.
+*/
+.hit-area {
+  position: relative;
+}
+.hit-area::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: max(100%, 44px);
+  height: max(100%, 44px);
+  transform: translate(-50%, -50%);
 }

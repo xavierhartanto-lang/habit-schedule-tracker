@@ -16,7 +16,7 @@ import type { WeekSummary } from "./week-summary";
  * Render inside <Suspense>.
  */
 
-const GHOST_LINK = buttonClasses("ghost", "sm", "h-7 px-2 text-[12px] text-ink-3");
+const GHOST_LINK = buttonClasses("ghost", "sm", "h-7 px-2 text-[12px] text-ink-3 pointer-coarse:h-9 pointer-coarse:px-2.5");
 
 function Header({
   date,
@@ -32,8 +32,8 @@ function Header({
   return (
     <header className="animate-fade-up">
       <div className="flex min-h-7 items-center justify-between gap-3">
-        <p className="text-[13px] tabular-nums text-ink-3">{date}</p>
-        {actions && <div className="-mr-2 flex items-center gap-0.5">{actions}</div>}
+        <p className="min-w-0 truncate text-[13px] tabular-nums text-ink-3">{date}</p>
+        {actions && <div className="-mr-2 flex shrink-0 items-center gap-0.5">{actions}</div>}
       </div>
       <h1 className="mt-1 text-[28px] font-semibold leading-[1.15] tracking-[-0.022em] text-ink sm:text-[32px]">
         {greeting}
@@ -53,7 +53,7 @@ function WeekLine({ week }: { week: WeekSummary }) {
       : { value: String(week.openDays), label: week.openDays === 1 ? "open day" : "open days" },
   ];
   return (
-    <dl aria-label="Next 7 days" className="mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-[13px] text-ink-3">
+    <dl aria-label="Next 7 days" className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-[13px] text-ink-3 sm:gap-x-4">
       <dt className="text-ink-3">Next 7 days</dt>
       {facts.map((f) => (
         <dd key={f.label} className="flex items-baseline gap-1">
@@ -98,7 +98,7 @@ function Blocked({ icon, title, body, action }: { icon: ReactNode; title: string
   );
 }
 
-export async function HomeAssistant({ fresh }: { fresh: boolean }) {
+export async function HomeAssistant({ fresh, glance }: { fresh: boolean; glance?: ReactNode }) {
   const data = await loadHomeAssistant();
 
   if (data.state === "preview") {
@@ -161,7 +161,7 @@ export async function HomeAssistant({ fresh }: { fresh: boolean }) {
     .slice(0, Math.max(0, (proactive.nudges.length ? 3 : 4) - actionChips.length));
 
   return (
-    <div className="flex flex-col gap-9">
+    <div className="flex flex-col gap-7 sm:gap-9">
       <Header
         date={formatDateKey(data.todayKey, { weekday: "long", month: "long", day: "numeric" })}
         greeting={data.opening.greeting}
@@ -174,11 +174,12 @@ export async function HomeAssistant({ fresh }: { fresh: boolean }) {
               </Link>
             )}
             <Link href={conversationId ? `/assistant?c=${conversationId}` : "/assistant"} className={GHOST_LINK}>
-              Full view <ArrowUpRight className="size-3.5" />
+              <span className="max-sm:sr-only">Full view</span> <ArrowUpRight className="size-3.5" />
             </Link>
           </>
         }
       />
+      {glance}
       <section aria-label="Assistant" className="min-w-0">
         <Chat
           key={conversationId ?? "home"}

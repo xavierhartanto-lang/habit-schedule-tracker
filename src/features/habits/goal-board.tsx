@@ -172,7 +172,7 @@ function GoalCard({
           type="button"
           onClick={onEdit}
           aria-label={`Edit ${g.title}`}
-          className="-mr-1 -mt-1 grid size-8 shrink-0 place-items-center rounded-lg text-ink-3 hover:bg-surface-2 hover:text-ink"
+          className="-mr-1 -mt-1 grid size-8 shrink-0 place-items-center rounded-lg pointer-coarse:-mr-2 pointer-coarse:size-10 text-ink-3 hover:bg-surface-2 hover:text-ink"
         >
           <PenLine className="size-4" />
         </button>

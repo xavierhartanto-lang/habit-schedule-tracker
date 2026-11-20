@@ -84,7 +84,8 @@ export function Dialog({
           size === "sm" ? "sm:max-w-md" : "sm:max-w-lg",
         )}
       >
-        <div className="flex items-start justify-between gap-4 px-5 pb-2 pt-5">
+        <span aria-hidden className="mx-auto mt-2 h-1 w-9 shrink-0 rounded-full bg-border-strong sm:hidden" />
+        <div className="flex items-start justify-between gap-4 px-5 pb-2 pt-3 sm:pt-5">
           <div className="min-w-0">
             <h2 id={titleId} className="text-[16px] font-medium tracking-[-0.01em] text-ink">
               {title}
@@ -95,7 +96,7 @@ export function Dialog({
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="-mr-1 -mt-1 grid size-8 shrink-0 place-items-center rounded-lg text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink"
+            className="-mr-1 -mt-1 grid size-8 shrink-0 place-items-center rounded-lg pointer-coarse:-mr-2 pointer-coarse:-mt-2 pointer-coarse:size-11 text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink"
           >
             <X className="size-4" />
           </button>

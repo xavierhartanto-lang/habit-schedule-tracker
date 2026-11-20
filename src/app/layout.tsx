@@ -12,6 +12,12 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  // Draw under the notch and home indicator; the shell pads with safe-area insets.
+  viewportFit: "cover",
+  // Android Chrome: the on-screen keyboard shrinks the page instead of covering inputs.
+  interactiveWidget: "resizes-content",
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#f6f7f9" },
     { media: "(prefers-color-scheme: dark)", color: "#0b0e14" },

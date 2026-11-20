@@ -32,7 +32,7 @@ export function RailSection({
         {href && (
           <Link
             href={href}
-            className="rounded text-[12px] text-ink-3 transition-colors hover:text-accent-ink"
+            className="-my-2 rounded px-1 py-2 text-[12px] text-ink-3 transition-colors hover:text-accent-ink pointer-coarse:-mr-1 pointer-coarse:py-3"
           >
             {hrefLabel}
           </Link>

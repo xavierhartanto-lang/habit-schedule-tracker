@@ -15,7 +15,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         }
       />
       <MobileTopBar />
-      <main className="mx-auto w-full max-w-6xl px-4 pb-28 pt-6 sm:px-6 lg:px-10 lg:pb-12 lg:pt-10 has-[[data-fullbleed]]:max-w-none has-[[data-fullbleed]]:p-0">
+      <main className="mx-auto w-full max-w-6xl px-4 pb-[calc(var(--tabbar-h)+2.5rem)] pt-6 sm:px-6 lg:px-10 lg:pb-12 lg:pt-10 has-[[data-fullbleed]]:max-w-none has-[[data-fullbleed]]:p-0">
         {children}
       </main>
       <MobileTabBar />

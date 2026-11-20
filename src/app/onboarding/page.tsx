@@ -21,8 +21,8 @@ export const metadata: Metadata = { title: "Set up Whitespace" };
  */
 export default function OnboardingPage() {
   return (
-    <div className="flex h-dvh flex-col bg-bg">
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-surface/80 px-4 backdrop-blur sm:px-6">
+    <div className="flex h-dvh flex-col bg-bg pb-[env(safe-area-inset-bottom)]">
+      <header className="box-content flex h-14 shrink-0 items-center pt-[env(safe-area-inset-top)] justify-between border-b border-border bg-surface/80 px-4 backdrop-blur sm:px-6">
         <Brand />
         <p className="hidden text-[13px] text-ink-3 sm:block">Setup · a quick conversation</p>
         <Suspense fallback={<span className="w-24" />}>

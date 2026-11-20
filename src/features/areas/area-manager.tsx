@@ -139,7 +139,7 @@ function IconButton({
       type="button"
       aria-label={label}
       title={label}
-      className="grid size-8 place-items-center rounded-lg text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink disabled:pointer-events-none disabled:opacity-30"
+      className="grid size-8 place-items-center rounded-lg text-ink-3 transition-colors pointer-coarse:size-10 active:bg-surface-2 hover:bg-surface-2 hover:text-ink disabled:pointer-events-none disabled:opacity-30"
       {...props}
     >
       {children}
@@ -162,7 +162,7 @@ export function ColorPicker({ value, onChange }: { value: AreaColor; onChange: (
             title={AREA_COLOR_LABELS[c]}
             onClick={() => onChange(c)}
             className={cn(
-              "grid size-8 place-items-center rounded-full ring-offset-2 ring-offset-surface transition-shadow",
+              "grid size-8 place-items-center rounded-full pointer-coarse:size-10 ring-offset-2 ring-offset-surface transition-shadow",
               on && "ring-2 ring-ink/70",
             )}
             style={{ background: `var(--area-${c})` }}

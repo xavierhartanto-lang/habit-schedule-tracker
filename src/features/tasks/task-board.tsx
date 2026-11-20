@@ -262,7 +262,7 @@ function TaskRow({
         onClick={onToggle}
         disabled={disabled}
         className={cn(
-          "mt-0.5 grid size-[18px] shrink-0 place-items-center rounded-md border-[1.5px] transition-colors",
+          "hit-area mt-0.5 grid size-[18px] shrink-0 place-items-center rounded-md border-[1.5px] transition-[background-color,border-color,transform] duration-150 active:scale-90 pointer-coarse:size-[22px] pointer-coarse:mt-0",
           done ? "border-transparent bg-ink text-bg" : "border-border-strong hover:border-accent",
           t.status === "in_progress" && "border-accent bg-accent-soft",
         )}
@@ -335,8 +335,8 @@ function QuickAdd({ areas, disabled, onMore }: { areas: LifeAreaRecord[]; disabl
             className="border-transparent bg-transparent px-1 hover:border-transparent focus:border-transparent focus:ring-0"
           />
         </div>
-        <div className="grid grid-cols-3 gap-2 md:flex md:items-center">
-          <Select aria-label="Life area" value={areaId} onChange={(e) => setAreaId(e.target.value)} disabled={disabled} className="h-8 text-[13px] md:w-36">
+        <div className="grid grid-cols-2 gap-2 md:flex md:items-center">
+          <Select aria-label="Life area" value={areaId} onChange={(e) => setAreaId(e.target.value)} disabled={disabled} className="col-span-2 h-8 text-[13px] md:w-36">
             <LifeAreaOptions areas={areas} />
           </Select>
           <Select

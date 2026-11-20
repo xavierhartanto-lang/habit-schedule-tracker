@@ -285,7 +285,7 @@ export function EditableList<T extends { id: string }>({
                         setConfirming(null);
                         setEditing({ id: item.id });
                       }}
-                      className="grid size-8 place-items-center rounded-lg text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                      className="grid size-8 place-items-center rounded-lg pointer-coarse:size-10 text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
                     >
                       <PenLine className="size-4" />
                     </button>
@@ -296,7 +296,7 @@ export function EditableList<T extends { id: string }>({
                         setDeleteError(null);
                         setConfirming(item.id);
                       }}
-                      className="grid size-8 place-items-center rounded-lg text-ink-3 transition-colors hover:bg-surface-2 hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                      className="grid size-8 place-items-center rounded-lg pointer-coarse:size-10 text-ink-3 transition-colors hover:bg-surface-2 hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
                     >
                       <Trash2 className="size-4" />
                     </button>

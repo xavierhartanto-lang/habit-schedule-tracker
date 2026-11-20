@@ -52,6 +52,8 @@ export async function CalendarContent({
       {loadError && <Notice tone="danger">Could not load events. Refresh to try again.</Notice>}
       <CalendarView
         view={view}
+        viewChosen={viewParam !== undefined}
+        weekStartsOn={ctx.weekStartsOn}
         date={date}
         dayKeys={keys}
         events={events}

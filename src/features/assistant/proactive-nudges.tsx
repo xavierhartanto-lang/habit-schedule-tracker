@@ -9,7 +9,7 @@ import type { Nudge, ProactiveChip } from "@/features/home/proactive";
  */
 
 const CHIP =
-  "rounded-full border px-3 py-1.5 text-[12.5px] transition-[background-color,border-color,color,transform] duration-150 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50";
+  "rounded-full border px-3 py-1.5 text-[12.5px] pointer-coarse:px-3.5 pointer-coarse:py-2.5 pointer-coarse:text-[13.5px] transition-[background-color,border-color,color,transform] duration-150 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50";
 
 export function ChipRow({
   chips,

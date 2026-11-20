@@ -2,7 +2,7 @@ import { cn } from "@/lib/utils/cn";
 import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
 
 const control =
-  "h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-ink placeholder:text-ink-3 transition-[border-color,box-shadow] duration-150 hover:border-border-strong focus:border-accent/70 focus:outline-none focus:ring-[3px] focus:ring-accent/15 disabled:opacity-60";
+  "h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-ink pointer-coarse:h-11 pointer-coarse:text-base placeholder:text-ink-3 transition-[border-color,box-shadow] duration-150 hover:border-border-strong focus:border-accent/70 focus:outline-none focus:ring-[3px] focus:ring-accent/15 disabled:opacity-60";
 
 export function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (

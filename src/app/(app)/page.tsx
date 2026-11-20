@@ -1,4 +1,5 @@
 import { Skeleton } from "@/components/ui";
+import { GlanceSkeleton, HomeGlance } from "@/features/home/glance";
 import { HomeAssistant, HomeAssistantSkeleton } from "@/features/home/home-assistant";
 import { PriorityTasks } from "@/features/home/priority-tasks";
 import { RailSection } from "@/features/home/rail-section";
@@ -22,7 +23,8 @@ function SectionSkeleton({ title }: { title: string }) {
  * Home is the assistant. The brief, what needs attention and the
  * conversation fill the main column; a quiet rail beside it holds today's
  * schedule, what's coming up and open tasks. Below xl the rail drops under
- * the conversation as two columns.
+ * the conversation as two columns, and a glance hub under the greeting puts
+ * what's next, tasks, habits and insights one tap away.
  */
 export default function HomePage(props: PageProps<"/">) {
   return (
@@ -57,5 +59,14 @@ export default function HomePage(props: PageProps<"/">) {
 
 async function HomeAssistantFromParams({ searchParams }: { searchParams: PageProps<"/">["searchParams"] }) {
   const { new: fresh } = await searchParams;
-  return <HomeAssistant fresh={fresh === "1"} />;
+  return (
+    <HomeAssistant
+      fresh={fresh === "1"}
+      glance={
+        <Suspense fallback={<GlanceSkeleton />}>
+          <HomeGlance />
+        </Suspense>
+      }
+    />
+  );
 }

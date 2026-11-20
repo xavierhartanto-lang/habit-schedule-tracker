@@ -392,7 +392,7 @@ function PlanRow({
             checked={selected}
             disabled={locked}
             onChange={onToggle}
-            className="size-4 cursor-pointer rounded accent-[var(--accent)]"
+            className="size-4 cursor-pointer rounded accent-[var(--accent)] pointer-coarse:size-5"
           />
         ) : item.status === "applied" ? (
           <Check aria-hidden className="size-4 text-success" />
