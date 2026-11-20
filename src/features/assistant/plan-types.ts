@@ -19,6 +19,7 @@ export const PLAN_ITEM_ACTIONS = [
   "remove_block",
   "remove_event",
   "skip_occurrence",
+  "update_event",
   "create_task",
   "update_task",
   "complete_task",
@@ -42,6 +43,7 @@ export const CALENDAR_ACTIONS: ReadonlySet<PlanItemAction> = new Set([
   "remove_block",
   "remove_event",
   "skip_occurrence",
+  "update_event",
 ]);
 
 export type PlanItemStatus = "pending" | "applied" | "rejected" | "conflict" | "failed" | "undone";
@@ -107,6 +109,7 @@ export type ClarifyField =
   | "deadline"
   | "amount"
   | "target"
+  | "scope"
   | "other";
 
 /** The one follow-up question the assistant is asking. */

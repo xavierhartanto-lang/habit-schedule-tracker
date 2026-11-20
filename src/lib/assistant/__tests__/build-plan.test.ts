@@ -214,7 +214,7 @@ describe("adaptive rescheduling", () => {
     expect(Date.parse(String(moved.payload.startsAt)) >= Date.parse(String(basketball.payload.endsAt)) || Date.parse(String(moved.payload.endsAt)) <= Date.parse(String(basketball.payload.startsAt))).toBe(true);
   });
 
-  it("\"I finished my coding project early\" completes the task and offers to free its sessions", () => {
+  it("\"I finished my coding project early\" proposes completing the task (one tap, no silent save) and offers to free its sessions", () => {
     const project = task({ title: "Coding project", estimatedMinutes: 240 });
     const b1 = blockOn("2026-11-19", "Coding project", project.id);
     const b2 = blockOn("2026-11-21", "Coding project", project.id);
@@ -223,7 +223,7 @@ describe("adaptive rescheduling", () => {
     const i = intent({ type: "finished_early", evidence: "finished my coding project early", target_ref: "t1", explicit: true });
     const plan = buildPlan(input({ world: w, openTasks: [project], events: [...weekCalendar(), b1, b2], specs: [specOf(i, w)] }));
     expect(plan.items.map((x) => [x.action, x.autoApply])).toEqual([
-      ["complete_task", true],
+      ["complete_task", false],
       ["remove_block", false],
       ["remove_block", false],
     ]);
@@ -254,9 +254,9 @@ describe("adaptive rescheduling", () => {
 
   it("removing something that isn't on the calendar changes nothing and says so", () => {
     const i = intent({ type: "remove_event", title: "Chess club", evidence: "cancel chess club" });
-    const plan = buildPlan(input({ specs: [specOf(i)] }));
-    expect(plan.items).toHaveLength(0);
-    expect(plan.notes.join(" ")).toContain("Chess club");
+    const a = assessIntent(i, world());
+    expect(a.status).toBe("skip");
+    if (a.status === "skip") expect(a.note).toContain("Chess club");
   });
 
   it("deletes a task when asked, after approval, with undo", () => {

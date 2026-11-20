@@ -11,7 +11,7 @@ import type {
 } from "@/features/assistant/plan-types";
 import { CALENDAR_ACTIONS, PLAN_ITEM_ACTIONS } from "@/features/assistant/plan-types";
 import type { BuiltPlan, ItemDisplay } from "@/lib/assistant/build-plan";
-import type { Draft } from "@/lib/assistant/intents";
+import { readActions, writeActions, type ActionContext, type ItemState } from "@/lib/assistant/action-state";
 import { isUuid } from "@/lib/domain/context-items";
 import { NotFoundError, dbError, requireDb } from "./client";
 import type { Json, PlanItemRow, PlanProposalRow } from "./database.types";
@@ -134,6 +134,7 @@ const UNDOABLE: ReadonlySet<PlanItemAction> = new Set([
   "complete_task",
   "remove_task",
   "remove_event",
+  "update_event",
   "create_habit",
   "update_habit",
   "create_goal",
@@ -480,10 +481,10 @@ export async function undoPlanItem(itemId: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Conversation drafts (follow-up questions still open)
+// Conversation action state (see lib/assistant/action-state.ts)
 // ---------------------------------------------------------------------------
 
-export async function getDrafts(userId: string, conversationId: string): Promise<Draft[]> {
+export async function getActions(userId: string, conversationId: string): Promise<ActionContext[]> {
   const supabase = await requireDb();
   const { data, error } = await supabase
     .from("conversations")
@@ -492,16 +493,29 @@ export async function getDrafts(userId: string, conversationId: string): Promise
     .eq("id", conversationId)
     .maybeSingle();
   if (error) throw dbError(error);
-  const state = obj(data?.planning_state ?? null);
-  return Array.isArray(state.drafts) ? (state.drafts as Draft[]).filter((d) => d && typeof d.id === "string" && d.intent) : [];
+  return readActions(data?.planning_state ?? null);
 }
 
-export async function setDrafts(userId: string, conversationId: string, drafts: Draft[]): Promise<void> {
+export async function setActions(userId: string, conversationId: string, actions: ActionContext[]): Promise<void> {
   const supabase = await requireDb();
   const { error } = await supabase
     .from("conversations")
-    .update({ planning_state: { drafts } as unknown as Json })
+    .update({ planning_state: writeActions(actions) as unknown as Json })
     .eq("user_id", userId)
     .eq("id", conversationId);
   if (error) throw dbError(error);
+}
+
+/** Real status of plan items, so action state follows the database. */
+export async function getItemStates(userId: string, itemIds: string[]): Promise<ItemState[]> {
+  const ids = [...new Set(itemIds.filter(isUuid))];
+  if (!ids.length) return [];
+  const supabase = await requireDb();
+  const { data, error } = await supabase
+    .from("plan_items")
+    .select("id, status, error, result_id, target_id")
+    .eq("user_id", userId)
+    .in("id", ids.slice(0, 200));
+  if (error) throw dbError(error);
+  return data.map((r) => ({ id: r.id, status: r.status, error: r.error, resultId: r.result_id, targetId: r.target_id }));
 }

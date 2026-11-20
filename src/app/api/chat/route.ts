@@ -297,6 +297,7 @@ export async function POST(request: Request) {
         // Phase 4: plan before replying, so the reply describes real results.
         let plan: PlanView | null = null;
         let clarify: Clarify | null = null;
+        let touched: PlanView[] = [];
         let extras: Parameters<typeof streamReply>[0]["extras"];
         let proactiveFailed: string | null = null;
         if (body.mode === "assistant") {
@@ -311,6 +312,7 @@ export async function POST(request: Request) {
                 });
           plan = phase4.plan;
           clarify = phase4.clarify;
+          touched = (phase4 as { touched?: PlanView[] }).touched ?? [];
           extras = phase4.extras;
           proactiveFailed = (phase4 as { failed?: string | null }).failed ?? null;
         }
@@ -330,6 +332,8 @@ export async function POST(request: Request) {
             await setPlanMessage(user.id, plan.id, saved.id).catch((error) => console.error("[chat] could not link plan", error));
             plan = { ...plan, messageId: saved.id };
           }
+          // Earlier cards this message approved, replaced or cancelled update in place.
+          for (const t of touched) if (t.messageId) send({ type: "plan", messageId: t.messageId, plan: t });
           send({ type: "assistant_message", message: toChatMessage(saved, plan) });
           if (plan) send({ type: "plan", messageId: saved.id, plan });
           if (clarify) send({ type: "clarify", messageId: saved.id, clarify });
@@ -427,7 +431,7 @@ async function runPhase4(
   isNew: boolean,
   signal: AbortSignal,
   knowledge: PlannerKnowledge,
-): Promise<{ plan: PlanView | null; clarify: Clarify | null; extras: Parameters<typeof streamReply>[0]["extras"] }> {
+): Promise<{ plan: PlanView | null; clarify: Clarify | null; touched?: PlanView[]; extras: Parameters<typeof streamReply>[0]["extras"] }> {
   if (!userMessage) {
     if (!body.checkIn) return { plan: null, clarify: null, extras: undefined };
     try {
@@ -470,7 +474,7 @@ async function runPhase4(
       planned: true,
       ...(result.plan ? { planId: result.plan.id } : {}),
     }).catch((error) => console.error("[chat] could not mark message planned", error));
-    return { plan: result.plan, clarify: result.clarify, extras: { actions: result.actions } };
+    return { plan: result.plan, clarify: result.clarify, touched: result.touched, extras: { actions: result.actions } };
   } catch (error) {
     const aiError = toAiError(error);
     if (aiError.code !== "aborted") console.error("[chat] planning failed", aiError.code, aiError.cause ?? error);

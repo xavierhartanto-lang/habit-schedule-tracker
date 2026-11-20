@@ -39,7 +39,9 @@ export const INTENT_TYPES = [
   "cant_make", // "I can't study Wednesday anymore"
   "finished_early", // "I finished my coding project early"
   "not_enough_time", // "I don't think I'll have enough time this week"
-  "cancel_draft", // "never mind" about something still being asked
+  "cancel_draft", // "never mind" / "don't add it" about an open action (asking or on a card)
+  "update_event", // change an existing event: rename, move, new time or length, repeat rule
+  "confirm_action", // "yes", "looks good", "add it": approve an action waiting on a card
 ] as const;
 export type IntentType = (typeof INTENT_TYPES)[number];
 
@@ -49,6 +51,8 @@ const WINDOWS = ["today", "tomorrow", "this_week", "next_week", "until_deadline"
 const AMOUNT_KINDS = ["total", "sessions", "single"] as const;
 const CADENCES = ["daily", "weekly", "specific_days"] as const;
 const FACT_CATEGORIES = ["activity", "interest", "routine", "working_time", "preference"] as const;
+const SCOPES = ["one", "all"] as const;
+export type Scope = (typeof SCOPES)[number];
 
 export type Recurrence = (typeof RECURRENCES)[number];
 export type PlanWindow = (typeof WINDOWS)[number];
@@ -71,7 +75,7 @@ const WireDate = z
 
 const WireIntent = z.object({
   type: z.enum(INTENT_TYPES),
-  draft_id: z.string().nullable().describe("Id from <pending_drafts> when this message answers or corrects it, else null."),
+  draft_id: z.string().nullable().describe("Id from <active_actions> when this message adds to, corrects, confirms or cancels it, else null."),
   explicit: z
     .boolean()
     .describe("True only if the user directly asked Whitespace to do this now (\"add a task…\", \"mark … done\")."),
@@ -82,8 +86,10 @@ const WireIntent = z.object({
     .string()
     .nullable()
     .describe("Ref of an existing record from <current_plan> (t1, e2, b3, h1, g2) this is about, else null."),
+  target_name: z.string().nullable().describe("The user's own words for the existing record (\"training\", \"the tutoring\"), else null."),
   date: WireDate.nullable().describe("When it happens (events) or the day affected (cant_make)."),
   start_time: z.string().nullable().describe('24h "HH:MM" if stated. "at 6" for a practice usually means 18:00.'),
+  start_in_minutes: z.number().int().nullable().describe('"in two hours" = 120. Only for "in N minutes/hours".'),
   end_time: z.string().nullable(),
   duration_minutes: z.number().int().nullable().describe("Only if stated (\"2 hours\" = 120)."),
   recurrence: z.enum(RECURRENCES).nullable().describe("null if the user has not said whether it repeats."),
@@ -101,6 +107,7 @@ const WireIntent = z.object({
   progress: z.number().int().nullable().describe("Goals: 0-100 if the user gave it."),
   target_date: WireDate.nullable().describe("Goals: target date."),
   location: z.string().nullable(),
+  scope: z.enum(SCOPES).nullable().describe("Repeating events: one = only that day, all = every repeat."),
   fact_category: z.enum(FACT_CATEGORIES).nullable().describe("save_fact only."),
   details: z.string().nullable().describe("One short description sentence: specifics from the user or established context. Not the title."),
   pref_day_start: z.string().nullable().describe('update_preferences: earliest time for work "HH:MM".'),
@@ -146,14 +153,16 @@ const ApiDate = z
 
 const ApiIntent = z.object({
   type: z.enum(INTENT_TYPES),
-  draft_id: apiText("Id from <pending_drafts> when this message answers or corrects it."),
+  draft_id: apiText("Id from <active_actions> when this message adds to, corrects, confirms or cancels that action."),
   explicit: z.boolean().describe('True only if the user directly asked Whitespace to do this now ("add a task…", "mark … done", "cancel …").'),
   title: apiText("Clean calendar name in title case, e.g. 'Math Tutoring', 'Chemistry Homework'. Follow the Naming rules."),
   evidence: z.string().describe("Exact words from the user's NEW message that state this. Copied verbatim."),
   area: apiText("One of the user's life area names, if clear."),
   target_ref: apiText("Ref of an existing record from <current_plan> (t1, e2, b3, h1, g2) this is about."),
+  target_name: apiText('The user\'s own words for that existing record, e.g. "training", "the tutoring".'),
   date: ApiDate.describe("When it happens (events) or the day affected (cant_make)."),
   start_time: apiText('24h "HH:MM" if stated. "at 6" for a practice usually means 18:00.'),
+  start_in_minutes: apiInt('Only for "in N minutes/hours" from now: "in two hours" = 120. Never compute the clock time yourself.'),
   end_time: apiText('24h "HH:MM".'),
   duration_minutes: apiInt('Only if stated ("2 hours" = 120).'),
   recurrence: apiEnum(RECURRENCES).describe('"none" if the user has not said whether it repeats.'),
@@ -171,6 +180,7 @@ const ApiIntent = z.object({
   progress: apiInt("Goals: 0-100 if the user gave it."),
   target_date: ApiDate.describe("Goals: target date."),
   location: apiText(),
+  scope: apiEnum(SCOPES).describe('Changes to a repeating event: "one" = only that day, "all" = every repeat. "none" if not said.'),
   fact_category: apiEnum(FACT_CATEGORIES).describe("save_fact only."),
   details: apiText("One short description sentence: specifics from the user's words or established context that do not belong in the title."),
   pref_day_start: apiText('update_preferences: earliest time for work "HH:MM".'),
@@ -236,8 +246,14 @@ export type Intent = {
   evidence: string;
   area: string | null;
   targetRef: string | null;
+  /** The user's words for the existing record, checked against its name. */
+  targetName: string | null;
+  /** Set by the server when the user answered our own "which one?" question with this ref. */
+  targetConfirmed?: boolean;
   date: DateRef | null;
   startTime: string | null;
+  /** "In two hours": minutes from now. The server turns it into a date and time. */
+  startInMinutes: number | null;
   endTime: string | null;
   durationMinutes: number | null;
   recurrence: Recurrence | null;
@@ -255,6 +271,7 @@ export type Intent = {
   progress: number | null;
   targetDate: DateRef | null;
   location: string | null;
+  scope: Scope | null;
   factCategory: Exclude<ContextCategory, never> | null;
   details: string | null;
   prefs: {
@@ -321,8 +338,10 @@ export function toIntent(raw: WireIntentT): Intent {
     evidence: clean(raw.evidence, 500) ?? "",
     area: clean(raw.area, 40),
     targetRef: raw.target_ref && REF_RE.test(raw.target_ref.trim()) ? raw.target_ref.trim() : null,
+    targetName: clean(raw.target_name, 120),
     date: dateRef(raw.date),
     startTime: time(raw.start_time),
+    startInMinutes: intIn(raw.start_in_minutes, 1, 7 * 24 * 60),
     endTime: time(raw.end_time),
     durationMinutes: intIn(raw.duration_minutes, 5, 24 * 60),
     recurrence: raw.recurrence ?? null,
@@ -340,6 +359,7 @@ export function toIntent(raw: WireIntentT): Intent {
     progress: intIn(raw.progress, 0, 100),
     targetDate: dateRef(raw.target_date),
     location: clean(raw.location, 200),
+    scope: raw.scope ?? null,
     factCategory: raw.fact_category ?? null,
     details: clean(raw.details, 500),
     prefs: {
@@ -359,20 +379,44 @@ export function toIntent(raw: WireIntentT): Intent {
  */
 export function mergeIntent(draft: Intent, next: Intent): Intent {
   const pick = <T>(a: T | null, b: T | null): T | null => (b !== null ? b : a);
+  // A correction to something new stays a creation: "it's math tutoring" renames
+  // the proposed event, it doesn't turn it into an edit of a saved one.
+  const keepType =
+    draft.type.startsWith("create_") && (next.type === "update_event" || next.type === "update_task" || next.type === "confirm_action");
+  // Times move together: a new start keeps the length; a new length drops the old end.
+  let endTime = pick(draft.endTime, next.endTime);
+  let durationMinutes = pick(draft.durationMinutes, next.durationMinutes);
+  if (next.startTime && !next.endTime && !next.durationMinutes && draft.startTime && draft.endTime) {
+    const length = minutesBetween(draft.startTime, draft.endTime);
+    if (length > 0) {
+      durationMinutes = length;
+      endTime = null;
+    }
+  }
+  if (next.durationMinutes && !next.endTime) endTime = null;
+  if (next.endTime && !next.durationMinutes) durationMinutes = null;
+  // A one-time thing moved to another day stays one time: "Actually Saturday" never re-asks "every Saturday?".
+  const wasOneOff = !!draft.date && (draft.date.isoDate !== null || draft.date.dayOffset !== null || draft.date.week !== null);
+  const recurrence = pick(draft.recurrence, next.recurrence) ?? (next.date && wasOneOff ? "once" : null);
+  let days = next.days.length ? next.days : draft.days;
+  if (recurrence === "once" || recurrence === "daily" || recurrence === "weekdays") days = next.days;
+  else if (!next.days.length && next.date?.weekday && recurrence === "weekly") days = [next.date.weekday];
   return {
-    type: next.type,
+    type: keepType ? draft.type : next.type,
     draftId: draft.draftId,
     explicit: draft.explicit || next.explicit,
     title: pick(draft.title, next.title),
     evidence: draft.evidence || next.evidence,
     area: pick(draft.area, next.area),
     targetRef: pick(draft.targetRef, next.targetRef),
+    targetName: pick(draft.targetName, next.targetName),
     date: pick(draft.date, next.date),
     startTime: pick(draft.startTime, next.startTime),
-    endTime: pick(draft.endTime, next.endTime),
-    durationMinutes: pick(draft.durationMinutes, next.durationMinutes),
-    recurrence: pick(draft.recurrence, next.recurrence),
-    days: next.days.length ? next.days : draft.days,
+    startInMinutes: next.startInMinutes ?? (next.startTime || next.date ? null : draft.startInMinutes),
+    endTime,
+    durationMinutes,
+    recurrence,
+    days,
     deadline: pick(draft.deadline, next.deadline),
     deadlineTime: pick(draft.deadlineTime, next.deadlineTime),
     amountKind: pick(draft.amountKind, next.amountKind),
@@ -386,6 +430,7 @@ export function mergeIntent(draft: Intent, next: Intent): Intent {
     progress: pick(draft.progress, next.progress),
     targetDate: pick(draft.targetDate, next.targetDate),
     location: pick(draft.location, next.location),
+    scope: pick(draft.scope, next.scope),
     factCategory: pick(draft.factCategory, next.factCategory),
     details: pick(draft.details, next.details),
     prefs: {
@@ -396,6 +441,12 @@ export function mergeIntent(draft: Intent, next: Intent): Intent {
       protectedLabel: pick(draft.prefs.protectedLabel, next.prefs.protectedLabel),
     },
   };
+}
+
+function minutesBetween(a: string, b: string): number {
+  const [ah, am] = a.split(":").map(Number);
+  const [bh, bm] = b.split(":").map(Number);
+  return bh * 60 + bm - (ah * 60 + am);
 }
 
 /** Intents that create something new, so their title is a fresh name. */
@@ -424,6 +475,10 @@ export type PlannerResult = {
   intents: Intent[];
   /** Draft ids the user cancelled or that were merged into an intent above. */
   consumedDrafts: string[];
+  /** Action ids the user approved in words ("yes, add it"). "latest" = the newest card. */
+  confirmed: string[];
+  /** Action ids the user called off ("never mind"). */
+  cancelled: string[];
   question: string | null;
   dropped: { title: string; reason: "ungrounded" | "limit" | "unknown_draft" }[];
   /** Titles whose unsupported specifics were removed (for logs). */
@@ -446,7 +501,7 @@ export function validatePlannerOutput(
     knownNames: input.naming?.knownNames ?? [],
   };
   const draftsById = new Map(input.drafts.map((d) => [d.id, d]));
-  const result: PlannerResult = { intents: [], consumedDrafts: [], question: null, dropped: [], retitled: [] };
+  const result: PlannerResult = { intents: [], consumedDrafts: [], confirmed: [], cancelled: [], question: null, dropped: [], retitled: [] };
   const name = (intent: Intent): Intent => {
     const removed: string[] = [];
     const named = applyNaming(intent, naming, removed);
@@ -458,6 +513,17 @@ export function validatePlannerOutput(
     const label = clean(raw.title, 80) ?? raw.type;
     let intent = toIntent(raw);
 
+    if (intent.type === "confirm_action") {
+      // Approval in words. Grounded like anything else, so a model can't approve on its own.
+      if (!isGrounded(intent.evidence, input.userText)) {
+        result.dropped.push({ title: label, reason: "ungrounded" });
+        continue;
+      }
+      const id = intent.draftId && draftsById.has(intent.draftId) ? intent.draftId : "latest";
+      if (!result.confirmed.includes(id)) result.confirmed.push(id);
+      continue;
+    }
+
     if (intent.draftId) {
       const draft = draftsById.get(intent.draftId);
       if (!draft) {
@@ -465,7 +531,10 @@ export function validatePlannerOutput(
         intent = { ...intent, draftId: null };
       } else {
         result.consumedDrafts.push(draft.id);
-        if (intent.type === "cancel_draft") continue;
+        if (intent.type === "cancel_draft") {
+          result.cancelled.push(draft.id);
+          continue;
+        }
         // A follow-up only needs to be grounded loosely: "Thursday" is enough.
         intent = name(mergeIntent(draft.intent, intent));
         if (result.intents.length >= MAX_INTENTS) {

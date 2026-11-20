@@ -2,8 +2,13 @@ import { normalizeText } from "@/lib/ai/extraction";
 import type { Clarify, ClarifyField } from "@/features/assistant/plan-types";
 import type { Commitment, ContextAttributes, Goal, Habit, HabitCadence, LifeAreaRecord, Task, Weekday } from "@/lib/domain/types";
 import { WEEKDAYS } from "@/lib/domain/types";
-import { addMinutesToTime, firstMatchingDay, hasDateRef, minutesBetweenTimes, resolveDateRef, weekdayName, weekdayOf } from "./dates";
+import { expandEvent } from "@/lib/scheduling/recurrence";
+import { addDaysToKey, dateKeyInZone, startOfDayInZone, timeKeyInZone } from "@/lib/scheduling/zoned";
+import { addMinutesToTime, firstMatchingDay, hasDateRef, minutesBetweenTimes, resolveDateRef, shortDate, weekdayName, weekdayOf } from "./dates";
 import type { Intent, PlanWindow } from "./intents";
+import { isGenericToken, nameScore, nameTokens, resolveEntity } from "./resolve";
+
+const GENERIC_WORDS = { has: isGenericToken };
 
 /**
  * Decides, for each intent, whether Whitespace has everything it needs or
@@ -21,12 +26,34 @@ export type RefTable = {
   goals: Map<string, Goal>;
 };
 
+/** An activity the user already has, with its usual time and length (for smart defaults). */
+export type KnownActivity = { title: string; startTime: string | null; durationMinutes: number | null; source: "event" | "fact" };
+
 export type World = {
   todayKey: string;
   timeZone: string;
   weekStartsOn: 0 | 1;
   areas: LifeAreaRecord[];
   refs: RefTable;
+  /** Activities with a usual time or length: saved events and onboarding facts. */
+  known?: KnownActivity[];
+  /** Refs this conversation is about right now ("it", "that"): named recently or touched by an action. */
+  focus?: string[];
+  /** Local time now, "HH:MM", for "in two hours". */
+  nowTime?: string;
+};
+
+/** What changes on an existing event. Fields left undefined stay as they are. */
+export type EventChange = {
+  title?: string;
+  /** New local date of the (first) occurrence. */
+  date?: string;
+  startTime?: string;
+  endTime?: string;
+  /** New repeat rule; null = make it one time. */
+  rrule?: string | null;
+  recurrenceText?: string | null;
+  location?: string | null;
 };
 
 export type ActionSpec =
@@ -43,6 +70,16 @@ export type ActionSpec =
       recurrenceText: string | null;
       location: string | null;
       notes: string | null;
+      /** What Whitespace filled in from what it already knows ("Same length as your usual Basketball Practice."). */
+      assumed?: string | null;
+    }
+  | {
+      /** Change a saved event. scope "one" = only `occurrenceDate` of a repeating event. */
+      kind: "event_update";
+      event: Commitment;
+      scope: "all" | "one";
+      occurrenceDate: string | null;
+      change: EventChange;
     }
   | {
       kind: "task_create";
@@ -120,7 +157,8 @@ export type ActionSpec =
 export type Assessment =
   | { status: "ready"; spec: ActionSpec; intent: Intent }
   | { status: "needs"; clarify: Clarify; intent: Intent }
-  | { status: "skip"; reason: string; intent: Intent };
+  /** Nothing to do. `note` tells the reply model what to say ("No training task exists."). */
+  | { status: "skip"; reason: string; intent: Intent; note?: string };
 
 const DURATION_CHOICES = ["1 hour", "90 minutes", "2 hours"];
 
@@ -146,6 +184,126 @@ function lower(title: string): string {
   // title case ("Math Tutoring") are names, and acronyms ("SAT prep") stay as written.
   if (/\s[A-Z]/.test(title)) return title;
   return /^[A-Z][a-z]/.test(title) ? title[0].toLowerCase() + title.slice(1) : title;
+}
+
+
+const PRONOUN = /^(?:it|that|this|them|those|these|the one|that one|this one|the other one|the other|same|same one)$/i;
+
+type Found<T> = { ok: true; ref: string; item: T } | { ok: false; result: Assessment };
+
+/** "Basketball Game (Fri Nov 20)" when several records share a name. */
+function optionLabel(item: { title: string; startsAt?: string | null }, all: { title: string }[], timeZone: string): string {
+  const twins = all.filter((o) => normalizeText(o.title) === normalizeText(item.title)).length > 1;
+  if (twins && item.startsAt) return `${item.title} (${shortDate(dateKeyInZone(new Date(item.startsAt), timeZone))})`;
+  return item.title;
+}
+
+/**
+ * Finds the existing record an intent is about, deterministically.
+ * - Named ("mark training done"): the name must match. No match = nothing
+ *   happens and the reply says so; never a similar-sounding stand-in.
+ * - "it" / "that": only records this conversation is about right now.
+ * - Several fit: one short question with the options.
+ */
+function findTarget<T extends { id: string; title: string; startsAt?: string | null }>(
+  intent: Intent,
+  world: World,
+  map: Map<string, T>,
+  noun: string,
+  options: { words?: string | null; onDate?: string | null } = {},
+): Found<T> {
+  const words = options.words !== undefined ? options.words : intent.targetName ?? intent.title;
+  const pronoun = !words || PRONOUN.test(words.trim().replace(/[.!?]+$/, ""));
+  const all = [...map.values()];
+  const ask = (refs: string[], about: string): Found<T> => {
+    const labels = refs.map((r) => optionLabel(map.get(r)!, all, world.timeZone));
+    return { ok: false, result: needs(intent, "target", about, `Which ${noun}: ${listLabels(labels)}?`, labels.slice(0, 4)) };
+  };
+  // The user just picked from our own options: trust the pick.
+  if (intent.targetConfirmed && intent.targetRef && map.has(intent.targetRef)) {
+    return { ok: true, ref: intent.targetRef, item: map.get(intent.targetRef)! };
+  }
+
+  if (!pronoun) {
+    const r = resolveEntity(map, intent.targetRef, words);
+    if (r.kind === "one") return { ok: true, ref: r.ref, item: r.item };
+    if (r.kind === "ask") {
+      let refs = r.options.map((o) => o.ref);
+      // Same name on several days: the day the user named picks one.
+      if (options.onDate) {
+        const onDay = refs.filter((ref) => occursOn(map.get(ref)!, options.onDate!, world.timeZone));
+        if (onDay.length === 1) return { ok: true, ref: onDay[0], item: map.get(onDay[0])! };
+        if (onDay.length > 1) refs = onDay;
+      }
+      return ask(refs, words!);
+    }
+    return {
+      ok: false,
+      result: {
+        status: "skip",
+        intent,
+        reason: "No matching record.",
+        note: `Nothing called "${words}" was found among the user's ${noun}s, so nothing was changed. Say so plainly; do not pick something similar.`,
+      },
+    };
+  }
+
+  // No name given, but the model's pick is named in the user's own words ("find time for my chem hw").
+  if (intent.targetRef && map.has(intent.targetRef) && mentions(intent.evidence, map.get(intent.targetRef)!.title)) {
+    return { ok: true, ref: intent.targetRef, item: map.get(intent.targetRef)! };
+  }
+
+  // "it" / "that": what this conversation is about.
+  let focus = (world.focus ?? []).filter((r) => map.has(r));
+  if (options.onDate && focus.length > 1) {
+    const onDay = focus.filter((ref) => occursOn(map.get(ref)!, options.onDate!, world.timeZone));
+    if (onDay.length) focus = onDay;
+  }
+  if (focus.length === 1) return { ok: true, ref: focus[0], item: map.get(focus[0])! };
+  if (focus.length > 1) return ask(focus.slice(0, 4), noun[0].toUpperCase() + noun.slice(1));
+  const guess = intent.targetRef && map.has(intent.targetRef) ? [intent.targetRef] : [];
+  const similar = guess.length
+    ? [...map.entries()].filter(([r, v]) => r !== guess[0] && nameScore(map.get(guess[0])!.title, v.title) > 0).map(([r]) => r)
+    : [];
+  if (guess.length && !similar.length && all.length === 1) return { ok: true, ref: guess[0], item: map.get(guess[0])! };
+  const refs = [...guess, ...similar].slice(0, 4);
+  if (!refs.length) return { ok: false, result: needs(intent, "target", noun, `Which ${noun} do you mean?`) };
+  return ask(refs, noun[0].toUpperCase() + noun.slice(1));
+}
+
+/** Every specific word of the name appears in the text ("my chem hw" mentions "Chemistry Homework"). */
+function mentions(text: string, title: string): boolean {
+  const have = new Set(nameTokens(text));
+  const tokens = nameTokens(title);
+  const specific = tokens.filter((t) => !GENERIC_WORDS.has(t));
+  const need = specific.length ? specific : tokens;
+  return need.length > 0 && need.every((t) => have.has(t));
+}
+
+function listLabels(labels: string[]): string {
+  const l = labels.slice(0, 4);
+  if (l.length <= 1) return l[0] ?? "";
+  return `${l.slice(0, -1).join(", ")} or ${l[l.length - 1]}`;
+}
+
+/** Does the event (or any repeat of it) happen on this local day? */
+export function occursOn(item: { startsAt?: string | null }, dateKey: string, timeZone: string): boolean {
+  const event = item as Commitment;
+  if (!event.startsAt) return false;
+  if (!event.recurrenceRule) return dateKeyInZone(new Date(event.startsAt), event.timezone ?? timeZone) === dateKey;
+  const from = startOfDayInZone(dateKey, event.timezone ?? timeZone);
+  const to = startOfDayInZone(addDaysToKey(dateKey, 1), event.timezone ?? timeZone);
+  return expandEvent(event, from, to, timeZone).length > 0;
+}
+
+/** Next day (today included) the event happens, as a local date. */
+function nextOccurrence(event: Commitment, todayKey: string, timeZone: string): string | null {
+  if (!event.startsAt) return null;
+  const tz = event.timezone ?? timeZone;
+  if (!event.recurrenceRule) return dateKeyInZone(new Date(event.startsAt), tz);
+  const from = startOfDayInZone(todayKey, tz);
+  const occ = expandEvent(event, from, new Date(from.getTime() + 15 * 86_400_000), timeZone)[0];
+  return occ ? dateKeyInZone(occ.start, tz) : null;
 }
 
 /** Finds a record by ref, or by title when the model gave no ref. */
@@ -204,7 +362,19 @@ function recurrenceFor(intent: Intent, firstDate: string): { rrule: string | nul
   }
 }
 
-function assessEvent(intent: Intent, world: World): Assessment {
+/** "In two hours" -> a local date and start time, rounded up to 5 minutes. */
+function fromOffset(intent: Intent, world: World): Intent {
+  if (!intent.startInMinutes || !world.nowTime) return intent;
+  const [h, m] = world.nowTime.split(":").map(Number);
+  const total = Math.ceil((h * 60 + m + intent.startInMinutes) / 5) * 5;
+  const days = Math.floor(total / 1440);
+  const minutes = total % 1440;
+  const startTime = `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+  return { ...intent, startTime, date: { isoDate: addDaysToKey(world.todayKey, days), weekday: null, week: null, dayOffset: null }, recurrence: intent.recurrence ?? "once" };
+}
+
+function assessEvent(raw: Intent, world: World): Assessment {
+  const intent = fromOffset(raw, world);
   const title = label(intent, "this");
   if (!intent.title) return needs(intent, "other", "Event", "What should I call it?");
 
@@ -229,7 +399,25 @@ function assessEvent(intent: Intent, world: World): Assessment {
     }
   }
 
-  const times = eventTimes(intent);
+  // Fill gaps from what the user already has: the same activity's usual time and length.
+  let assumed: string | null = null;
+  let filled = intent;
+  let times = eventTimes(filled);
+  if ("missing" in times) {
+    const known = usual(world, intent.title);
+    if (known) {
+      const usedTime = times.missing === "time" && known.startTime && known.durationMinutes;
+      const usedLength = times.missing === "duration" && known.durationMinutes;
+      if (usedTime) {
+        filled = { ...filled, startTime: known.startTime, durationMinutes: known.durationMinutes, endTime: null };
+        assumed = `Your usual time for ${known.title}.`;
+      } else if (usedLength) {
+        filled = { ...filled, durationMinutes: known.durationMinutes, endTime: null };
+        assumed = `Same length as your usual ${known.title}.`;
+      }
+      times = eventTimes(filled);
+    }
+  }
   if ("missing" in times) {
     if (times.missing === "time") return needs(intent, "time", title, `What time does ${lower(title)} start?`);
     return needs(intent, "duration", title, `How long does ${lower(title)} usually last?`, DURATION_CHOICES);
@@ -250,8 +438,125 @@ function assessEvent(intent: Intent, world: World): Assessment {
       recurrenceText: rec.text,
       location: intent.location,
       notes: intent.details,
+      assumed,
     },
   };
+}
+
+
+/** Usual time and length of an activity the user already has, matched by name. */
+function usual(world: World, title: string): KnownActivity | null {
+  const list = (world.known ?? []).filter((k) => nameScore(title, k.title) >= 0.99);
+  return list.find((k) => k.source === "event") ?? list[0] ?? null;
+}
+
+/**
+ * Changes to a saved event: rename, move, new time or length, repeat rule.
+ * Everything not mentioned stays as it is. A repeating event asks "just
+ * this one or every week?" only when the answer changes what happens.
+ */
+function assessEventUpdate(original: Intent, world: World): Assessment {
+  // "Just this week" next to another change means only that day, not "stop repeating".
+  const otherChange = !!(original.startTime || original.endTime || original.durationMinutes || original.date || original.location || (original.title && original.targetName));
+  const intent: Intent =
+    original.recurrence === "once" && otherChange && !original.scope ? { ...original, recurrence: null, scope: "one" } : original;
+  const calendar = new Map<string, Commitment>([...world.refs.events, ...world.refs.blocks]);
+  const found = findTarget(intent, world, calendar, "event", { words: intent.targetName });
+  if (!found.ok) return found.result;
+  const event = found.item;
+  const tz = event.timezone ?? world.timeZone;
+  if (!event.startsAt || !event.endsAt) return { status: "skip", intent, reason: "No time.", note: `${event.title} has no time yet, so it can't be moved here.` };
+
+  const start = new Date(event.startsAt);
+  const end = new Date(event.endsAt);
+  const oldDate = dateKeyInZone(start, tz);
+  const oldStart = timeKeyInZone(start, tz);
+  const oldEnd = timeKeyInZone(end, tz);
+  const length = Math.round((end.getTime() - start.getTime()) / 60_000);
+  const recurring = !!event.recurrenceRule;
+
+  const change: EventChange = {};
+  const newTitle = intent.title && normalizeText(intent.title) !== normalizeText(event.title) && nameScore(intent.targetName, intent.title) < 0.99 ? intent.title : null;
+  if (newTitle) change.title = newTitle;
+  if (intent.location) change.location = intent.location;
+
+  // Times: a new start keeps the length unless a new end or length is given.
+  if (intent.startTime || intent.endTime || intent.durationMinutes) {
+    const s = intent.startTime ?? oldStart;
+    const e = intent.endTime ?? (intent.durationMinutes ? addMinutesToTime(s, intent.durationMinutes) : addMinutesToTime(s, length));
+    if (!e || minutesBetweenTimes(s, e) <= 0) return needs(intent, "duration", event.title, `When does ${lower(event.title)} end?`);
+    if (s !== oldStart) change.startTime = s;
+    if (e !== oldEnd) change.endTime = e;
+    if (change.startTime && !change.endTime) change.endTime = e;
+    if (change.endTime && !change.startTime) change.startTime = s;
+  }
+
+  const day = resolveDateRef(intent.date, world.todayKey, world.weekStartsOn);
+  // Repeat rule changes: "make that every Friday", "it's only this week".
+  if (intent.recurrence === "weekly" || intent.recurrence === "weekdays" || intent.recurrence === "daily") {
+    const anchor = day ?? oldDate;
+    const rec = recurrenceFor(intent, anchor);
+    if (rec.rrule && rec.rrule !== event.recurrenceRule) {
+      change.rrule = rec.rrule;
+      change.recurrenceText = rec.text;
+      // Weekly on other days: the first one is the next matching day.
+      const first = recurringFirstDate(intent, anchor, world);
+      if (first && first !== oldDate) change.date = first;
+    }
+  } else if (intent.recurrence === "once" && recurring) {
+    change.rrule = null;
+    change.recurrenceText = null;
+    const next = day ?? nextOccurrence(event, world.todayKey, world.timeZone);
+    if (next) change.date = next;
+  }
+
+  let scope: "all" | "one" = recurring ? (intent.scope ?? "all") : "all";
+  let occurrenceDate: string | null = null;
+
+  if (day && change.date === undefined && change.rrule === undefined) {
+    if (recurring) {
+      // "Move Friday's practice to 6": the day names the occurrence. "Move practice to Friday": a new day.
+      const dayIsOccurrence = occursOn(event, day, world.timeZone) && (change.startTime || change.title);
+      if (dayIsOccurrence) {
+        occurrenceDate = day;
+        if (!intent.scope) scope = "one";
+      } else {
+        if (!intent.scope) {
+          return needs(intent, "scope", event.title, `Just this week, or every week?`, ["Just this week", "Every week"]);
+        }
+        if (scope === "one") {
+          occurrenceDate = nextOccurrence(event, world.todayKey, world.timeZone);
+          change.date = day;
+        } else {
+          // Every week on the new day: shift the series by the weekday difference.
+          change.date = day;
+          change.rrule = event.recurrenceRule!.replace(/BYDAY=[A-Z,]+/, `BYDAY=${RRULE_DAY[weekdayOf(day)]}`);
+          change.recurrenceText = `Every ${weekdayName(weekdayOf(day))}`;
+        }
+      }
+    } else if (day !== oldDate) {
+      change.date = day;
+    }
+  }
+
+  if (recurring && scope === "one" && !occurrenceDate) {
+    occurrenceDate = intent.scope === "one" && day && occursOn(event, day, world.timeZone) ? day : nextOccurrence(event, world.todayKey, world.timeZone);
+  }
+
+  if (recurring && (change.startTime || change.title) && !intent.scope && scope === "all" && !change.rrule && change.rrule !== null && !change.date) {
+    return needs(intent, "scope", event.title, `Just this week, or every week?`, ["Just this week", "Every week"]);
+  }
+
+  if (!Object.keys(change).length) {
+    return needs(intent, "other", event.title, `What should change about ${lower(event.title)}?`);
+  }
+  return { status: "ready", intent, spec: { kind: "event_update", event, scope, occurrenceDate, change } };
+}
+
+function recurringFirstDate(intent: Intent, anchor: string, world: World): string | null {
+  if (intent.recurrence === "weekdays") return firstMatchingDay(anchor < world.todayKey ? world.todayKey : anchor, ["mo", "tu", "we", "th", "fr"]);
+  if (intent.recurrence === "weekly" && intent.days.length) return firstMatchingDay(anchor < world.todayKey ? world.todayKey : anchor, intent.days);
+  return null;
 }
 
 function cadenceOf(intent: Intent): HabitCadence | null {
@@ -287,7 +592,15 @@ function taskNamed<T extends { title: string }>(map: Map<string, T>, title: stri
 }
 
 function assessPlanTime(intent: Intent, world: World): Assessment {
-  const task = findByRef(world.refs.tasks, intent.targetRef, null) ?? taskNamed(world.refs.tasks, intent.title);
+  // "Schedule that for tomorrow": the task this conversation is about, verified by name when one is given.
+  let task: Task | null = null;
+  if (intent.targetRef || intent.targetName) {
+    // The title here is the name for new sessions, not a reference: only target_name names the task.
+    const found = findTarget(intent, world, world.refs.tasks, "task", { words: intent.targetName });
+    if (found.ok) task = found.item;
+    else if (found.result.status === "needs") return found.result;
+  }
+  task ??= taskNamed(world.refs.tasks, intent.title);
   // Sessions for a task carry the task's own name, so the two stay clearly linked.
   const title = task?.title ?? intent.title ?? null;
   if (!title) return needs(intent, "other", "Planning", "What would you like me to find time for?");
@@ -357,14 +670,16 @@ export function assessIntent(intent: Intent, world: World): Assessment {
     case "update_task":
     case "complete_task":
     case "remove_task": {
-      const task = findByRef(refs.tasks, intent.targetRef, intent.title);
-      if (!task) {
-        const options = candidates(refs.tasks, intent.title);
-        return needs(intent, "target", intent.title ?? "Task", "Which task do you mean?", options);
-      }
+      // Verified against the user's words: never a similar-sounding stand-in (see findTarget).
+      const found = findTarget(intent, world, refs.tasks, "task", {
+        words: intent.targetName ?? (intent.type === "update_task" ? null : intent.title) ?? intent.title,
+      });
+      if (!found.ok) return found.result;
+      const task = found.item;
       if (intent.type === "complete_task") return { status: "ready", intent, spec: { kind: "task_complete", task } };
       if (intent.type === "remove_task") return { status: "ready", intent, spec: { kind: "task_remove", task } };
       const patch: Extract<ActionSpec, { kind: "task_update" }>["patch"] = {};
+      if (intent.targetName && intent.title && normalizeText(intent.title) !== normalizeText(task.title)) patch.title = intent.title;
       const due = resolveDateRef(intent.deadline ?? intent.date, world.todayKey, world.weekStartsOn);
       if (due) {
         patch.dueDate = due;
@@ -378,6 +693,12 @@ export function assessIntent(intent: Intent, world: World): Assessment {
       }
       return { status: "ready", intent, spec: { kind: "task_update", task, patch } };
     }
+
+    case "update_event":
+      return assessEventUpdate(intent, world);
+
+    case "confirm_action":
+      return { status: "skip", intent, reason: "Handled by the action state." };
 
     case "create_habit": {
       if (!intent.title) return needs(intent, "other", "Habit", "What habit do you want to build?");
@@ -393,8 +714,9 @@ export function assessIntent(intent: Intent, world: World): Assessment {
     }
 
     case "update_habit": {
-      const habit = findByRef(refs.habits, intent.targetRef, intent.title);
-      if (!habit) return needs(intent, "target", intent.title ?? "Habit", "Which habit do you mean?", candidates(refs.habits, intent.title));
+      const found = findTarget(intent, world, refs.habits, "habit");
+      if (!found.ok) return found.result;
+      const habit = found.item;
       const cadence = cadenceOf(intent);
       if (!cadence) return needs(intent, "amount", habit.title, `How often should ${lower(habit.title)} be?`, ["Every day", "3 times a week"]);
       return { status: "ready", intent, spec: { kind: "habit_update", habit, cadence } };
@@ -416,8 +738,9 @@ export function assessIntent(intent: Intent, world: World): Assessment {
     }
 
     case "update_goal": {
-      const goal = findByRef(refs.goals, intent.targetRef, intent.title);
-      if (!goal) return needs(intent, "target", intent.title ?? "Goal", "Which goal do you mean?", candidates(refs.goals, intent.title));
+      const found = findTarget(intent, world, refs.goals, "goal");
+      if (!found.ok) return found.result;
+      const goal = found.item;
       const targetDate = resolveDateRef(intent.targetDate ?? intent.deadline, world.todayKey, world.weekStartsOn);
       if (intent.progress === null && !targetDate) {
         return needs(intent, "amount", goal.title, `Roughly how far along is ${lower(goal.title)}, as a percent?`, ["25%", "50%", "75%"]);
@@ -498,22 +821,38 @@ export function assessIntent(intent: Intent, world: World): Assessment {
       return assessPlanTime(intent, world);
 
     case "remove_event": {
-      const byRef = intent.targetRef ? refs.events.get(intent.targetRef) ?? refs.blocks.get(intent.targetRef) ?? null : null;
-      const title = intent.title ?? byRef?.title ?? null;
-      if (byRef) return { status: "ready", intent, spec: { kind: "remove_event", events: [byRef], title: byRef.title } };
-      if (!title) {
-        return needs(intent, "target", "Event", "Which event should I remove?", [...refs.events.values()].slice(0, 3).map((e) => e.title));
+      const day = resolveDateRef(intent.date, world.todayKey, world.weekStartsOn);
+      const calendar = new Map<string, Commitment>([...refs.events, ...refs.blocks]);
+      const words = intent.targetName ?? intent.title;
+      // "Cancel all math tutoring": every event with that name goes.
+      if (intent.scope === "all" && words && !PRONOUN.test(words)) {
+        const matches = matchEvents([...calendar.values()], words);
+        if (matches.length) return { status: "ready", intent, spec: { kind: "remove_event", events: matches, title: matches[0].title } };
       }
-      const matches = matchEvents([...refs.events.values(), ...refs.blocks.values()], title);
-      // Tasks aren't on the calendar. If only a task matches, the user meant that.
-      if (!matches.length) {
-        const task = findByRef(refs.tasks, null, title);
-        if (task) return { status: "ready", intent, spec: { kind: "task_remove", task } };
+      const found = findTarget(intent, world, calendar, "event", { words, onDate: day });
+      if (!found.ok) {
+        // Tasks aren't on the calendar. If only a task matches, the user meant that.
+        if (found.result.status === "skip" && words) {
+          const task = resolveEntity(refs.tasks, null, words);
+          if (task.kind === "one") return { status: "ready", intent, spec: { kind: "task_remove", task: task.item } };
+        }
+        return found.result;
       }
-      const names = [...new Set(matches.map((m) => m.title))];
-      const distinct = new Set(matches.map((m) => normalizeText(m.title)));
-      if (distinct.size > 1) return needs(intent, "target", title, "Which one should I remove?", names.slice(0, 4));
-      return { status: "ready", intent, spec: { kind: "remove_event", events: matches, title: matches[0]?.title ?? title } };
+      const event = found.item;
+      // "Cancel my practice tomorrow" on a repeating event: only that day.
+      if (event.recurrenceRule && (day || intent.scope === "one")) {
+        const date = day ?? nextOccurrence(event, world.todayKey, world.timeZone);
+        if (date && occursOn(event, date, world.timeZone)) {
+          const isBlock = refs.blocks.has(found.ref);
+          return {
+            status: "ready",
+            intent,
+            spec: { kind: "cant_make", date, blocks: isBlock ? [event] : [], event: isBlock ? null : event, title: event.title },
+          };
+        }
+        if (date) return { status: "skip", intent, reason: "Not that day.", note: `${event.title} doesn't happen on ${shortDate(date)}, so nothing was changed.` };
+      }
+      return { status: "ready", intent, spec: { kind: "remove_event", events: [event], title: event.title } };
     }
 
     case "cant_make": {
@@ -536,9 +875,14 @@ export function assessIntent(intent: Intent, world: World): Assessment {
     }
 
     case "finished_early": {
-      const task = findByRef(refs.tasks, intent.targetRef, intent.title);
-      if (!task && !intent.title) return needs(intent, "target", "Task", "What did you finish?", candidates(refs.tasks, null));
-      return { status: "ready", intent, spec: { kind: "finished_early", task, title: task?.title ?? intent.title! } };
+      const words = intent.targetName ?? intent.title;
+      if (!words && !intent.targetRef) return needs(intent, "target", "Task", "What did you finish?", candidates(refs.tasks, null));
+      const found = findTarget(intent, world, refs.tasks, "task", { words });
+      // No task by that name: only matching sessions are freed up, nothing is marked done.
+      if (!found.ok && found.result.status === "needs") return found.result;
+      const task = found.ok ? found.item : null;
+      if (!task && !words) return needs(intent, "target", "Task", "What did you finish?", candidates(refs.tasks, null));
+      return { status: "ready", intent, spec: { kind: "finished_early", task, title: task?.title ?? words! } };
     }
 
     case "not_enough_time":
