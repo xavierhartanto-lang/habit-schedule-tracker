@@ -142,7 +142,9 @@ function label(intent: Intent, fallback: string): string {
 }
 
 function lower(title: string): string {
-  // "Volleyball" -> "volleyball" for mid-sentence use, but keep acronyms ("SAT prep").
+  // "Volleyball" -> "volleyball" for mid-sentence use. Multi-word names in
+  // title case ("Math Tutoring") are names, and acronyms ("SAT prep") stay as written.
+  if (/\s[A-Z]/.test(title)) return title;
   return /^[A-Z][a-z]/.test(title) ? title[0].toLowerCase() + title.slice(1) : title;
 }
 
@@ -276,9 +278,18 @@ function planAmount(intent: Intent): PlanAmount | null {
     : { type: "total", minutes: intent.amountMinutes };
 }
 
+/** An open task with exactly this name, so "time for Chemistry Homework" books time for that task. */
+function taskNamed<T extends { title: string }>(map: Map<string, T>, title: string | null): T | null {
+  if (!title) return null;
+  const n = normalizeText(title);
+  const matches = [...map.values()].filter((t) => normalizeText(t.title) === n);
+  return matches.length === 1 ? matches[0] : null;
+}
+
 function assessPlanTime(intent: Intent, world: World): Assessment {
-  const task = findByRef(world.refs.tasks, intent.targetRef, null);
-  const title = intent.title ?? task?.title ?? null;
+  const task = findByRef(world.refs.tasks, intent.targetRef, null) ?? taskNamed(world.refs.tasks, intent.title);
+  // Sessions for a task carry the task's own name, so the two stay clearly linked.
+  const title = task?.title ?? intent.title ?? null;
   if (!title) return needs(intent, "other", "Planning", "What would you like me to find time for?");
 
   let amount = planAmount(intent);

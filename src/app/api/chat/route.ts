@@ -14,7 +14,7 @@ import { loadChatContext } from "@/features/assistant/server/context";
 import { checkInText, loadCheckIn } from "@/features/assistant/server/checkin";
 import { planTurn } from "@/features/assistant/server/plan-service";
 import type { Clarify, PlanView } from "@/features/assistant/plan-types";
-import { plannerResultBlock } from "@/lib/assistant/planner-prompt";
+import { plannerResultBlock, type PlannerKnowledge } from "@/lib/assistant/planner-prompt";
 import { getPlan, setPlanMessage, toPlanView } from "@/lib/db/plans";
 import { NotFoundError } from "@/lib/db/client";
 import { isUuid } from "@/lib/domain/context-items";
@@ -303,7 +303,12 @@ export async function POST(request: Request) {
           const phase4 =
             body.proactive && userMessage
               ? await runProactive(user.id, conversation.id, userMessage, body.proactive, createdUserMessage)
-              : await runPhase4(user.id, conversation.id, userMessage, turns, body, createdUserMessage, signal);
+              : await runPhase4(user.id, conversation.id, userMessage, turns, body, createdUserMessage, signal, {
+                  personalizationEnabled: chatContext.prompt.personalizationEnabled,
+                  profile: chatContext.prompt.profile,
+                  facts: chatContext.prompt.facts,
+                  recaps: chatContext.recaps,
+                });
           plan = phase4.plan;
           clarify = phase4.clarify;
           extras = phase4.extras;
@@ -421,6 +426,7 @@ async function runPhase4(
   body: ChatRequestBody,
   isNew: boolean,
   signal: AbortSignal,
+  knowledge: PlannerKnowledge,
 ): Promise<{ plan: PlanView | null; clarify: Clarify | null; extras: Parameters<typeof streamReply>[0]["extras"] }> {
   if (!userMessage) {
     if (!body.checkIn) return { plan: null, clarify: null, extras: undefined };
@@ -456,6 +462,7 @@ async function runPhase4(
       userMessageId: userMessage.id,
       userText: userMessage.content,
       history: turns.slice(0, -1),
+      knowledge,
       signal,
     });
     await updateMessageMetadata(userId, userMessage.id, {

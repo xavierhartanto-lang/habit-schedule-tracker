@@ -10,7 +10,7 @@ import { buildPlan, timingFor, type ItemDisplay } from "@/lib/assistant/build-pl
 import { DRAFT_TTL_MS, nextDrafts } from "@/lib/assistant/drafts";
 import { dedupeIntents } from "@/lib/assistant/intents";
 import { parsePayload, toOp, type Op } from "@/lib/assistant/ops";
-import { buildPlannerUserPrompt, plannerResultBlock } from "@/lib/assistant/planner-prompt";
+import { buildPlannerUserPrompt, namingContext, plannerResultBlock, type PlannerKnowledge } from "@/lib/assistant/planner-prompt";
 import { applyPreferenceChanges } from "@/lib/assistant/prefs";
 import { DataValidationError } from "@/lib/db/client";
 import { listGoals } from "@/lib/db/goals";
@@ -128,6 +128,8 @@ export async function planTurn(input: {
   userMessageId: string;
   userText: string;
   history: ChatTurn[];
+  /** What Whitespace knows about the user, so new items get specific, consistent names. */
+  knowledge?: PlannerKnowledge | null;
   signal?: AbortSignal;
   now?: Date;
 }): Promise<PlanTurnResult> {
@@ -136,10 +138,12 @@ export async function planTurn(input: {
   const drafts = previousDrafts.filter((d) => now.getTime() - Date.parse(d.createdAt) < DRAFT_TTL_MS);
   const { world } = loaded;
 
+  const recentHistory = input.history.slice(-6);
   const interpreted = await interpretMessage({
     userMessage: input.userText,
     drafts,
     signal: input.signal,
+    naming: namingContext({ refs: world.refs, areas: world.areas, recentHistory, knowledge: input.knowledge }),
     prompt: buildPlannerUserPrompt({
       todayKey: world.todayKey,
       weekday: weekdayName(world.todayKey),
@@ -147,11 +151,13 @@ export async function planTurn(input: {
       areas: world.areas,
       refs: world.refs,
       drafts,
-      recentHistory: input.history.slice(-6),
+      recentHistory,
       newUserText: input.userText,
+      knowledge: input.knowledge,
     }),
   });
   if (interpreted.dropped.length) console.info("[plan] dropped intents", interpreted.dropped);
+  if (interpreted.retitled.length) console.info("[plan] unsupported title details removed", interpreted.retitled);
 
   const assessments = dedupeIntents(interpreted.intents).map((i) => assessIntent(i, world));
   const next = nextDrafts(drafts, interpreted.consumedDrafts, assessments, now);
