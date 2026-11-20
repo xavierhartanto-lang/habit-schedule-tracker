@@ -98,8 +98,26 @@ export function readActions(raw: unknown): ActionContext[] {
   return out;
 }
 
+/**
+ * The database caps planning_state at 16 KB, and a write over it fails the
+ * whole turn. Stay well under: drop the oldest finished actions first.
+ */
+export const STATE_BUDGET_CHARS = 10_000;
+
 export function writeActions(actions: ActionContext[]): { actions: ActionContext[] } {
-  return { actions };
+  const kept = [...actions];
+  const size = () => JSON.stringify({ actions: kept }).length;
+  while (kept.length > 1 && size() > STATE_BUDGET_CHARS) {
+    let drop = -1;
+    for (let i = kept.length - 1; i >= 0; i--) {
+      if (!isOpen(kept[i])) {
+        drop = i;
+        break;
+      }
+    }
+    kept.splice(drop === -1 ? kept.length - 1 : drop, 1);
+  }
+  return { actions: kept };
 }
 
 export type ItemState = { id: string; status: string; error: string | null; resultId: string | null; targetId: string | null };
