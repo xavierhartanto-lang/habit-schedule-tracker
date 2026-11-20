@@ -11,6 +11,8 @@ import { surface } from "@/lib/proactive/surface";
 /** What a button does. Every change still goes through an approval card. */
 export type ProactiveAct =
   | { kind: "daily_plan" }
+  /** "I'm behind": one recovery plan for overdue work and the week (7.5). */
+  | { kind: "catch_up" }
   | { kind: "recommendation"; id: string; actionId: string }
   /** Sends `prompt` as the user's message (needs the AI). */
   | { kind: "ask"; prompt: string }
@@ -122,6 +124,19 @@ export function homeProactive(state: ProactiveState | null, aiConfigured: boolea
       const nudge = toNudge(top, aiConfigured);
       opening = { message: nudge.message, chips: nudge.chips, recommendationId: top.id };
       rest = usable.filter((r) => r.id !== top.id);
+    }
+  }
+
+  // Behind (7.5): one tap for a recovery plan, beside whatever leads.
+  if (state.today.behind) {
+    const chip: ProactiveChip = { label: "I'm behind", act: { kind: "catch_up" } };
+    if (!opening) {
+      opening = { message: "Some work is overdue or won't fit before it's due. Want a catch-up plan for the week?", chips: [{ ...chip, primary: true }], recommendationId: null };
+    } else {
+      const at = opening.chips.findIndex((c) => c.act.kind === "dismiss");
+      const chips = [...opening.chips];
+      chips.splice(at < 0 ? chips.length : at, 0, chip);
+      opening = { ...opening, chips };
     }
   }
 

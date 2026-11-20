@@ -43,7 +43,7 @@ Choosing a type
 - remove_event: the user wants an existing event gone ("cancel my practice tomorrow" = remove_event with date tomorrow; the server skips just that day of a repeating event) ("cancel all math tutoring" = scope all, "I quit robotics, take it off", "delete the dentist appointment"). Set target_ref to the event's e/b ref from <current_plan>, and target_name in the user's words. explicit = true when they ask directly.
 - remove_task: the user wants an existing task (a to-do, not a calendar event) deleted ("delete my essay task", "take the chem worksheet off my list", "cancel training" when training is a t ref and no e/b ref matches). Set target_ref to the task's t ref, and title in the user's words. If they finished it, use complete_task instead.
 - Before choosing remove_event, check the t refs too: "cancel", "remove" or "delete" a name that is only a task means remove_task. For "it" or "that", use the item named in the recent conversation.
-- cant_make: "I can't study Wednesday anymore" or "no tutoring this Wednesday" (date + title, or target_ref). finished_early: "I finished my coding project early". not_enough_time: "I don't think I'll have enough time this week".
+- cant_make: "I can't study Wednesday anymore" or "no tutoring this Wednesday" (date + title, or target_ref). finished_early: "I finished my coding project early". not_enough_time: "I don't think I'll have enough time this week", "I'm behind", "I'm drowning in work" (window this_week unless they name next week).
 - Greetings, questions about their schedule, small talk: return no intents.
 - question: only for real ambiguity the fields cannot express (e.g. it is unclear whether "work on my coding project" means a one-time task or regular time). Otherwise "".
 

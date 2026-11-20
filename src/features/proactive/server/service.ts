@@ -20,6 +20,7 @@ import {
 import { loadSchedulingBase } from "@/lib/db/scheduling";
 import { getAssistantSettings } from "@/lib/db/scheduling-preferences";
 import { analyze, type Analysis } from "@/lib/proactive/analyze";
+import { catchUpPlan } from "@/lib/proactive/catch-up";
 import { buildBrief } from "@/lib/proactive/brief";
 import { detectFromAnalysis, type Candidate } from "@/lib/proactive/detect";
 import { reconcile } from "@/lib/proactive/reconcile";
@@ -258,6 +259,28 @@ export async function proposeDailyPlanFor(
   if (!brief.action) return { plan: null, brief };
   const { plan } = await planFromActions(userId, brief.action, { conversationId: input.conversationId, sourceMessageId: input.sourceMessageId, now });
   return { plan, brief };
+}
+
+/**
+ * "I'm behind" (7.5): one recovery plan, recomputed from fresh data. The
+ * engine keeps the most urgent work that fits and leaves the rest out on
+ * purpose, with why (lib/proactive/catch-up.ts via buildPlan).
+ */
+export async function proposeCatchUpFor(
+  userId: string,
+  input: { conversationId: string | null; sourceMessageId: string | null; now?: Date },
+): Promise<{ plan: PlanView | null; summary: string }> {
+  const now = input.now ?? new Date();
+  const { analysis } = await loadFresh(userId, now);
+  const summary = analysis ? catchUpPlan(analysis).summary : "Couldn't read the schedule.";
+  try {
+    const { plan } = await planFromActions(userId, { id: "plan_week", kind: "plan_week", label: "I'm behind", params: {} }, { ...input, now });
+    return { plan, summary };
+  } catch (error) {
+    // Nothing to plan is an answer, not a failure.
+    if (error instanceof DataValidationError) return { plan: null, summary };
+    throw error;
+  }
 }
 
 // ---------------------------------------------------------------------------

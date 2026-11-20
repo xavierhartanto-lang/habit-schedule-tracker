@@ -165,6 +165,7 @@ function focusFrom(brief: DailyBrief, tasks: Map<string, Task>, nextFreeAt: stri
       planLabel: null,
       then: [],
       now,
+      behind: !!brief.behind,
     };
   }
   return {
@@ -178,6 +179,7 @@ function focusFrom(brief: DailyBrief, tasks: Map<string, Task>, nextFreeAt: stri
     planLabel: brief.action?.kind === "plan_day" ? brief.action.label : null,
     then: rest.map((f) => ({ taskId: f.taskId, title: f.title, why: f.why })),
     now,
+    behind: !!brief.behind,
   };
 }
 

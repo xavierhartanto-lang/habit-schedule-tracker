@@ -361,7 +361,38 @@ function brokenPlans(a: Analysis): Candidate[] {
       date: key,
     });
   }
-  return out;
+  return groupBroken(out, a);
+}
+
+/**
+ * One calendar change often breaks several sessions at once (7.5). Those
+ * become one card with one fix: move them all, on one approval card, so the
+ * user never fixes them one by one.
+ */
+function groupBroken(list: Candidate[], a: Analysis): Candidate[] {
+  if (list.length < 2) return list;
+  const ids = list.flatMap((c) => c.commitmentIds);
+  const blocks = ids.map((id) => a.futureBlocks.find((b) => b.id === id)!).filter(Boolean);
+  const named = blocks
+    .slice(0, 3)
+    .map((b) => `${b.title} (${dayPhrase(dateKeyInZone(new Date(b.startsAt!), a.timeZone), a.todayKey)} ${clockAt(b.startsAt!, a.timeZone)})`);
+  const more = blocks.length > 3 ? `, and ${plural(blocks.length - 3, "more")}` : "";
+  const first = list.map((c) => c.date!).sort()[0];
+  return [
+    {
+      dedupeKey: `plan_broken:group:${[...ids].sort().join(",")}`,
+      kind: "plan_broken",
+      priority: list.some((c) => c.priority === "high") ? "high" : "medium",
+      title: `${plural(list.length, "session")} no longer fit`,
+      reason: "Your calendar changed, and these sessions now overlap events.",
+      message: `Your calendar changed, so ${plural(list.length, "session")} no longer fit: ${named.join(", ")}${more}. I'd move them all to free times before they're due. Want me to?`,
+      facts: list.flatMap((c) => c.facts.filter((f) => f.startsWith("Overlaps"))).filter((f, i, all) => all.indexOf(f) === i).slice(0, 3),
+      actions: [{ id: "reschedule", kind: "reschedule", label: `Move all ${list.length}`, params: { commitmentIds: ids.slice(0, 20) } }],
+      taskId: null,
+      commitmentIds: ids,
+      date: first,
+    },
+  ];
 }
 
 // ---------------------------------------------------------------------------

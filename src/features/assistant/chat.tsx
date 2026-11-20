@@ -347,6 +347,9 @@ export function Chat({
       case "daily_plan":
         void run({ message: chip.label, proactive: { kind: "daily_plan" } });
         return;
+      case "catch_up":
+        void run({ message: chip.label, proactive: { kind: "catch_up" } });
+        return;
     }
   };
   // Home's adaptive rail sends its suggestion buttons here, so the approval card lands in the conversation.

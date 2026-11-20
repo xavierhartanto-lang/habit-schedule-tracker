@@ -91,7 +91,7 @@ export type ChatRequestBody = {
   nudge?: string;
 };
 
-export type ChatProactive = { kind: "daily_plan" } | { kind: "recommendation"; id: string; actionId: string };
+export type ChatProactive = { kind: "daily_plan" } | { kind: "catch_up" } | { kind: "recommendation"; id: string; actionId: string };
 
 export const OPENING_MAX = 300;
 

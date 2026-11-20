@@ -1,4 +1,5 @@
 import { LifeAreaDot } from "@/components/ui";
+import { BehindButton } from "./suggestion-items";
 import { findArea } from "@/lib/domain/life-areas";
 import type { LifeAreaRecord } from "@/lib/domain/types";
 import { formatDuration } from "@/lib/scheduling/time";
@@ -85,6 +86,7 @@ function FocusView({ section, ctx }: ViewProps<"focus">) {
           Then: <span className="text-ink-2">{f.then.map((t) => t.title).join(", ")}</span>
         </p>
       )}
+      {f.behind && <BehindButton />}
     </div>
   );
 }

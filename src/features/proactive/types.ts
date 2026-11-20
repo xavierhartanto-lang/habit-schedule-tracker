@@ -152,6 +152,8 @@ export type DailyBrief = {
   message: string;
   /** Usually plan_day. Null when there is nothing to plan. */
   action: RecommendationAction | null;
+  /** Phase 7.5: overdue work, or work that doesn't fit before it's due. Home offers "I'm behind". */
+  behind?: boolean;
 };
 
 export type ProactiveState = {

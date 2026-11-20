@@ -12,6 +12,24 @@ import { sendToHomeChat } from "./home-bridge";
  * dashed, labelled "Suggestion". A button never changes anything here; it
  * goes to the conversation, which answers with an approval card.
  */
+/** "I'm behind" (7.5): asks the conversation for one catch-up plan, shown as an approval card there. */
+export function BehindButton() {
+  const [sent, setSent] = useState(false);
+  return (
+    <button
+      type="button"
+      disabled={sent}
+      onClick={() => {
+        setSent(true);
+        sendToHomeChat({ chip: { label: "I'm behind", act: { kind: "catch_up" } }, nudge: null });
+      }}
+      className="mt-3 text-[12.5px] font-medium text-accent-ink hover:underline disabled:text-ink-3 disabled:no-underline"
+    >
+      {sent ? "Catch-up plan is in the conversation" : "I'm behind. Make me a catch-up plan"}
+    </button>
+  );
+}
+
 export function SuggestionItems({ items, compact = false }: { items: Nudge[]; compact?: boolean }) {
   const [handled, setHandled] = useState<ReadonlySet<string>>(() => new Set());
   const key = items.map((n) => n.id).join(",");

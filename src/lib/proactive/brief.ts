@@ -2,6 +2,7 @@ import type { BriefEvent, BriefFocus, DailyBrief, RecommendationAction } from "@
 import { expandEvents } from "@/lib/scheduling/recurrence";
 import { addDaysToKey, daysBetweenKeys, startOfDayInZone } from "@/lib/scheduling/zoned";
 import { capacityBefore, dayCapacity, isSession, type Analysis, type TaskLoad } from "./analyze";
+import { catchUpPlan } from "./catch-up";
 import { about, clockAt, dayName, dayPhrase, duePhrase, periodPhrase, plural, quote, shortDate } from "./text";
 
 /**
@@ -179,7 +180,16 @@ export function buildBrief(a: Analysis): DailyBrief {
       }
     : null;
 
-  return { date: a.todayKey, timeZone: tz, events, freeMinutes, focus, message: briefMessage(a, events, ranked, action, planToday), action };
+  return {
+    date: a.todayKey,
+    timeZone: tz,
+    events,
+    freeMinutes,
+    focus,
+    message: briefMessage(a, events, ranked, action, planToday),
+    action,
+    behind: catchUpPlan(a).behind,
+  };
 }
 
 function briefMessage(a: Analysis, events: BriefEvent[], ranked: Ranked[], action: RecommendationAction | null, planToday: boolean): string {
