@@ -4,12 +4,13 @@ import { buttonClasses } from "@/components/ui/button";
 import { cn } from "@/lib/utils/cn";
 import { ArrowUp, ChevronUp, KeyRound, RotateCcw, Sparkles, Square } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AssistantMessage, SystemNotice, ThinkingState, UserMessage } from "./messages";
 import { ProposalGroup } from "./proposal-cards";
 import { RichText } from "./rich-text";
 import { streamChat } from "./stream";
 import { PlanCard, type PlanCardActions } from "./plan-card";
+import type { PlanActionResult } from "./plan-types";
 import { approvePlanItems, editPlanItem, rejectPlanItems, requestAlternatives, undoPlanItem } from "./plan-actions";
 import { CHAT_MESSAGE_MAX, type ChatMessage, type ChatProactive, type ClientAiError, type Proposal } from "./types";
 import { ChipRow, NudgeList } from "./proactive-nudges";
@@ -24,13 +25,23 @@ const CHIP_BUTTON =
 
 const EYEBROW = "flex items-center gap-1.5 text-[12px] font-medium tracking-[0.01em] text-ink-3";
 
-const PLAN_ACTIONS: PlanCardActions = {
-  approve: approvePlanItems,
-  reject: rejectPlanItems,
-  edit: editPlanItem,
-  alternatives: requestAlternatives,
-  undo: undoPlanItem,
-};
+/** Approve and Undo change saved data, so the rest of the page (e.g. Home's task rail) refreshes after them. */
+function planActions(refresh: () => void): PlanCardActions {
+  const thenRefresh =
+    <A,>(fn: (input: A) => Promise<PlanActionResult>) =>
+    async (input: A) => {
+      const result = await fn(input);
+      if (result.ok) refresh();
+      return result;
+    };
+  return {
+    approve: thenRefresh(approvePlanItems),
+    reject: rejectPlanItems,
+    edit: editPlanItem,
+    alternatives: requestAlternatives,
+    undo: thenRefresh(undoPlanItem),
+  };
+}
 
 /**
  * The live conversation: persisted history, streaming replies, proposal
@@ -94,6 +105,7 @@ export function Chat({
   const [opening] = useState(openingProp);
   const embedded = variant === "embedded";
   const router = useRouter();
+  const planCardActions = useMemo(() => planActions(() => router.refresh()), [router]);
   const [conversationId, setConversationId] = useState(initialConversationId);
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
   const [streaming, setStreaming] = useState<string | null>(null);
@@ -186,6 +198,8 @@ export function Chat({
       let createdConversation = false;
       let userSaved = !request.message;
       let gotReply = false;
+      // Changes applied during the turn (e.g. "it's done") must show up in the rest of the page.
+      let applied = false;
 
       // The opening line is shown before the conversation exists. Send it with
       // the first message so the assistant knows what it "said".
@@ -206,6 +220,7 @@ export function Chat({
       )) {
         switch (event.type) {
           case "plan":
+            if (event.plan?.items.some((i) => i.status === "applied")) applied = true;
             setMessages((m) => m.map((x) => (x.id === event.messageId ? { ...x, plan: event.plan } : x)));
             break;
           case "clarify":
@@ -272,7 +287,7 @@ export function Chat({
         });
       }
       // Pick up the new conversation in the history list.
-      if (createdConversation) router.refresh();
+      if (createdConversation || applied) router.refresh();
     },
     [busy, conversationId, mode, router, embedded, opening],
   );
@@ -461,7 +476,7 @@ export function Chat({
                 )}
                 {m.role === "assistant" && m.plan && (
                   <div className="sm:pl-10">
-                    <PlanCard key={`${m.plan.id}:${m.plan.version}`} plan={m.plan} actions={PLAN_ACTIONS} disabled={busy} />
+                    <PlanCard key={`${m.plan.id}:${m.plan.version}`} plan={m.plan} actions={planCardActions} disabled={busy} />
                   </div>
                 )}
                 {m.role === "assistant" && m.clarify && i === messages.length - 1 && !busy && aiConfigured && m.clarify.choices.length > 0 && (
