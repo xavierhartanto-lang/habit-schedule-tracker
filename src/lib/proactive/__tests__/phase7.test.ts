@@ -113,6 +113,20 @@ describe("commitment conflicts", () => {
     expect(out[0].dedupeKey).not.toMatch(/\d{4}-\d{2}-\d{2}$/);
   });
 
+  it("raises a repeating overlap normally when one of the events was just added", () => {
+    const now = zonedToUtc("2026-11-16", "16:00", TZ);
+    const club = event({
+      title: "Robotics",
+      date: "2026-09-03",
+      start: "19:00",
+      end: "20:30",
+      recurrenceRule: "FREQ=WEEKLY;BYDAY=TH",
+      createdAt: new Date(now.getTime() - 3_600_000).toISOString(),
+    });
+    const out = commitmentConflicts(analyze(input({ now: now.toISOString(), events: [...weekCalendar(), club] })));
+    expect(out[0].priority).toBe("medium");
+  });
+
   it("calls a double entry a duplicate, and never conflicts sessions with events", () => {
     const a = event({ title: "Dentist", date: "2026-11-23", start: "16:00", end: "17:00" });
     const b = event({ title: "Dentist", date: "2026-11-23", start: "16:00", end: "17:00" });

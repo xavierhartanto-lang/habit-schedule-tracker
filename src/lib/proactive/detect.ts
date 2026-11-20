@@ -491,6 +491,8 @@ function overloadedWeek(a: Analysis): Candidate | null {
 /** Overlaps shorter than this are back-to-back events with sloppy times, not conflicts. */
 const MIN_CONFLICT_MINUTES = 10;
 const MAX_CONFLICTS = 5;
+/** An event added this recently makes a repeating overlap news. */
+const NEW_EVENT_DAYS = 7;
 
 function short(title: string, max = 24): string {
   return title.length > max ? `${title.slice(0, max - 1).trimEnd()}…` : title;
@@ -533,10 +535,14 @@ export function commitmentConflicts(a: Analysis): Candidate[] {
         const span = (o: Occurrence) => `${o.event.title}: ${clockAt(o.start.toISOString(), a.timeZone)}–${clockAt(o.end.toISOString(), a.timeZone)}`;
         const same = x.event.title.trim().toLowerCase() === y.event.title.trim().toLowerCase();
         const soon = daysBetweenKeys(a.todayKey, day.date) <= 1;
+        // Two long-standing repeating events that overlap are usually on purpose (lunch inside school).
+        // If one of them is new, the overlap is news: raise it normally.
+        const isNew = (o: Occurrence) => !!o.event.createdAt && a.nowMs - Date.parse(o.event.createdAt) < NEW_EVENT_DAYS * 86_400_000;
+        const settled = bothRepeat && !isNew(x) && !isNew(y);
         out.push({
           dedupeKey,
           kind: "commitment_conflict",
-          priority: soon ? "high" : bothRepeat ? "low" : "medium",
+          priority: soon ? "high" : settled ? "low" : "medium",
           title: same ? `${x.event.title} is on the calendar twice` : `${x.event.title} overlaps ${y.event.title}`,
           reason: `Both are fixed and overlap by ${duration(overlap)}${bothRepeat ? " every time they repeat" : ""}.`,
           message: same
