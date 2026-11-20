@@ -6,6 +6,7 @@ import type {
 import { checkPlacements } from "@/lib/scheduling/planner";
 import { addDaysToKey, dateKeyInZone, daysBetweenKeys, startOfDayInZone, startOfWeekKey } from "@/lib/scheduling/zoned";
 import type { Occurrence } from "@/lib/scheduling/recurrence";
+import { pickKeeper } from "./conflict-pick";
 import type { Commitment } from "@/lib/domain/types";
 import { analyze, capacityBefore, dayCapacity, HORIZON_DAYS, type Analysis, type DayLoad, type ProactiveInput, type TaskLoad } from "./analyze";
 import {
@@ -498,13 +499,18 @@ function short(title: string, max = 24): string {
   return title.length > max ? `${title.slice(0, max - 1).trimEnd()}…` : title;
 }
 
-function keepAction(keep: Occurrence, drop: Occurrence, date: string): RecommendationAction {
+function keepAction(keep: Occurrence, drop: Occurrence, date: string, label = `Keep ${short(keep.event.title)}`): RecommendationAction {
   return {
     id: `keep:${keep.event.id}`,
     kind: "resolve_conflict",
-    label: `Keep ${short(keep.event.title)}`,
+    label,
     params: { keepId: keep.event.id, dropId: drop.event.id, date },
   };
+}
+
+/** What happens to the event that gives way: one day of a repeating event, or the whole one-off. */
+function dropLabel(drop: Occurrence, date: string, todayKey: string): string {
+  return drop.recurring ? `Skip ${short(drop.event.title)} ${dayPhrase(date, todayKey) === "today" ? "today" : "that day"}` : `Remove ${short(drop.event.title)}`;
 }
 
 export function commitmentConflicts(a: Analysis): Candidate[] {
@@ -534,6 +540,13 @@ export function commitmentConflicts(a: Analysis): Candidate[] {
         const name = dayName(day.date, a.todayKey);
         const span = (o: Occurrence) => `${o.event.title}: ${clockAt(o.start.toISOString(), a.timeZone)}–${clockAt(o.end.toISOString(), a.timeZone)}`;
         const same = x.event.title.trim().toLowerCase() === y.event.title.trim().toLowerCase();
+        // Whitespace proposes which one gives way; the user approves or picks the other.
+        const pick = same ? null : pickKeeper(
+          { id: x.event.id, title: x.event.title, recurring: x.recurring },
+          { id: y.event.id, title: y.event.title, recurring: y.recurring },
+        );
+        const keepOcc = pick ? (pick.keep.id === x.event.id ? x : y) : null;
+        const dropOcc = pick ? (pick.drop.id === x.event.id ? x : y) : null;
         const soon = daysBetweenKeys(a.todayKey, day.date) <= 1;
         // Two long-standing repeating events that overlap are usually on purpose (lunch inside school).
         // If one of them is new, the overlap is news: raise it normally.
@@ -544,14 +557,24 @@ export function commitmentConflicts(a: Analysis): Candidate[] {
           kind: "commitment_conflict",
           priority: soon ? "high" : settled ? "low" : "medium",
           title: same ? `${x.event.title} is on the calendar twice` : `${x.event.title} overlaps ${y.event.title}`,
-          reason: `Both are fixed and overlap by ${duration(overlap)}${bothRepeat ? " every time they repeat" : ""}.`,
+          reason: pick
+            ? `They overlap by ${duration(overlap)}. ${pick.why}`
+            : `Both are fixed and overlap by ${duration(overlap)}${bothRepeat ? " every time they repeat" : ""}.`,
           message: same
             ? `${name} at ${at}: ${quote(x.event.title)} is on your calendar twice. Remove one?`
-            : `${name} at ${at}: ${quote(x.event.title)} overlaps ${quote(y.event.title)}. Which one is happening?`,
+            : pick && keepOcc && dropOcc
+              ? `${name} at ${at}: ${quote(keepOcc.event.title)} overlaps ${quote(dropOcc.event.title)}. ${pick.why} I'd ${dropOcc.recurring ? `skip ${dropOcc.event.title} ${dayPhrase(day.date, a.todayKey) === "today" ? "today" : "that day"}` : `drop ${dropOcc.event.title}`}. Want me to?`
+              : `${name} at ${at}: ${quote(x.event.title)} overlaps ${quote(y.event.title)}. Which one is happening?`,
           facts: [span(x), span(y), bothRepeat ? "Both repeat" : shortDate(day.date)],
           actions: same
             ? [keepAction(x, y, day.date), { id: "acknowledge", kind: "acknowledge", label: "Both are right", params: {} }]
-            : [keepAction(x, y, day.date), keepAction(y, x, day.date), { id: "acknowledge", kind: "acknowledge", label: "Both are right", params: {} }],
+            : pick && keepOcc && dropOcc
+              ? [
+                  keepAction(keepOcc, dropOcc, day.date, dropLabel(dropOcc, day.date, a.todayKey)),
+                  keepAction(dropOcc, keepOcc, day.date, `Keep ${short(dropOcc.event.title)} instead`),
+                  { id: "acknowledge", kind: "acknowledge", label: "Both are right", params: {} },
+                ]
+              : [keepAction(x, y, day.date), keepAction(y, x, day.date), { id: "acknowledge", kind: "acknowledge", label: "Both are right", params: {} }],
           taskId: null,
           commitmentIds: [x.event.id, y.event.id],
           date: day.date,

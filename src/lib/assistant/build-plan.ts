@@ -17,6 +17,7 @@ import {
   type ProposedSession,
   type SchedulingPreferences,
 } from "@/lib/scheduling/planner";
+import { pickKeeper } from "@/lib/proactive/conflict-pick";
 import type { ActionSpec, World } from "./assess";
 import { clockLabel, shortDate } from "./dates";
 
@@ -411,8 +412,52 @@ export function buildPlan(input: BuildInput): BuiltPlan {
             editable: true,
           },
         });
-        // Sessions the assistant placed earlier that now collide get moved (with approval).
+        // Fixed events it collides with: Whitespace proposes which one gives way (Phase 7).
+        // A one-time event over a repeating one: skip that day of the repeating one, on this
+        // same card, so one approval settles it. Anything else is left as a recommendation.
         const occ = expandEvent(asEvent, now, new Date(now.getTime() + 28 * 86_400_000), tz);
+        const fixedOthers = expandEvents(
+          input.events.filter((e) => e.kind === "fixed" && !isFlexibleBlock(e)),
+          now,
+          new Date(now.getTime() + 28 * 86_400_000),
+          tz,
+        ).filter((o) => !o.allDay);
+        const skipped = new Set<string>();
+        for (const mineOcc of occ) {
+          for (const other of overlapping(fixedOthers, mineOcc.start, mineOcc.end)) {
+            const overlapMin = (Math.min(mineOcc.end.getTime(), other.end.getTime()) - Math.max(mineOcc.start.getTime(), other.start.getTime())) / 60_000;
+            if (overlapMin < 10 || skipped.has(other.key)) continue;
+            const pick = pickKeeper(
+              { id: "new", title: spec.title, recurring: !!spec.rrule },
+              { id: other.event.id, title: other.event.title, recurring: other.recurring },
+            );
+            if (!pick) {
+              ctx.notes.push(`${spec.title} overlaps ${other.event.title} (${whenLabel(other.start.toISOString(), tz)}). There's no clear choice: ask which one is happening.`);
+              continue;
+            }
+            if (pick.keep.id === "new" && other.recurring) {
+              skipped.add(other.key);
+              ctx.items.push({
+                action: "skip_occurrence",
+                title: other.event.title,
+                targetId: other.event.id,
+                autoApply: false,
+                payload: { commitmentId: other.event.id, date: other.date },
+                display: {
+                  ...EMPTY_DISPLAY,
+                  detail: `Skip ${shortDate(other.date)} only. The rest of the series stays.`,
+                  reason: `Overlaps ${spec.title}. ${pick.why}`,
+                },
+              });
+              ctx.notes.push(`Whitespace proposes skipping ${other.event.title} on ${shortDate(other.date)} (it's on the card): ${pick.why} Say so in one line; the user can reject that item.`);
+            } else {
+              ctx.notes.push(
+                `${spec.title} overlaps ${other.event.title} (${whenLabel(other.start.toISOString(), tz)}). Recommend keeping ${pick.keep.id === "new" ? spec.title : other.event.title}: ${pick.why} After saving, Home offers a one-tap fix.`,
+              );
+            }
+          }
+        }
+        // Sessions the assistant placed earlier that now collide get moved (with approval).
         for (const block of futureBlocks) {
           if (ctx.excludeEventIds.has(block.id)) continue;
           const hit = occ.some((o) => o.start < new Date(block.endsAt!) && o.end > new Date(block.startsAt!));

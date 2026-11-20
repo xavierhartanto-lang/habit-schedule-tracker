@@ -72,16 +72,32 @@ function asRec(c: Candidate): Recommendation {
 }
 
 describe("commitment conflicts", () => {
-  it("asks which of two overlapping fixed events is right", () => {
+  it("proposes which one gives way: a one-time recital beats a weekly practice", () => {
     const recital = event({ title: "Piano recital", date: "2026-11-19", start: "17:00", end: "19:00" });
     const data = input({ events: [...weekCalendar(), recital] });
     const [c, ...rest] = commitmentConflicts(analyze(data));
     expect(rest).toHaveLength(0);
     expect(c.kind).toBe("commitment_conflict");
-    expect(c.message).toBe("Tomorrow at 6 PM: “Piano recital” overlaps “Volleyball”. Which one is happening?");
+    expect(c.message).toBe("Tomorrow at 6 PM: “Piano recital” overlaps “Volleyball”. The recital only happens once. I'd skip Volleyball that day. Want me to?");
     expect(c.priority).toBe("high");
-    expect(c.actions.map((a) => a.label)).toEqual(["Keep Piano recital", "Keep Volleyball", "Both are right"]);
+    expect(c.actions.map((a) => a.label)).toEqual(["Skip Volleyball that day", "Keep Volleyball instead", "Both are right"]);
     expect(c.reason).toContain("1 h");
+  });
+
+  it("between two one-time events, an occasion beats a routine", () => {
+    const lesson = event({ title: "Math tutoring", date: "2026-11-21", start: "17:00", end: "18:00" });
+    const recital = event({ title: "Piano Recital", date: "2026-11-21", start: "17:30", end: "18:30" });
+    const [c] = commitmentConflicts(analyze(input({ events: [...weekCalendar(), lesson, recital] })));
+    expect(c.message).toContain("“Piano Recital” overlaps “Math tutoring”. The recital is harder to reschedule than Math tutoring. I'd drop Math tutoring.");
+    expect(c.actions[0]).toMatchObject({ label: "Remove Math tutoring", params: { keepId: recital.id, dropId: lesson.id } });
+  });
+
+  it("asks when there is no honest default", () => {
+    const a = event({ title: "Tennis match", date: "2026-11-21", start: "17:00", end: "18:00" });
+    const b = event({ title: "Piano recital", date: "2026-11-21", start: "17:30", end: "18:30" });
+    const [c] = commitmentConflicts(analyze(input({ events: [...weekCalendar(), a, b] })));
+    expect(c.message).toMatch(/Which one is happening\?$/);
+    expect(c.actions.map((x) => x.label)).toEqual(["Keep Tennis match", "Keep Piano recital", "Both are right"]);
   });
 
   it("keeping one skips that day of a repeating event, or removes a one-off, through an approval card", () => {
@@ -142,7 +158,7 @@ describe("commitment conflicts", () => {
     const recital = event({ title: "Piano recital", date: "2026-11-19", start: "17:00", end: "19:00" });
     const [c] = commitmentConflicts(analyze(input({ events: [...weekCalendar(), recital] })));
     const nudge = toNudge(asRec(c), true);
-    expect(nudge.chips.map((x) => x.label)).toEqual(["Keep Piano recital", "Keep Volleyball", "Both are right"]);
+    expect(nudge.chips.map((x) => x.label)).toEqual(["Skip Volleyball that day", "Keep Volleyball instead", "Both are right"]);
     expect(nudge.chips[2].act).toMatchObject({ kind: "dismiss", reason: "not_relevant" });
     expect(nudge.tone).toBe("suggestion");
   });
@@ -296,5 +312,47 @@ describe("schedule_tasks spec", () => {
       { todayKey: "2026-11-18", timeZone: TZ, tasks: new Map([[open.id, open]]), events: new Map(), maxSessionMinutes: 90, nowMs: NOW.getTime() },
     );
     expect(r.ok).toBe(false);
+  });
+});
+
+describe("adding an event that clashes (chat)", () => {
+  const eventSpec = (title: string, date: string, start: string, end: string, rrule: string | null = null) => ({
+    kind: "event" as const,
+    title,
+    lifeAreaId: null,
+    date,
+    startTime: start,
+    endTime: end,
+    rrule,
+    recurrenceText: rrule ? "Every Thursday" : null,
+    location: null,
+    notes: null,
+  });
+  const build = (spec: ReturnType<typeof eventSpec>, events: Commitment[] = weekCalendar()) =>
+    buildPlan({
+      now: NOW.toISOString(),
+      world: world(),
+      preferences: PREFS,
+      events,
+      openTasks: [],
+      busy: [],
+      specs: [{ spec, explicit: true }],
+      sourceMessageId: null,
+    });
+
+  it("a one-time recital over weekly volleyball proposes skipping volleyball that day, on the same card", () => {
+    const plan = build(eventSpec("Piano recital", "2026-11-19", "17:00", "19:00"));
+    expect(plan.items.map((i) => i.action)).toEqual(["create_event", "skip_occurrence"]);
+    const skip = plan.items[1];
+    expect(skip).toMatchObject({ title: "Volleyball", autoApply: false, payload: { date: "2026-11-19" } });
+    expect(skip.display.reason).toBe("Overlaps Piano recital. The recital only happens once.");
+    expect(plan.notes.some((n) => n.includes("proposes skipping Volleyball"))).toBe(true);
+  });
+
+  it("a new weekly class over a one-time event leaves the existing event alone and recommends", () => {
+    const recital = event({ title: "Piano recital", date: "2026-11-26", start: "17:30", end: "19:00" });
+    const plan = build(eventSpec("Tennis", "2026-11-19", "17:00", "18:00", "FREQ=WEEKLY;BYDAY=TH"), [recital]);
+    expect(plan.items.map((i) => i.action)).toEqual(["create_event"]);
+    expect(plan.notes.some((n) => n.startsWith("Tennis overlaps Piano recital") && n.includes("Recommend keeping Piano recital"))).toBe(true);
   });
 });
