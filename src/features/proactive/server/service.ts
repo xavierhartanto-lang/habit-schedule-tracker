@@ -28,7 +28,7 @@ import { isQuietTime, surface as surfaceRecommendations } from "@/lib/proactive/
 import { addDaysToKey, dateKeyInZone, isValidTimeZone, zonedToUtc } from "@/lib/scheduling/zoned";
 import type { PlanView } from "@/features/assistant/plan-types";
 import { loadWorld } from "@/features/assistant/server/plan-service";
-import { PHASE7_KINDS, type AssistantSettings, type DailyBrief, type ProactiveState, type Recommendation, type RecommendationAction } from "../types";
+import { PHASE7_KINDS, PHASE73_KINDS, type AssistantSettings, type DailyBrief, type ProactiveState, type Recommendation, type RecommendationAction } from "../types";
 
 /**
  * Phase 5 proactive assistant, server side.
@@ -158,8 +158,12 @@ async function sync(userId: string, candidates: Candidate[], settings: Assistant
       // Before the Phase 7 migration the table rejects the new kinds (check violation).
       // Keep everything else working: retry without them.
       if ((error as { code?: string }).code !== "23514" || !result.inserts.some((c) => PHASE7_KINDS.has(c.kind))) throw error;
-      console.warn("[proactive] new recommendation kinds need the Phase 7 migration (20261128000000)");
-      return applyReconcile(userId, { ...result, inserts: result.inserts.filter((c) => !PHASE7_KINDS.has(c.kind)) });
+      // First without the newest kinds (7.3 migration missing), then without every Phase 7 kind.
+      console.warn("[proactive] new recommendation kinds need the Phase 7 migrations (20261128000000, 20261129000000)");
+      return applyReconcile(userId, { ...result, inserts: result.inserts.filter((c) => !PHASE73_KINDS.has(c.kind)) }).catch((again) => {
+        if ((again as { code?: string }).code !== "23514") throw again;
+        return applyReconcile(userId, { ...result, inserts: result.inserts.filter((c) => !PHASE7_KINDS.has(c.kind)) });
+      });
     });
     // Occasional cleanup, piggybacking on a load that already wrote something.
     if (result.updates.some((u) => u.patch.status === "resolved")) await pruneResolved(userId, now).catch(() => undefined);
@@ -205,6 +209,8 @@ async function planFromActions(
     specs: spec.specs.map((s) => ({ spec: s, explicit: false })),
     sourceMessageId: input.sourceMessageId,
   });
+  // Tasks the day plan left out on purpose show under the plan, with why.
+  if (spec.leftOut?.length) built.unscheduled.push(...spec.leftOut.filter((l) => !built.unscheduled.some((u) => u.title === l.title)));
   if (!built.items.length && !built.unscheduled.length) {
     throw new DataValidationError(built.notes[0] ?? "Nothing needs to change right now.");
   }

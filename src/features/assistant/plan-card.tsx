@@ -278,7 +278,8 @@ export function PlanCard({
         {plan.unscheduled.length > 0 && (
           <div className="border-t border-border bg-[var(--cat-creative-soft)] px-3.5 py-2.5">
             <p className="flex items-center gap-1.5 text-[12px] font-medium text-ink">
-              <TriangleAlert className="size-3.5 text-[var(--cat-creative)]" /> Didn&apos;t fit
+              <TriangleAlert className="size-3.5 text-[var(--cat-creative)]" />{" "}
+              {plan.unscheduled.every((s) => s.minutes === 0) ? "Left for later" : <>Didn&apos;t fit</>}
             </p>
             <ul className="mt-1 space-y-0.5">
               {plan.unscheduled.map((s) => (

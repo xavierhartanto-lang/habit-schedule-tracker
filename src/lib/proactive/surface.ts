@@ -38,6 +38,7 @@ const KIND_RANK: Record<RecommendationKind, number> = {
   commitment_conflict: 1,
   deadline_cluster: 7,
   neglected_area: 9,
+  exam_prep: 3,
 };
 
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;

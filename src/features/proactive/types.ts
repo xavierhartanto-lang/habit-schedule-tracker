@@ -44,10 +44,14 @@ export type RecommendationKind =
   /** Phase 7: several deadlines close together that only fit if work starts earlier. */
   | "deadline_cluster"
   /** Phase 7.6: a life area with no time lately, and a real window for it. Low priority. */
-  | "neglected_area";
+  | "neglected_area"
+  /** Phase 7.3: an exam, test or quiz soon with nothing planned to study for it. */
+  | "exam_prep";
 
 /** Kinds added by the Phase 7 migration (20261128000000). Older databases reject them. */
-export const PHASE7_KINDS: ReadonlySet<RecommendationKind> = new Set(["commitment_conflict", "deadline_cluster", "neglected_area"]);
+export const PHASE7_KINDS: ReadonlySet<RecommendationKind> = new Set(["commitment_conflict", "deadline_cluster", "neglected_area", "exam_prep"]);
+/** Kinds added by the Phase 7.3 migration (20261129000000). */
+export const PHASE73_KINDS: ReadonlySet<RecommendationKind> = new Set(["exam_prep"]);
 
 export type RecommendationPriority = "high" | "medium" | "low";
 
@@ -74,6 +78,8 @@ export type RecommendationActionKind =
   | "schedule_tasks"
   /** { dropId, keepId, date } one of two overlapping fixed events goes: skip that day (repeating) or remove (one-off) */
   | "resolve_conflict"
+  /** { eventId, sessions, minutesEach } study sessions before an exam */
+  | "prep_exam"
   /** {} "Both are right": the situation is fine, never raise it again */
   | "acknowledge"
   /** { prompt } no plan: send `prompt` as the user's chat message */

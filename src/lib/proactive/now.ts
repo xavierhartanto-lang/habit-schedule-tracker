@@ -1,5 +1,5 @@
 import type { Commitment } from "@/lib/domain/types";
-import { rankTasks } from "./brief";
+import { planCandidates } from "./brief";
 import { type Analysis, type TaskLoad } from "./analyze";
 import { about, clockAt, duration, quote, roughly } from "./text";
 
@@ -57,20 +57,8 @@ function need(t: TaskLoad): number | null {
   return t.unscheduled;
 }
 
-/** Ranked tasks first, then any other open task with an estimate, high priority first. */
-function candidates(a: Analysis): { t: TaskLoad; why: string | null }[] {
-  const ranked = rankTasks(a).map((r) => ({ t: r.t, why: r.why }));
-  const seen = new Set(ranked.map((r) => r.t.task.id));
-  const order = { high: 0, medium: 1, low: 2 } as const;
-  const rest = a.tasks
-    .filter((t) => !seen.has(t.task.id) && t.estimate !== null && (t.dueMs === null || t.dueMs > a.nowMs))
-    .sort((x, y) => order[x.task.priority] - order[y.task.priority] || (x.dueMs ?? Infinity) - (y.dueMs ?? Infinity) || x.task.id.localeCompare(y.task.id))
-    .map((t) => ({ t, why: null }));
-  return [...ranked, ...rest];
-}
-
 export function pickTask(a: Analysis, windowMinutes: number): NowTask | null {
-  for (const { t, why } of candidates(a)) {
+  for (const { t, why } of planCandidates(a)) {
     const left = need(t);
     if (left === 0) continue; // its time is already booked
     if (left === null) {
