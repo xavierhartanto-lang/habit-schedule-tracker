@@ -154,7 +154,7 @@ describe("extractFacts", () => {
     parse.mockResolvedValue({ stop_reason: "end_turn", parsed_output: output });
     const result = await extractFacts({ userMessage, history: [], known: [], today });
     expect(result.items).toHaveLength(1);
-    expect(result.items[0]).toMatchObject({ title: "Swim practice", kind: "fixed" });
+    expect(result.items[0]).toMatchObject({ title: "Swim Practice", kind: "fixed" });
     expect(result.dropped).toEqual([{ title: "Qualify for state", reason: "ungrounded" }]);
   });
 

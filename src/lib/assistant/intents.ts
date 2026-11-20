@@ -4,6 +4,7 @@ import { isGrounded, normalizeText } from "@/lib/ai/extraction";
 import type { ContextCategory, Weekday } from "@/lib/domain/types";
 import { WEEKDAYS } from "@/lib/domain/types";
 import type { DateRef } from "./dates";
+import { nameActivity, type NamingContext } from "./naming";
 
 /**
  * Planner output: what the user wants done, as structured intents.
@@ -74,7 +75,7 @@ const WireIntent = z.object({
   explicit: z
     .boolean()
     .describe("True only if the user directly asked Whitespace to do this now (\"add a task…\", \"mark … done\")."),
-  title: z.string().nullable().describe("Short name in the user's words, e.g. 'Volleyball practice'."),
+  title: z.string().nullable().describe("Clean calendar name in title case, e.g. 'Math Tutoring'. See Naming."),
   evidence: z.string().describe("Exact words from the user's NEW message that state this. Copied verbatim."),
   area: z.string().nullable().describe("One of the user's life area names, or null if unclear."),
   target_ref: z
@@ -101,7 +102,7 @@ const WireIntent = z.object({
   target_date: WireDate.nullable().describe("Goals: target date."),
   location: z.string().nullable(),
   fact_category: z.enum(FACT_CATEGORIES).nullable().describe("save_fact only."),
-  details: z.string().nullable().describe("One short sentence of extra specifics the user gave."),
+  details: z.string().nullable().describe("One short description sentence: specifics from the user or established context. Not the title."),
   pref_day_start: z.string().nullable().describe('update_preferences: earliest time for work "HH:MM".'),
   pref_day_end: z.string().nullable().describe('update_preferences: latest time for work "HH:MM".'),
   pref_max_session_minutes: z.number().int().nullable(),
@@ -147,7 +148,7 @@ const ApiIntent = z.object({
   type: z.enum(INTENT_TYPES),
   draft_id: apiText("Id from <pending_drafts> when this message answers or corrects it."),
   explicit: z.boolean().describe('True only if the user directly asked Whitespace to do this now ("add a task…", "mark … done", "cancel …").'),
-  title: apiText("Short name in the user's words, e.g. 'Volleyball practice'."),
+  title: apiText("Clean calendar name in title case, e.g. 'Math Tutoring', 'Chemistry Homework'. Follow the Naming rules."),
   evidence: z.string().describe("Exact words from the user's NEW message that state this. Copied verbatim."),
   area: apiText("One of the user's life area names, if clear."),
   target_ref: apiText("Ref of an existing record from <current_plan> (t1, e2, b3, h1, g2) this is about."),
@@ -171,7 +172,7 @@ const ApiIntent = z.object({
   target_date: ApiDate.describe("Goals: target date."),
   location: apiText(),
   fact_category: apiEnum(FACT_CATEGORIES).describe("save_fact only."),
-  details: apiText("One short sentence of extra specifics the user gave."),
+  details: apiText("One short description sentence: specifics from the user's words or established context that do not belong in the title."),
   pref_day_start: apiText('update_preferences: earliest time for work "HH:MM".'),
   pref_day_end: apiText('update_preferences: latest time for work "HH:MM".'),
   pref_max_session_minutes: apiInt(),
@@ -397,6 +398,27 @@ export function mergeIntent(draft: Intent, next: Intent): Intent {
   };
 }
 
+/** Intents that create something new, so their title is a fresh name. */
+const NAMED_TYPES: ReadonlySet<IntentType> = new Set(["create_event", "create_task", "create_habit", "create_goal", "plan_time", "save_fact"]);
+
+/**
+ * Contextual naming (see naming.ts). Only for new activities: intents that
+ * point at existing records keep the title the model used to find them.
+ * Goals and preference-like facts keep their dates and times ("Focus after 8pm").
+ */
+export function applyNaming(intent: Intent, context: NamingContext, removed: string[] = []): Intent {
+  if (!NAMED_TYPES.has(intent.type) || !intent.title) return intent;
+  if (intent.type === "save_fact" && intent.factCategory !== "activity" && intent.factCategory !== "interest") return intent;
+  // Time for an existing task is named after that task (assess.ts).
+  if (intent.type === "plan_time" && intent.targetRef) return intent;
+  const named = nameActivity(intent.title, context, {
+    stripWhen: intent.type !== "create_goal",
+    fallback: intent.evidence,
+  });
+  removed.push(...named.removed);
+  return named.title ? { ...intent, title: named.title } : intent;
+}
+
 export type PlannerResult = {
   /** New or completed intents, in the order the user gave them. */
   intents: Intent[];
@@ -404,6 +426,8 @@ export type PlannerResult = {
   consumedDrafts: string[];
   question: string | null;
   dropped: { title: string; reason: "ungrounded" | "limit" | "unknown_draft" }[];
+  /** Titles whose unsupported specifics were removed (for logs). */
+  retitled: { from: string; to: string | null; removed: string[] }[];
 };
 
 /**
@@ -413,11 +437,22 @@ export type PlannerResult = {
  */
 export function validatePlannerOutput(
   payload: unknown,
-  input: { userText: string; drafts: Draft[] },
+  input: { userText: string; drafts: Draft[]; naming?: NamingContext },
 ): PlannerResult {
   const wire = PlannerWireSchema.parse(payload);
+  // Titles may draw on the user's words, the drafts they continue, and whatever context the caller adds.
+  const naming: NamingContext = {
+    sources: [input.userText, ...input.drafts.flatMap((d) => [d.intent.evidence, d.intent.title ?? ""]), ...(input.naming?.sources ?? [])],
+    knownNames: input.naming?.knownNames ?? [],
+  };
   const draftsById = new Map(input.drafts.map((d) => [d.id, d]));
-  const result: PlannerResult = { intents: [], consumedDrafts: [], question: null, dropped: [] };
+  const result: PlannerResult = { intents: [], consumedDrafts: [], question: null, dropped: [], retitled: [] };
+  const name = (intent: Intent): Intent => {
+    const removed: string[] = [];
+    const named = applyNaming(intent, naming, removed);
+    if (removed.length) result.retitled.push({ from: intent.title ?? "", to: named.title, removed });
+    return named;
+  };
 
   for (const raw of wire.intents) {
     const label = clean(raw.title, 80) ?? raw.type;
@@ -432,7 +467,7 @@ export function validatePlannerOutput(
         result.consumedDrafts.push(draft.id);
         if (intent.type === "cancel_draft") continue;
         // A follow-up only needs to be grounded loosely: "Thursday" is enough.
-        intent = mergeIntent(draft.intent, intent);
+        intent = name(mergeIntent(draft.intent, intent));
         if (result.intents.length >= MAX_INTENTS) {
           result.dropped.push({ title: label, reason: "limit" });
           continue;
@@ -451,7 +486,7 @@ export function validatePlannerOutput(
       result.dropped.push({ title: label, reason: "limit" });
       continue;
     }
-    result.intents.push(intent);
+    result.intents.push(name(intent));
   }
 
   result.question = clean(wire.question, 300);

@@ -23,6 +23,8 @@ export type ChatContext = {
   today: { date: string; weekday: string };
   permissions: { personalization: boolean; memory: boolean };
   onboardedAt: string | null;
+  /** Recaps of recent conversations ("Title: summary"). Empty when memory is off. */
+  recaps: string[];
 };
 
 const BYDAY: Record<string, string> = { MO: "Mon", TU: "Tue", WE: "Wed", TH: "Thu", FR: "Fri", SA: "Sat", SU: "Sun" };
@@ -121,5 +123,8 @@ export async function loadChatContext(
     today,
     permissions: ctx.permissions,
     onboardedAt: ctx.onboardedAt,
+    recaps: ctx.recentConversations
+      .filter((c) => c.summary)
+      .map((c) => `${c.title ? `${c.title}: ` : ""}${c.summary}`.replace(/\s+/g, " ").slice(0, 300)),
   };
 }

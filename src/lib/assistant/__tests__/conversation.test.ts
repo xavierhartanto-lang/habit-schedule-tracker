@@ -37,7 +37,7 @@ describe("grounding and validation", () => {
       },
       { userText: "Add a task to buy a lab notebook", drafts: [] },
     );
-    expect(out.intents.map((i) => i.title)).toEqual(["Buy notebook"]);
+    expect(out.intents.map((i) => i.title)).toEqual(["Buy Notebook"]);
     expect(out.dropped).toEqual([{ title: "Dentist", reason: "ungrounded" }]);
   });
 

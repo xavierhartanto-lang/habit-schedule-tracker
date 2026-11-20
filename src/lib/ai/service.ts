@@ -22,6 +22,7 @@ import {
   type ReplyExtras,
 } from "./prompts";
 import { PlannerApiSchema, fromApiWire, validatePlannerOutput, type Draft, type PlannerResult } from "@/lib/assistant/intents";
+import { formatFactTitle, type NamingContext } from "@/lib/assistant/naming";
 import { PLANNER_SYSTEM_PROMPT } from "@/lib/assistant/planner-prompt";
 
 /**
@@ -150,7 +151,9 @@ export async function extractFacts(input: ExtractFactsInput): Promise<Extraction
   }
 
   try {
-    return validateExtraction(response.parsed_output, { userText: input.userMessage, known: input.known });
+    const result = validateExtraction(response.parsed_output, { userText: input.userMessage, known: input.known });
+    const sources = [input.userMessage, ...input.history.map((t) => t.content)];
+    return { ...result, items: result.items.map((item) => ({ ...item, title: formatFactTitle(item.category, item.title, sources) })) };
   } catch (error) {
     throw new AiError("invalid_output", { cause: error });
   }
@@ -162,6 +165,8 @@ export type InterpretInput = {
   /** Built by buildPlannerUserPrompt (context, refs, drafts, recent turns). */
   prompt: string;
   drafts: Draft[];
+  /** What new titles may draw on beyond the user's message (see lib/assistant/naming). */
+  naming?: NamingContext;
   signal?: AbortSignal;
 };
 
@@ -171,7 +176,7 @@ export type InterpretInput = {
  * follow-ups and builds proposals from the result.
  */
 export async function interpretMessage(input: InterpretInput): Promise<PlannerResult> {
-  const empty: PlannerResult = { intents: [], consumedDrafts: [], question: null, dropped: [] };
+  const empty: PlannerResult = { intents: [], consumedDrafts: [], question: null, dropped: [], retitled: [] };
   if (!input.userMessage.trim()) return empty;
   const { client, model } = getAiClient();
 
@@ -200,7 +205,11 @@ export async function interpretMessage(input: InterpretInput): Promise<PlannerRe
     throw new AiError("invalid_output", { message: `Planner unusable (stop_reason=${response.stop_reason})` });
   }
   try {
-    return validatePlannerOutput(fromApiWire(response.parsed_output), { userText: input.userMessage, drafts: input.drafts });
+    return validatePlannerOutput(fromApiWire(response.parsed_output), {
+      userText: input.userMessage,
+      drafts: input.drafts,
+      naming: input.naming,
+    });
   } catch (error) {
     throw new AiError("invalid_output", { cause: error });
   }

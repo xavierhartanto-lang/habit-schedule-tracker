@@ -146,6 +146,7 @@ const ACTIONS_RULES = `Ground rules:
 - Whitespace's server turns what the user says into actions. <whitespace_actions> lists exactly what it did for this message. Describe only those results. Never claim something was saved, scheduled, moved or deleted unless it is listed as already done.
 - Calendar changes always wait for the user's approval on a card shown under your message. Point to the card in a few words ("Here's the plan." / "Card's below."); do not repeat every time, the card shows them. Mention the key reason or trade-off, and anything that did not fit, honestly.
 - Things listed as already done: confirm in a few words ("Done. Added to Thursday."). Don't list every field back.
+- Call each item by its exact name from <whitespace_actions>. The user can speak casually; Whitespace already turned "I have to tutor a kid tomorrow" into a clean name, so confirm it naturally ("Got it. Math Tutoring tomorrow."). Never ask for details just to make a nicer name.
 - Never calculate free time or pick time slots yourself. Only the scheduler does that.
 - If <whitespace_actions> gives a follow-up question, ask only that one question, at the end. Do not ask other questions in the same message.
 - Whitespace never moves or deletes fixed commitments on its own. Removing one is only proposed when the user asks, and it waits for their approval on the card.
@@ -157,7 +158,7 @@ const CHECKIN_GUIDE: Record<"daily" | "weekly", string> = {
   weekly: `This is a weekly planning check-in the user opened. Using only <check_in> data: open with the week's biggest pressure point (a crunch day or a key deadline). Then the other deadlines and roughly how much free time there is, in at most four short lines. End with one short question about what matters most this week. Never list anything that is not in <check_in>.`,
 };
 
-function formatFacts(facts: KnownFact[]): string {
+export function formatFacts(facts: KnownFact[]): string {
   if (facts.length === 0) return "Nothing saved yet.";
   const order: ContextCategory[] = ["commitment", "activity", "interest", "goal", "routine", "working_time", "preference"];
   const heading: Record<ContextCategory, string> = {
@@ -303,6 +304,7 @@ Rules:
   routine: regular habits of daily life (sleep, wake time, commute, workouts, family dinner).
   working_time: when they like or are able to do focused work (e.g. "I focus best after 8pm", "I do homework right after school").
   preference: how they like their schedule to work (e.g. "keep Sundays free", "no more than two activities a day", "short breaks every hour").
+- title: a clean, specific name in natural title case, the way it would appear in a calendar: "Basketball Practice", "Math Tutoring", "DECA", "AP Chemistry". No first person, filler, articles or full sentences, and no days or times in titles of commitments, activities and interests (those go in schedule). Expand clear shorthand ("chem" = Chemistry). Never add a subject, person, place or name the user did not say or that is not in <known_facts>: "I tutor kids" is "Tutoring", not "Math Tutoring". Routines, working times and preferences may keep their wording ("Focus after 8pm"). Put extra specifics in details, not the title.
 - area must be one of: academics, extracurricular, athletics, creative, personal, rest.
 - Times are 24h "HH:MM". Days are mon..sun. Convert "after school" or "evenings" into a time only if the user gave the time; otherwise leave times null and add a clarification.
 - Clarifications: add at most 2 short questions for things that are clearly ambiguous and matter for planning. None if nothing is ambiguous.

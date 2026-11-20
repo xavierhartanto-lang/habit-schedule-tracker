@@ -1,4 +1,4 @@
-import type { ChatTurn } from "@/lib/ai/prompts";
+import { formatFacts, type ChatTurn, type KnownFact, type PromptContext } from "@/lib/ai/prompts";
 import type { Commitment, LifeAreaRecord } from "@/lib/domain/types";
 import { parseRRule, describeRecurrence } from "@/lib/scheduling/recurrence";
 import { dateKeyInZone, timeKeyInZone } from "@/lib/scheduling/zoned";
@@ -6,6 +6,7 @@ import type { PlanView } from "@/features/assistant/plan-types";
 import type { RefTable } from "./assess";
 import { calendarTable, clockLabel, shortDate } from "./dates";
 import type { Draft } from "./intents";
+import type { NamingContext } from "./naming";
 
 /**
  * Prompts for the planner (structured intents) and the extra context the
@@ -38,7 +39,20 @@ Choosing a type
 - Before choosing remove_event, check the t refs too: "cancel", "remove" or "delete" a name that is only a task means remove_task. For "it" or "that", use the item named in the recent conversation.
 - cant_make: "I can't study Wednesday anymore" or "no tutoring this Wednesday" (date + title, or target_ref). finished_early: "I finished my coding project early". not_enough_time: "I don't think I'll have enough time this week".
 - Greetings, questions about their schedule, small talk: return no intents.
-- question: only for real ambiguity the fields cannot express (e.g. it is unclear whether "work on my coding project" means a one-time task or regular time). Otherwise "".`;
+- question: only for real ambiguity the fields cannot express (e.g. it is unclear whether "work on my coding project" means a one-time task or regular time). Otherwise "".
+
+Naming (title and details)
+The user describes their life casually. You turn it into the name they would want to see on their calendar.
+- title: concise, specific, professional, natural title case, easy to scan. Usually 1 to 4 words, a noun phrase, never a sentence. No first person ("I", "my"), filler, leading articles, dates, times, durations or how often it repeats: those go in their own fields.
+  "I have to tutor a kid tomorrow" -> "Tutoring Session". "Basketball after school" -> "Basketball Practice". "Need to finish my chem hw" -> "Chemistry Homework". "Meeting with the DECA people" -> "DECA Meeting". "Helping Jack study for his test" -> "Study Session with Jack".
+- Use context to be specific: <what_whitespace_knows> (onboarding answers, activities, interests, commitments, goals, past conversations), <current_plan>, <life_areas> and the recent conversation.
+  If the user is known to tutor math, "tutor a kid" -> "Math Tutoring". If they have an app or project with a name, "work on my app" -> "<that name> Development" (e.g. "HoopVision Development"). Expand clear shorthand ("chem" = Chemistry, "hw" = Homework).
+- Never invent specifics. A subject, person, place, project name, objective, duration, deadline or recurrence goes in only if the user said it or it is established above. With no known subject, "tutor a kid" stays "Tutoring Session", not "Math Tutoring". When unsure, pick an accurate general title instead of asking. Never ask a question just to get a better name.
+- Keep what the user already made specific: "Finish my AP Chemistry lab report" -> "AP Chemistry Lab Report".
+- Consistency: if the activity already exists in <current_plan> or <what_whitespace_knows>, use that exact name, even if the user calls it something shorter ("basketball" -> the existing "Basketball Practice"). The same activity keeps one name everywhere.
+- plan_time for an existing task: set target_ref to that task. Whitespace names the sessions after the task, so they stay linked.
+- details: one short description sentence for extra specifics that do not belong in the title, from the user's words or established context ("Tutoring an elementary-school student in math."). "" when there is nothing useful. Never put guesses here either.
+- Titles of save_fact preferences, routines and working times can keep their times ("Focus after 8pm").`;
 
 function eventLine(e: Commitment, timeZone: string): string {
   if (!e.startsAt || !e.endsAt) return `${e.title} (flexible, no time yet)`;
@@ -86,6 +100,65 @@ function draftLine(d: Draft): string {
   return `${d.id} (${i.type}): ${known || "nothing yet"}; last asked about: ${d.asked.at(-1) ?? "nothing"}`;
 }
 
+/**
+ * What Whitespace knows about the user, for naming. Comes from the same
+ * context builder as the reply model, so the privacy toggles already apply:
+ * personalization off means no facts and no conversation recaps.
+ */
+export type PlannerKnowledge = {
+  personalizationEnabled: boolean;
+  profile: Pick<PromptContext["profile"], "gradeLevel" | "school">;
+  facts: KnownFact[];
+  /** Recaps of recent conversations, e.g. "College essays: drafted the Common App essay outline." */
+  recaps: string[];
+};
+
+export function formatKnowledge(knowledge: PlannerKnowledge | null | undefined): string {
+  if (!knowledge) return "Nothing available.";
+  if (!knowledge.personalizationEnabled) {
+    return "The user turned off personalization. Name things from their own words and <current_plan> only.";
+  }
+  const profile = [
+    knowledge.profile.gradeLevel ? `Grade ${knowledge.profile.gradeLevel}` : null,
+    knowledge.profile.school ? `School: ${knowledge.profile.school}` : null,
+  ].filter(Boolean);
+  const parts = [
+    profile.length ? profile.join(". ") : null,
+    formatFacts(knowledge.facts),
+    knowledge.recaps.length ? `Recent conversations:\n${knowledge.recaps.map((r) => `- ${r}`).join("\n")}` : null,
+  ].filter(Boolean);
+  return parts.join("\n");
+}
+
+/** Everything a new title may draw on, and the names already in use. */
+export function namingContext(input: {
+  refs: RefTable;
+  areas: LifeAreaRecord[];
+  recentHistory: ChatTurn[];
+  knowledge?: PlannerKnowledge | null;
+}): NamingContext {
+  const k = input.knowledge?.personalizationEnabled ? input.knowledge : null;
+  const recordNames = [
+    ...[...input.refs.tasks.values()].map((t) => t.title),
+    ...[...input.refs.events.values()].map((e) => e.title),
+    ...[...input.refs.blocks.values()].map((b) => b.title),
+    ...[...input.refs.habits.values()].map((h) => h.title),
+    ...[...input.refs.goals.values()].map((g) => g.title),
+  ];
+  const factNames = (k?.facts ?? []).filter((f) => f.category === "commitment" || f.category === "activity").map((f) => f.title);
+  return {
+    sources: [
+      ...input.recentHistory.map((t) => t.content),
+      ...recordNames,
+      ...input.areas.map((a) => a.name),
+      ...(k?.facts ?? []).map((f) => `${f.title} ${f.detail ?? ""}`),
+      ...(k?.recaps ?? []),
+      ...(k?.profile.school ? [k.profile.school] : []),
+    ],
+    knownNames: [...new Set([...recordNames, ...factNames])],
+  };
+}
+
 export function buildPlannerUserPrompt(input: {
   todayKey: string;
   weekday: string;
@@ -95,11 +168,13 @@ export function buildPlannerUserPrompt(input: {
   drafts: Draft[];
   recentHistory: ChatTurn[];
   newUserText: string;
+  knowledge?: PlannerKnowledge | null;
 }): string {
   const history = input.recentHistory.map((t) => `${t.role === "user" ? "User" : "Assistant"}: ${t.content}`).join("\n");
   return [
     `Today is ${input.weekday} ${input.todayKey}. Time zone: ${input.timeZone}. Weeks start on Monday.`,
     `<calendar>\n${calendarTable(input.todayKey)}\n</calendar>`,
+    `<what_whitespace_knows>\n${formatKnowledge(input.knowledge)}\n</what_whitespace_knows>`,
     `<life_areas>\n${input.areas.map((a) => a.name).join(", ") || "None"}\n</life_areas>`,
     `<current_plan>\n${formatRefs(input.refs, input.timeZone)}\n</current_plan>`,
     `<pending_drafts>\n${input.drafts.map(draftLine).join("\n") || "None."}\n</pending_drafts>`,

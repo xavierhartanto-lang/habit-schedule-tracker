@@ -22,6 +22,10 @@ from a client component, and never expose `ANTHROPIC_API_KEY`.
 - Every extracted item must quote the user's own words (`evidence`).
   Items that don't, or that have malformed times/dates, are dropped.
 - The AI never creates or moves events. Scheduling stays in `lib/scheduling`.
+- Names of new tasks, events, sessions, habits and goals go through
+  `lib/assistant/naming.ts` after the planner model: title case, no filler or
+  dates, specifics only when the user said them or saved context establishes
+  them, and existing names reused exactly. Sessions for a task use the task's name.
 
 ## Using it from a route handler
 
