@@ -48,7 +48,7 @@ export function BriefingFor({ view, ctx, variant }: { view: BriefingView; ctx: I
       heading={view.heading}
       headline={view.headline}
       preview={view.window.preview}
-      lines={variant === "home" ? view.compactLines : view.lines}
+      visual={variant === "home" ? view.compactVisual : view.visual}
       days={view.facts.days}
       actions={view.facts.actions}
       empty={view.facts.empty}

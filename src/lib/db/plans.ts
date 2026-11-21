@@ -80,6 +80,10 @@ function toDisplay(value: Json): ItemDisplay {
     warnings: strings(d.warnings),
     alternatives: Array.isArray(d.alternatives) ? (d.alternatives as { start: string; end: string }[]) : [],
     editable: d.editable === true,
+    chips: Array.isArray(d.chips) ? (d.chips as ItemDisplay["chips"]) : [],
+    nearby: Array.isArray(d.nearby) ? (d.nearby as ItemDisplay["nearby"]) : [],
+    deadline: typeof d.deadline === "string" ? d.deadline : null,
+    step: d.step && typeof d.step === "object" && !Array.isArray(d.step) ? (d.step as ItemDisplay["step"]) : null,
   };
 }
 
@@ -175,6 +179,10 @@ export function toPlanView(plan: StoredPlan, now = new Date()): PlanView {
         tradeoffs: i.display.tradeoffs,
         conflicts: i.display.conflicts,
         warnings: i.display.warnings,
+        chips: i.display.chips ?? [],
+        nearby: i.display.nearby ?? [],
+        deadline: i.display.deadline ?? null,
+        step: i.display.step ?? null,
         editable: i.display.editable && (i.status === "pending" || i.status === "conflict"),
         canUndo: i.status === "applied" && UNDOABLE.has(i.action) && i.undo !== null,
         targetId: i.targetId,

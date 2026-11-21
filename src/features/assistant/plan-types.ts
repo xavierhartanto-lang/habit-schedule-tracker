@@ -80,6 +80,13 @@ export type PlanItem = {
   tradeoffs: string[];
   conflicts: PlanConflict[];
   warnings: string[];
+  /** Short "why" labels ("After Math", "10m buffer"). Older plans have none; the card falls back to `reason`. */
+  chips: { code: string; label: string; tone: "plain" | "warn" }[];
+  /** Busy blocks around a session, for the time strip. */
+  nearby: { title: string; start: string; end: string }[];
+  deadline: string | null;
+  /** The bigger task this session is a step of, with its open steps in order. */
+  step: { parentId: string; parentTitle: string; currentId: string; steps: { id: string; title: string; dueAt: string | null }[] } | null;
   editable: boolean;
   canUndo: boolean;
   targetId: string | null;

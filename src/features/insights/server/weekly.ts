@@ -10,7 +10,7 @@ import type { Json } from "@/lib/db/database.types";
 import type { Goal, LifeAreaRecord, Task } from "@/lib/domain/types";
 import { buildBriefingPrompt, validateBriefing } from "@/lib/insights/briefing-ai";
 import { goalTime, weekTime, type AreaTimeInput, type GoalTime, type WeekTime } from "@/lib/insights/area-time";
-import { briefingWindow, buildWeeklyFacts, factLines, factsHash, headline, showOnHome, weekLabel, type BriefingWindow, type WeeklyFacts } from "@/lib/insights/weekly";
+import { briefingVisual, briefingWindow, buildWeeklyFacts, factLines, factsHash, headline, showOnHome, weekLabel, type BriefingVisual, type BriefingWindow, type WeeklyFacts } from "@/lib/insights/weekly";
 import type { Analysis } from "@/lib/proactive/analyze";
 import { addDaysToKey, startOfDayInZone, startOfWeekKey } from "@/lib/scheduling/zoned";
 import type { Recommendation } from "@/features/proactive/types";
@@ -39,6 +39,9 @@ export type BriefingView = {
   lines: string[];
   /** Home's shorter version: problems, what's due, the load. */
   compactLines: string[];
+  /** The same facts as chips and bars for the card. */
+  visual: BriefingVisual;
+  compactVisual: BriefingVisual;
   heading: string;
   headline: string;
   hash: string;
@@ -120,7 +123,7 @@ export async function loadBriefing(
     console.warn("[insights] weekly_briefings table missing: run migration 20261130000000");
     tracked = false;
   }
-  return { window, facts, lines: factLines(facts, ctx.todayKey), compactLines: factLines(facts, ctx.todayKey, { compact: true }), heading: weekLabel(facts), headline: headline(facts), hash, stored, tracked };
+  return { window, facts, lines: factLines(facts, ctx.todayKey), compactLines: factLines(facts, ctx.todayKey, { compact: true }), visual: briefingVisual(facts, ctx.todayKey), compactVisual: briefingVisual(facts, ctx.todayKey, { compact: true }), heading: weekLabel(facts), headline: headline(facts), hash, stored, tracked };
 }
 
 /** Whether Home shows the briefing card right now. */

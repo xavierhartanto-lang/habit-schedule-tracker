@@ -7,7 +7,8 @@ import { compareWeeks, type WeekTime } from "./area-time";
  * user can check on their calendar. Pure.
  */
 
-export type Observation = { id: string; title: string; body: string };
+/** `bars` lets the card show the comparison instead of the sentence; `body` stays one tap away. */
+export type Observation = { id: string; title: string; body: string; bars?: { label: string; minutes: number; tone: "accent" | "muted" | "warn" }[] };
 
 const MAX = 4;
 /** Rounded so it doesn't sound falsely precise; zero stays zero. */
@@ -25,6 +26,10 @@ export function observations(thisWeek: WeekTime, lastWeek: WeekTime, todayKey: s
       id: "missed",
       title: `${duration(roughly(t.missed))} of sessions missed`,
       body: `Of ${duration(roughly(past))} of past sessions this week, you marked ${duration(roughly(t.missed))} as missed. If a time keeps not working, it may be the time, not you.`,
+      bars: [
+        { label: "Done", minutes: roughly(t.done + t.partial), tone: "accent" },
+        { label: "Missed", minutes: roughly(t.missed), tone: "warn" },
+      ],
     });
   }
   if (t.unrecorded >= 30) {
@@ -47,6 +52,10 @@ export function observations(thisWeek: WeekTime, lastWeek: WeekTime, todayKey: s
       id: `shift:${shift.areaId}`,
       title: `${shift.name} ${shift.delta > 0 ? "up" : "down"} ${duration(roughly(Math.abs(shift.delta)))}`,
       body: `${amount(shift.thisWeek)} scheduled this week${sofar}, against ${amount(shift.lastWeek)} last week.`,
+      bars: [
+        { label: "This week", minutes: roughly(shift.thisWeek), tone: "accent" },
+        { label: "Last week", minutes: roughly(shift.lastWeek), tone: "muted" },
+      ],
     });
   }
 
@@ -68,6 +77,10 @@ export function observations(thisWeek: WeekTime, lastWeek: WeekTime, todayKey: s
       id: "busiest",
       title: `${weekdayLong(busiest.date)} is the busiest day`,
       body: `${amount(busiest.scheduled)} on the calendar, about ${amount(busiest.scheduled - avg)} more than a typical day this week.`,
+      bars: [
+        { label: weekdayLong(busiest.date).slice(0, 3), minutes: roughly(busiest.scheduled), tone: "warn" },
+        { label: "Typical", minutes: roughly(avg), tone: "muted" },
+      ],
     });
   }
   return out.slice(0, MAX);

@@ -1,6 +1,6 @@
 "use client";
 
-import { ChipRow } from "@/features/assistant/proactive-nudges";
+import { ChipRow, FactRow } from "@/features/assistant/proactive-nudges";
 import { markRecommendationsShown } from "@/features/proactive/actions";
 import { cn } from "@/lib/utils/cn";
 import { useEffect, useState } from "react";
@@ -55,7 +55,7 @@ export function SuggestionItems({ items, compact = false }: { items: Nudge[]; co
         >
           <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-3">Suggestion</p>
           <p className="mt-1 text-[13.5px] leading-relaxed text-ink text-pretty">{n.message}</p>
-          {!compact && n.facts.length > 0 && <p className="mt-1 text-[12px] tabular-nums text-ink-3">{n.facts.join(" · ")}</p>}
+          {!compact && <FactRow facts={n.facts} />}
           <ChipRow
             chips={n.chips}
             className="mt-2.5"

@@ -9,13 +9,13 @@ import {
   CalendarCheck,
   CalendarClock,
   Check,
+  ChevronDown,
   CircleAlert,
   Clock,
   ListChecks,
   Lock,
   Pencil,
   RefreshCw,
-  Repeat,
   RotateCcw,
   TriangleAlert,
   Undo2,
@@ -23,6 +23,8 @@ import {
 } from "lucide-react";
 import { useId, useRef, useState, useTransition } from "react";
 import type { PlanActionResult, PlanItem, PlanItemAction, PlanView } from "./plan-types";
+import { choosePlanVisual, isTimed, leftOutTag, stepGroup } from "./plan-visual";
+import { ChipLine, DayStrip, NextUp, PILL, StepRing, TONE, WeekStrips, numberTimed } from "./plan-visuals";
 
 /**
  * Approval card for a plan the assistant proposed. Nothing in the
@@ -77,6 +79,8 @@ const DONE_LABEL: Partial<Record<PlanItemAction, string>> = {
   remove_task: "Deleted",
   save_fact: "Saved",
 };
+
+const REMOVALS = new Set<PlanItemAction>(["remove_block", "remove_event", "skip_occurrence"]);
 
 const newRequestId = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -197,6 +201,16 @@ export function PlanCard({
 
   const calendarCount = items.filter((i) => i.group === "calendar").length;
   const allChosen = open.length > 0 && chosen.length === open.length;
+  const visual = choosePlanVisual(items);
+  const numberOf = numberTimed(items.filter((i) => i.group === "calendar"));
+  const timed = items.filter((i) => i.group === "calendar" && isTimed(i));
+  const timeZone = timed[0]?.timing?.timeZone ?? "UTC";
+  const group = visual === "steps" ? stepGroup(items) : null;
+  const live = timed.filter((i) => i.status !== "rejected" && i.status !== "undone" && !REMOVALS.has(i.action));
+  const liveMinutes = live.reduce((s, i) => s + (i.timing?.durationMinutes ?? 0), 0);
+  const sessions = live.filter((i) => i.action === "schedule_block" || i.action === "move_block").length;
+  const showDay = new Set(timed.map((i) => i.timing!.date)).size > 1;
+
   const header =
     plan.status === "applied"
       ? "All set"
@@ -205,8 +219,45 @@ export function PlanCard({
         : open.length === 0
           ? "Plan reviewed"
           : calendarCount > 0
-            ? `Proposed plan · ${open.length} to review`
-            : `Suggested changes · ${open.length} to review`;
+            ? visual === "day"
+              ? `Plan for ${dayLabel(timed[0].timing!.start, timeZone)}`
+              : "Proposed plan"
+            : "Suggested changes";
+
+  // Step path: the bigger task's open steps, with this plan's sessions slotted in.
+  const pathSteps = group?.steps ?? [];
+  const inPath = new Set(items.filter((i) => i.step && group && i.step.parentId === group.parentId).map((i) => i.id));
+  const pathLeft = new Map(plan.unscheduled.filter((u) => pathSteps.some((s) => s.title === u.title)).map((u) => [u.title, u]));
+  const placedSteps = pathSteps.filter((s) => items.some((i) => inPath.has(i.id) && i.step!.currentId === s.id && i.status !== "rejected" && i.status !== "undone")).length;
+  const nextUp = plan.unscheduled.filter((u) => !pathLeft.has(u.title));
+
+  const row = (item: PlanItem, marker?: React.ReactNode) =>
+    editing === item.id && item.timing ? (
+      <TimeEditor
+        item={item}
+        timeZone={item.timing.timeZone}
+        busy={busy}
+        onCancel={() => setEditing(null)}
+        onSave={(t) => run("edit", () => actions.edit({ planId: plan.id, itemId: item.id, ...t }), () => setEditing(null))}
+      />
+    ) : (
+      <PlanRow
+        item={item}
+        number={numberOf.get(item.id)}
+        marker={marker}
+        showDay={showDay}
+        selected={selected.has(item.id)}
+        locked={locked}
+        onToggle={() => toggle(item.id)}
+        onEdit={() => {
+          setFeedback(null);
+          setEditing(item.id);
+        }}
+        onReject={() => run("reject", () => actions.reject({ planId: plan.id, itemIds: [item.id] }))}
+        onAlternative={() => run("alternatives", () => actions.alternatives({ planId: plan.id, itemIds: [item.id] }))}
+        onUndo={() => run("undo", () => actions.undo({ planId: plan.id, itemId: item.id }))}
+      />
+    );
 
   return (
     <div className="space-y-2">
@@ -216,87 +267,128 @@ export function PlanCard({
       <section
         aria-label={calendarCount > 0 ? "Proposed schedule" : "Suggested changes"}
         className={cn(
-          "overflow-hidden rounded-xl border bg-surface shadow-card animate-fade-up transition-colors duration-300",
+          "overflow-hidden rounded-[18px] border bg-surface shadow-card animate-fade-up transition-colors duration-300",
           open.length > 0 && !locked ? "border-accent/35" : "border-border",
         )}
       >
-        <header className="flex items-start gap-3 border-b border-border px-3.5 py-3">
-          <span className="mt-0.5 grid size-6 shrink-0 place-items-center rounded-md bg-accent-soft text-accent">
-            {plan.status === "applied" ? (
-              <CalendarCheck className="size-3.5" />
-            ) : calendarCount > 0 ? (
-              <CalendarClock className="size-3.5" />
+        <header className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3.5 py-3">
+          {group ? (
+            <StepRing placed={placedSteps} total={pathSteps.length} />
+          ) : (
+            <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent">
+              {plan.status === "applied" ? (
+                <CalendarCheck className="size-3.5" />
+              ) : calendarCount > 0 ? (
+                <CalendarClock className="size-3.5" />
+              ) : (
+                <ListChecks className="size-3.5" />
+              )}
+            </span>
+          )}
+          <div className="min-w-[9rem] flex-1">
+            <p className="truncate text-[14px] font-semibold tracking-[-0.01em] text-ink">{group?.parentTitle || header}</p>
+            {group ? (
+              <p className="text-[12px] text-ink-3">
+                {placedSteps} of {pathSteps.length} steps in this plan
+              </p>
             ) : (
-              <ListChecks className="size-3.5" />
+              calendarCount === 0 && plan.summary && <p className="text-[12px] text-ink-3">{plan.summary}</p>
             )}
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="text-[13px] font-medium text-ink">{header}</p>
-            {plan.summary && <p className="mt-0.5 text-[12px] leading-relaxed text-ink-3">{plan.summary}</p>}
           </div>
+          {calendarCount > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {sessions > 1 && (
+                <span className={cn(PILL, TONE.accent)}>
+                  <CalendarClock aria-hidden className="size-3" /> {sessions} sessions
+                </span>
+              )}
+              {liveMinutes > 0 && (
+                <span className={cn(PILL, TONE.plain)}>
+                  <Clock aria-hidden className="size-3" /> {formatDuration(liveMinutes)}
+                </span>
+              )}
+              {plan.status === "applied" ? (
+                <span className={cn(PILL, TONE.ok)}>
+                  <Check aria-hidden className="size-3" /> Added
+                </span>
+              ) : (
+                plan.unscheduled.length === 0 &&
+                open.length > 0 &&
+                !items.some((i) => i.conflicts.length > 0) && (
+                  <span className={cn(PILL, TONE.ok)}>
+                    <Check aria-hidden className="size-3" /> All fit
+                  </span>
+                )
+              )}
+            </div>
+          )}
         </header>
 
         {plan.status === "stale" && open.length > 0 && (
-          <p className="flex items-start gap-1.5 border-b border-border px-3.5 py-2.5 text-[12px] text-ink-2">
-            <RotateCcw className="mt-px size-3.5 shrink-0 text-ink-3" />
-            Your calendar may have changed since this was suggested. Each time is checked again when you approve.
+          <p className="flex items-center gap-1.5 border-t border-border px-3.5 py-2 text-[12px] text-ink-2">
+            <RotateCcw className="size-3.5 shrink-0 text-ink-3" />
+            Your calendar may have changed. Times are re-checked when you approve.
           </p>
         )}
 
-        <ul className="divide-y divide-border">
-          {items.map((item) => (
-            <li key={item.id}>
-              {editing === item.id && item.timing ? (
-                <TimeEditor
-                  item={item}
-                  timeZone={item.timing.timeZone}
-                  busy={busy}
-                  onCancel={() => setEditing(null)}
-                  onSave={(t) =>
-                    run("edit", () => actions.edit({ planId: plan.id, itemId: item.id, ...t }), () => setEditing(null))
-                  }
-                />
-              ) : (
-                <PlanRow
-                  item={item}
-                  selected={selected.has(item.id)}
-                  locked={locked}
-                  onToggle={() => toggle(item.id)}
-                  onEdit={() => {
-                    setFeedback(null);
-                    setEditing(item.id);
-                  }}
-                  onReject={() => run("reject", () => actions.reject({ planId: plan.id, itemIds: [item.id] }))}
-                  onAlternative={() => run("alternatives", () => actions.alternatives({ planId: plan.id, itemIds: [item.id] }))}
-                  onUndo={() => run("undo", () => actions.undo({ planId: plan.id, itemId: item.id }))}
-                />
-              )}
-            </li>
+        {visual === "day" && (
+          <div className="px-3.5 pb-3 pt-3.5">
+            <DayStrip items={timed} numberOf={numberOf} timeZone={timeZone} />
+          </div>
+        )}
+        {visual === "week" && (
+          <div className="px-3.5 pb-3">
+            <WeekStrips items={timed} numberOf={numberOf} timeZone={timeZone} />
+          </div>
+        )}
+
+        {group ? (
+          <ul className="border-t border-border py-1">
+            {pathSteps.map((s, idx) => {
+              const mine = items.filter((i) => inPath.has(i.id) && i.step!.currentId === s.id);
+              const last = idx === pathSteps.length - 1;
+              if (mine.length) {
+                return mine.map((i) => (
+                  <li key={i.id} className={cn("relative", !last && "before:absolute before:bottom-0 before:left-[52px] before:top-8 before:w-0.5 before:bg-accent/60")}>
+                    {row(i, <PathDot n={idx + 1} on />)}
+                  </li>
+                ));
+              }
+              const left = pathLeft.get(s.title);
+              const tag = left ? leftOutTag(left) : null;
+              return (
+                <li key={s.id} className={cn("relative", !last && "before:absolute before:bottom-0 before:left-[52px] before:top-8 before:w-0.5 before:bg-border")}>
+                  <div className="flex items-center gap-3 px-3.5 py-2">
+                    <span className="w-4 shrink-0" />
+                    <PathDot n={idx + 1} />
+                    <span className="min-w-0 flex-1 truncate text-[13.5px] text-ink-2">{s.title}</span>
+                    {tag ? (
+                      <span title={left!.reason} className={cn(PILL, TONE[tag.tone])}>
+                        {tag.label}
+                      </span>
+                    ) : (
+                      <span className={cn(PILL, TONE.plain)}>Later</span>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        ) : null}
+
+        <ul className="divide-y divide-border border-t border-border">
+          {(group ? items.filter((i) => !inPath.has(i.id)) : items).map((item) => (
+            <li key={item.id}>{row(item)}</li>
           ))}
         </ul>
 
-        {plan.unscheduled.length > 0 && (
-          <div className="border-t border-border bg-[var(--cat-creative-soft)] px-3.5 py-2.5">
-            <p className="flex items-center gap-1.5 text-[12px] font-medium text-ink">
-              <TriangleAlert className="size-3.5 text-[var(--cat-creative)]" />{" "}
-              {plan.unscheduled.every((s) => s.minutes === 0) ? "Left for later" : <>Didn&apos;t fit</>}
-            </p>
-            <ul className="mt-1 space-y-0.5">
-              {plan.unscheduled.map((s) => (
-                <li key={s.title} className="text-[12px] leading-relaxed text-ink-2">
-                  <span className="font-medium text-ink">{s.title}</span>
-                  {s.minutes > 0 && <> ({formatDuration(s.minutes)} short)</>}: {s.reason}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
+        <NextUp entries={nextUp} />
 
         {feedback && <FeedbackLine feedback={feedback} />}
 
         {open.length > 0 && (
           <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-3.5 py-2.5">
-            <p className="text-[12px] text-ink-3">
+            <p className="text-[12px] tabular-nums text-ink-3">
               {chosen.length === 0
                 ? "Nothing selected"
                 : `${chosen.length} selected${chosenMinutes ? ` · ${formatDuration(chosenMinutes)}` : ""}`}
@@ -324,6 +416,20 @@ export function PlanCard({
         )}
       </section>
     </div>
+  );
+}
+
+function PathDot({ n, on = false }: { n: number; on?: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "relative z-[1] grid size-[22px] shrink-0 place-items-center rounded-full text-[11px] font-bold",
+        on ? "bg-accent text-on-accent" : "border-2 border-dashed border-border-strong bg-surface text-ink-3",
+      )}
+    >
+      {n}
+    </span>
   );
 }
 
@@ -361,6 +467,9 @@ function StatusTag({ item }: { item: PlanItem }) {
 
 function PlanRow({
   item,
+  number,
+  marker,
+  showDay,
   selected,
   locked,
   onToggle,
@@ -370,6 +479,9 @@ function PlanRow({
   onUndo,
 }: {
   item: PlanItem;
+  number?: number;
+  marker?: React.ReactNode;
+  showDay: boolean;
   selected: boolean;
   locked: boolean;
   onToggle: () => void;
@@ -381,135 +493,144 @@ function PlanRow({
   const open = isOpen(item);
   const t = item.timing;
   const checkboxId = useId();
+  const [expanded, setExpanded] = useState(false);
   const closed = item.status === "rejected" || item.status === "undone";
   const canRetime = open && item.editable && t && !t.allDay;
   const canAlternate = open && item.action === "schedule_block";
+  const details = [...item.tradeoffs, ...item.warnings];
+  const fallbackWhy = !item.chips.length && item.reason;
+  const hasMore = !!item.reason || details.length > 0 || (!locked && open);
+  const kindTag = item.action !== "schedule_block" ? ACTION_LABEL[item.action] : null;
 
   return (
-    <div className={cn("flex gap-3 px-3.5 py-3", closed && "opacity-55")}>
-      <div className="pt-0.5">
-        {open ? (
-          <input
-            id={checkboxId}
-            type="checkbox"
-            checked={selected}
-            disabled={locked}
-            onChange={onToggle}
-            className="size-4 cursor-pointer rounded accent-[var(--accent)] pointer-coarse:size-5"
-          />
-        ) : item.status === "applied" ? (
-          <Check aria-hidden className="size-4 text-success" />
-        ) : (
-          <X aria-hidden className="size-4 text-ink-3" />
-        )}
-      </div>
+    <div className={cn("px-3.5 py-2.5", closed && "opacity-55")}>
+      <div className="flex items-start gap-3">
+        <div className="pt-[3px]">
+          {open ? (
+            <input
+              id={checkboxId}
+              type="checkbox"
+              checked={selected}
+              disabled={locked}
+              onChange={onToggle}
+              className="size-4 cursor-pointer rounded accent-[var(--accent)] pointer-coarse:size-5"
+            />
+          ) : item.status === "applied" ? (
+            <Check aria-hidden className="size-4 text-success" />
+          ) : (
+            <X aria-hidden className="size-4 text-ink-3" />
+          )}
+        </div>
+        {marker ??
+          (number !== undefined && (
+            <span aria-hidden className="grid size-[22px] shrink-0 place-items-center rounded-md bg-accent-soft text-[11px] font-bold text-accent-ink">
+              {number}
+            </span>
+          ))}
 
-      <div className="min-w-0 flex-1">
-        <p className="flex items-center gap-1.5 text-[10.5px] font-medium uppercase tracking-wide text-ink-3">
-          {item.action === "create_event" && <Lock aria-label="Fixed" className="size-3" />}
-          {ACTION_LABEL[item.action]}
-        </p>
-        <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2">
-          <label
-            htmlFor={open ? checkboxId : undefined}
-            className={cn("text-sm font-medium text-ink", open && "cursor-pointer", closed && "line-through")}
-          >
-            {item.title}
-          </label>
-          <StatusTag item={item} />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5">
+            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+              <label
+                htmlFor={open ? checkboxId : undefined}
+                className={cn("text-[14px] font-semibold leading-snug text-ink", open && "cursor-pointer", closed && "line-through")}
+              >
+                {item.title}
+              </label>
+              {kindTag && (
+                <span className={cn(PILL, TONE.plain, "px-1.5 py-0 text-[10.5px] uppercase tracking-wide")}>
+                  {item.action === "create_event" && <Lock aria-label="Fixed" className="size-2.5" />}
+                  {kindTag}
+                </span>
+              )}
+              <StatusTag item={item} />
+            </div>
+            {t ? (
+              <div className="flex shrink-0 items-center gap-1.5 text-[12.5px] tabular-nums text-ink-2">
+                {item.previous && (
+                  <>
+                    <span className="text-ink-3 line-through">
+                      {timeRange(item.previous.start, item.previous.end, t.timeZone)}
+                    </span>
+                    <ArrowRight aria-hidden className="size-3 text-ink-3" />
+                  </>
+                )}
+                {(showDay || (item.previous && dayLabel(item.previous.start, t.timeZone) !== dayLabel(t.start, t.timeZone))) && (
+                  <span className="text-ink-3">{dayLabel(t.start, t.timeZone)}</span>
+                )}
+                <span>{t.allDay ? "All day" : timeRange(t.start, t.end, t.timeZone)}</span>
+                {!t.allDay && <span className={cn(PILL, TONE.plain)}>{formatDuration(t.durationMinutes)}</span>}
+              </div>
+            ) : (
+              item.detail && <span className="text-[12.5px] text-ink-3">{item.detail}</span>
+            )}
+          </div>
+
+          <ChipLine item={item} />
+          {item.error && (item.status === "conflict" || item.status === "failed") && (
+            <p className="mt-1 text-[12px] text-danger">{item.error}</p>
+          )}
+
+          {expanded && (
+            <div className="mt-2 space-y-1.5 rounded-xl bg-surface-2/70 px-3 py-2.5 text-[12px] leading-relaxed text-ink-2">
+              {item.reason && <p>{item.reason}</p>}
+              {details.map((text) => (
+                <p key={text} className="flex items-start gap-1.5">
+                  <TriangleAlert aria-hidden className="mt-0.5 size-3 shrink-0 text-[var(--cat-creative)]" />
+                  {text}
+                </p>
+              ))}
+              {item.conflicts.map((c) => (
+                <p key={c.title + c.start} className="flex items-start gap-1.5 text-danger">
+                  <CircleAlert aria-hidden className="mt-0.5 size-3 shrink-0" />
+                  Overlaps {c.title} ({timeRange(c.start, c.end, t?.timeZone ?? "UTC")}){c.kind === "fixed" && ". Fixed events never move."}
+                </p>
+              ))}
+              {!locked && open && (
+                <div className="-ml-2 flex flex-wrap items-center gap-0.5 pt-0.5">
+                  {canRetime && (
+                    <button type="button" onClick={onEdit} className={buttonClasses("ghost", "sm", "h-7 px-2 text-[12px] text-ink-2")}>
+                      <Pencil className="size-3" /> Edit time
+                    </button>
+                  )}
+                  {canAlternate && (
+                    <button type="button" onClick={onAlternative} className={buttonClasses("ghost", "sm", "h-7 px-2 text-[12px] text-ink-2")}>
+                      <RefreshCw className="size-3" /> Other times
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={onReject}
+                    aria-label={`Reject ${item.title}`}
+                    className={buttonClasses("ghost", "sm", "h-7 px-2 text-[12px] text-ink-2 hover:text-danger")}
+                  >
+                    <X className="size-3" /> Reject
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
-        {t ? (
-          <div className="mt-0.5 text-[13px] tabular-nums text-ink-2">
-            {item.previous && (
-              <p className="flex flex-wrap items-center gap-x-1.5 text-ink-3 line-through">
-                {dayLabel(item.previous.start, t.timeZone)}, {timeRange(item.previous.start, item.previous.end, t.timeZone)}
-              </p>
-            )}
-            <p className="flex flex-wrap items-center gap-x-1.5">
-              {item.previous && <ArrowRight aria-hidden className="size-3 text-ink-3" />}
-              <span>{dayLabel(t.start, t.timeZone)}</span>
-              <span aria-hidden className="text-ink-3">·</span>
-              <span>{t.allDay ? "All day" : timeRange(t.start, t.end, t.timeZone)}</span>
-              {!t.allDay && (
-                <>
-                  <span aria-hidden className="text-ink-3">·</span>
-                  <span className="inline-flex items-center gap-1 text-ink-3">
-                    <Clock aria-hidden className="size-3" />
-                    {formatDuration(t.durationMinutes)}
-                  </span>
-                </>
-              )}
-            </p>
-            {t.recurrence && (
-              <p className="mt-0.5 inline-flex items-center gap-1 text-[12px] text-ink-3">
-                <Repeat aria-hidden className="size-3" /> {t.recurrence}
-              </p>
-            )}
-          </div>
-        ) : (
-          item.detail && <p className="mt-0.5 text-[13px] text-ink-2">{item.detail}</p>
-        )}
-
-        {item.reason && (
-          <p className="mt-1 text-[12px] leading-relaxed text-ink-3">
-            <span className="sr-only">Why: </span>
-            {item.reason}
-          </p>
-        )}
-        {open &&
-          [...item.tradeoffs, ...item.warnings].map((text) => (
-            <p key={text} className="mt-1 flex items-start gap-1 text-[12px] leading-relaxed text-ink-2">
-              <TriangleAlert aria-hidden className="mt-0.5 size-3 shrink-0 text-[var(--cat-creative)]" />
-              <span>
-                <span className="sr-only">Trade-off: </span>
-                {text}
-              </span>
-            </p>
-          ))}
-        {open &&
-          item.conflicts.map((c) => (
-            <p key={c.title + c.start} className="mt-1 flex items-start gap-1 text-[12px] leading-relaxed text-danger">
-              <CircleAlert aria-hidden className="mt-0.5 size-3 shrink-0" />
-              <span>
-                Overlaps {c.title} ({dayLabel(c.start, t?.timeZone ?? "UTC")}, {timeRange(c.start, c.end, t?.timeZone ?? "UTC")})
-                {c.kind === "fixed" && ". Fixed events are never moved."}
-              </span>
-            </p>
-          ))}
-        {item.error && (item.status === "conflict" || item.status === "failed") && (
-          <p className="mt-1 text-[12px] text-danger">{item.error}</p>
-        )}
-
-        {!locked && (open || (item.status === "applied" && item.canUndo)) && (
-          <div className="-ml-2 mt-1.5 flex flex-wrap items-center gap-0.5">
-            {canRetime && (
-              <button type="button" onClick={onEdit} className={buttonClasses("ghost", "sm", "h-7 px-2 text-[12px] text-ink-3")}>
-                <Pencil className="size-3" /> Edit
-              </button>
-            )}
-            {canAlternate && (
-              <button type="button" onClick={onAlternative} className={buttonClasses("ghost", "sm", "h-7 px-2 text-[12px] text-ink-3")}>
-                <RefreshCw className="size-3" /> Other times
-              </button>
-            )}
-            {open && (
-              <button
-                type="button"
-                onClick={onReject}
-                aria-label={`Reject ${item.title}`}
-                className={buttonClasses("ghost", "sm", "h-7 px-2 text-[12px] text-ink-3 hover:text-danger")}
-              >
-                <X className="size-3" /> Reject
-              </button>
-            )}
-            {item.status === "applied" && item.canUndo && (
-              <button type="button" onClick={onUndo} className={buttonClasses("ghost", "sm", "h-7 px-2 text-[12px] text-ink-3")}>
-                <Undo2 className="size-3" /> Undo
-              </button>
-            )}
-          </div>
-        )}
+        <div className="flex shrink-0 items-center gap-0.5">
+          {!locked && item.status === "applied" && item.canUndo && (
+            <button type="button" onClick={onUndo} className={buttonClasses("ghost", "sm", "h-7 px-2 text-[12px] text-ink-3")}>
+              <Undo2 className="size-3" /> Undo
+            </button>
+          )}
+          {hasMore && (
+            <button
+              type="button"
+              onClick={() => setExpanded((e) => !e)}
+              aria-expanded={expanded}
+              aria-label={expanded ? `Hide details for ${item.title}` : `Details for ${item.title}`}
+              title={fallbackWhy ? "Why this time" : "Details"}
+              className="grid size-7 place-items-center rounded-lg text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink pointer-coarse:size-9"
+            >
+              <ChevronDown className={cn("size-4 transition-transform duration-200", expanded && "rotate-180")} />
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

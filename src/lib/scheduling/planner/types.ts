@@ -40,7 +40,8 @@ export type ScheduleBase = {
 
 export type PlanInput = ScheduleBase & { requests: readonly PlanRequest[] };
 
-export type Reason = { code: string; text: string };
+/** `short` is a 1–3 word chip label ("After Math", "10m buffer"); `text` is the full sentence. */
+export type Reason = { code: string; text: string; short?: string };
 
 export type ProposedSession = {
   id: string;
@@ -56,6 +57,10 @@ export type ProposedSession = {
   count: number;
   reasons: Reason[];
   tradeoffs: Reason[];
+  /** Busy blocks near this session on the same day, for the plan card's time strip. */
+  nearby?: { title: string; start: Iso; end: Iso }[];
+  /** The request's deadline, when it has one. */
+  deadline?: Iso | null;
   alternatives: IsoRange[];
   lifeAreaId: string | null;
   taskId: string | null;

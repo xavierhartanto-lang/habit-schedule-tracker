@@ -46,7 +46,20 @@ export type ItemDisplay = {
   warnings: string[];
   alternatives: { start: string; end: string }[];
   editable: boolean;
+  /** Short "why" labels for the card ("After Math", "10m buffer"). The full sentence stays in `reason`. */
+  chips?: ItemChip[];
+  /** Busy blocks around a session, drawn on the card's time strip. */
+  nearby?: { title: string; start: string; end: string }[];
+  /** Deadline of the work this session is for. */
+  deadline?: string | null;
+  /** Set when the session is for one step of a bigger task. */
+  step?: StepInfo | null;
 };
+
+export type ItemChip = { code: string; label: string; tone: "plain" | "warn" };
+
+/** A step of a bigger task, with its open siblings in order, so the card can draw the step path. */
+export type StepInfo = { parentId: string; parentTitle: string; currentId: string; steps: { id: string; title: string; dueAt: string | null }[] };
 
 export type NewPlanItem = {
   action: PlanItemAction;
@@ -215,6 +228,32 @@ function windowFor(
 }
 
 /** Why this slot. Session numbering lives in the title, so the engine's "spread" note is left out. */
+function sessionChips(s: ProposedSession): ItemChip[] {
+  const why = s.reasons
+    .filter((r) => r.code !== "spread" && r.short)
+    .slice(0, 3)
+    .map((r): ItemChip => ({ code: r.code, label: r.short!, tone: "plain" }));
+  const watch = s.tradeoffs.filter((r) => r.short).slice(0, 2).map((r): ItemChip => ({ code: r.code, label: r.short!, tone: "warn" }));
+  return [...watch, ...why].slice(0, 4);
+}
+
+/** Open steps of the parent task, in order, when the session belongs to a step. */
+export function stepInfo(task: Task | null | undefined, openTasks: readonly Task[]): StepInfo | null {
+  if (!task?.parentTaskId) return null;
+  const parent = openTasks.find((t) => t.id === task.parentTaskId);
+  const steps = openTasks
+    .filter((t) => t.parentTaskId === task.parentTaskId)
+    .sort((a, b) => (a.dueAt ?? "\uffff").localeCompare(b.dueAt ?? "\uffff") || (a.createdAt ?? "").localeCompare(b.createdAt ?? ""))
+    .slice(0, 8)
+    .map((t) => ({ id: t.id, title: t.title, dueAt: t.dueAt }));
+  if (steps.length < 2) return null;
+  return { parentId: task.parentTaskId, parentTitle: parent?.title ?? "", currentId: task.id, steps };
+}
+
+function sessionVisuals(s: ProposedSession, step: StepInfo | null): Pick<ItemDisplay, "chips" | "nearby" | "deadline" | "step"> {
+  return { chips: sessionChips(s), nearby: s.nearby ?? [], deadline: s.deadline ?? null, step };
+}
+
 function sessionReason(s: ProposedSession): string {
   return s.reasons.filter((r) => r.code !== "spread").map((r) => r.text).join(" ").trim() || "Free time inside your working hours.";
 }
@@ -239,6 +278,7 @@ function blockItem(
   request: PlanRequest,
   timeZone: string,
   sourceMessageId: string | null,
+  step: StepInfo | null = null,
 ): NewPlanItem {
   const title = numbering && numbering.of > 1 ? `${s.title} (${numbering.n} of ${numbering.of})` : s.title;
   return {
@@ -263,6 +303,7 @@ function blockItem(
       tradeoffs: s.tradeoffs.map((t) => t.text),
       alternatives: s.alternatives,
       editable: true,
+      ...sessionVisuals(s, step),
     },
   };
 }
@@ -1075,10 +1116,12 @@ export function buildPlan(input: BuildInput): BuiltPlan {
             tradeoffs: s.tradeoffs.map((t) => t.text),
             alternatives: s.alternatives,
             editable: true,
+            ...sessionVisuals(s, null),
           },
         });
       } else {
-        ctx.items.push(blockItem(s, numbers.get(s.id), request, tz, input.sourceMessageId));
+        const linked = request.taskId ? tasksById.get(request.taskId) : undefined;
+        ctx.items.push(blockItem(s, numbers.get(s.id), request, tz, input.sourceMessageId, stepInfo(linked, input.openTasks)));
         if (newTaskRequests.has(s.requestId)) ctx.items[ctx.items.length - 1].payload.forNewTask = true;
       }
       ctx.items[ctx.items.length - 1].actionId = requestAction.get(s.requestId) ?? null;
