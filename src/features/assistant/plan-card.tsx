@@ -89,6 +89,9 @@ const newRequestId = () =>
 
 export const isOpen = (i: PlanItem) => i.status === "pending" || i.status === "conflict" || i.status === "failed";
 
+/** Ticked by default. Failed items stay on the card unticked: approving them again would fail the same way. */
+export const preselected = (i: PlanItem) => isOpen(i) && i.status !== "failed" && !i.autoApplied;
+
 function dayLabel(iso: string, tz: string) {
   return formatDateKey(dateKeyInZone(new Date(iso), tz), { weekday: "short", month: "short", day: "numeric" });
 }
@@ -99,7 +102,7 @@ function timeRange(start: string, end: string, tz: string) {
 
 type Feedback = { tone: "ok" | "warn" | "error"; text: string };
 
-function describeResult(result: Extract<PlanActionResult, { ok: true }>, verb: string): Feedback {
+export function describeResult(result: Extract<PlanActionResult, { ok: true }>, verb: string): Feedback {
   const count = (o: string[]) => result.results.filter((r) => o.includes(r.outcome)).length;
   const done = count(["applied", "already_applied"]);
   const blocked = count(["conflict", "stale"]);
@@ -109,6 +112,7 @@ function describeResult(result: Extract<PlanActionResult, { ok: true }>, verb: s
   if (verb === "edit") return { tone: "ok", text: "Time updated. Approve it when it looks right." };
   if (verb === "alternatives")
     return { tone: "ok", text: "Found other times. Your calendar wasn't changed." };
+  if (!result.results.length) return { tone: "warn", text: "Nothing changed." };
   if (blocked || failed) {
     const parts = [
       done ? `Approved ${done}.` : "",
@@ -117,7 +121,7 @@ function describeResult(result: Extract<PlanActionResult, { ok: true }>, verb: s
     ];
     return { tone: "warn", text: parts.filter(Boolean).join(" ") };
   }
-  return { tone: "ok", text: done === 1 ? "Approved. It's on your calendar." : `Approved ${done}. Your calendar is updated.` };
+  return { tone: "ok", text: done === 1 ? "Approved." : `Approved ${done}.` };
 }
 
 export function PlanCard({
@@ -131,7 +135,7 @@ export function PlanCard({
 }) {
   const [plan, setPlan] = useState(initialPlan);
   const [selected, setSelected] = useState<Set<string>>(
-    () => new Set(initialPlan.items.filter((i) => isOpen(i) && !i.autoApplied).map((i) => i.id)),
+    () => new Set(initialPlan.items.filter(preselected).map((i) => i.id)),
   );
   const [editing, setEditing] = useState<string | null>(null);
   const [busy, start] = useTransition();
@@ -160,7 +164,7 @@ export function PlanCard({
       if (result.plan) {
         const fresh = result.plan;
         setPlan(fresh);
-        setSelected((s) => new Set(fresh.items.filter((i) => isOpen(i) && !i.autoApplied && (s.has(i.id) || verb !== "approve")).map((i) => i.id)));
+        setSelected((s) => new Set(fresh.items.filter((i) => preselected(i) && (s.has(i.id) || verb !== "approve")).map((i) => i.id)));
       }
       if (!result.ok) {
         setFeedback({ tone: "error", text: result.error });
@@ -175,10 +179,10 @@ export function PlanCard({
     if (!ids.length) return;
     const requestId = attempt.current ?? newRequestId();
     attempt.current = requestId;
-    const all = ids.length === open.length;
+    // Always name the items: "all" on the server means every pending item, which skips failed ones.
     run(
       "approve",
-      () => actions.approve({ planId: plan.id, itemIds: all ? undefined : ids, requestId }),
+      () => actions.approve({ planId: plan.id, itemIds: ids, requestId }),
       () => {
         attempt.current = null;
       },

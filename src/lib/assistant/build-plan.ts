@@ -1159,10 +1159,22 @@ export function buildPlan(input: BuildInput): BuiltPlan {
   const hasBlocks = ctx.items.some((i) => i.action === "schedule_block");
   return {
     kind: ctx.adaptive ? "reschedule" : hasBlocks || ctx.requests.length ? "schedule" : "actions",
-    items: ctx.items,
+    items: withoutDuplicates(ctx.items),
     summary,
     unscheduled: ctx.unscheduled,
     notes: ctx.notes,
     context: { requests: ctx.requests, window },
   };
+}
+
+/** The same change to the same record only once ("Delete task: Outline the Essay" four times). */
+function withoutDuplicates<T extends { action: string; targetId: string | null; payload: unknown }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  return items.filter((i) => {
+    if (!i.targetId) return true;
+    const key = `${i.action}:${i.targetId}:${JSON.stringify(i.payload)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
