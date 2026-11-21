@@ -144,7 +144,7 @@ function overdue(t: TaskLoad, a: Analysis): Candidate | null {
     priority,
     title: `${t.task.title} is overdue`,
     reason: `It was due ${when} and is still open.`,
-    message: `${quote(t.task.title)} was due ${when}. Want me to find time, or is it done?`,
+    message: `${quote(t.task.title)} is overdue. It was due ${when}. I'd find time to finish it, unless it's already done.`,
     facts: factsFor(t),
     actions,
     taskId: t.task.id,
@@ -167,8 +167,8 @@ function atRisk(t: TaskLoad, a: Analysis): Candidate | null {
     reason: `It needs ${about(t.unscheduled)} more, but only ${about(free)} of realistic free time is left before it's ${when}.`,
     message:
       free >= 15
-        ? `${quote(t.task.title)} is ${when}. It needs ${about(t.unscheduled)}, you've got ${about(free)}. Schedule what fits?`
-        : `${quote(t.task.title)} is ${when} and needs ${about(t.unscheduled)}. There's no free time left before then. Move the due date, or make room?`,
+        ? `${quote(t.task.title)} is ${when}. It needs ${about(t.unscheduled)}, you've got ${about(free)}. I'd lock in what fits now.`
+        : `${quote(t.task.title)} is ${when} and needs ${about(t.unscheduled)}. There's no free time left before then. I'd move the due date.`,
     facts: factsFor(t, [`About ${duration(roughly(free))} free before then`]),
     actions: [
       ...(free >= 15 ? [scheduleWork(t, t.unscheduled, "Schedule what fits")] : []),
@@ -202,7 +202,7 @@ function postponed(t: TaskLoad, a: Analysis): Candidate | null {
     priority: taskPriority(t, "medium"),
     title: `${t.task.title} keeps getting pushed back`,
     reason: `It has been postponed ${plural(n, "time")}.`,
-    message: `You've pushed ${quote(t.task.title)} back ${plural(n, "time")}. Smaller sessions, or is it less urgent than it looks?`,
+    message: `You've pushed ${quote(t.task.title)} back ${plural(n, "time")}. ${t.remaining && t.remaining >= minSplit ? "I'd break it into short sessions." : t.remaining ? "I'd give it a fixed slot." : "I'd break it into smaller steps."} Or it's less urgent than it looks.`,
     facts: factsFor(t, [`Postponed ${plural(n, "time")}`]),
     actions,
     taskId: t.task.id,
@@ -672,7 +672,7 @@ export function deadlineClusters(a: Analysis): Candidate[] {
       priority: days <= 2 ? "high" : "medium",
       title: `${plural(group.length, "deadline")} ${range}`,
       reason: `They need ${about(need)} of work, and those days only have ${about(during)} free.`,
-      message: `You have ${plural(group.length, "deadline")} ${range}, about ${duration(roughly(need))} of work, with ${about(during)} free then. Start earlier?`,
+      message: `${plural(group.length, "deadline")} land ${range}: about ${duration(roughly(need))} of work, ${about(during)} free then. I'd start before ${from}.`,
       facts: [
         group.map((t) => t.task.title).slice(0, 4).join(", "),
         `About ${duration(roughly(need))} of work left`,

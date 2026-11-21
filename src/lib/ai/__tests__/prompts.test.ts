@@ -84,3 +84,26 @@ describe("toApiTurns", () => {
     ]);
   });
 });
+
+describe("chief of staff persona", () => {
+  it("bans greetings and filler, and states command and concur", () => {
+    const [stable] = buildSystemPrompt("assistant", ctx, { actions: null });
+    expect(stable).toContain("chief of staff");
+    expect(stable).toContain("Never open with a greeting");
+    expect(stable).toContain('"I can help with that"');
+    expect(stable).toContain("Command and concur");
+  });
+
+  it("shows one-off calendar items apart from what Whitespace knows", () => {
+    const [, user] = buildSystemPrompt("assistant", { ...ctx, upcoming: ["Dentist: Thu, Nov 19 4:00 PM-5:00 PM"] });
+    const knows = user.slice(user.indexOf("<what_whitespace_knows>"), user.indexOf("</what_whitespace_knows>"));
+    expect(knows).not.toContain("Dentist");
+    expect(user).toContain("<upcoming_calendar>");
+    expect(user).toContain("- Dentist: Thu, Nov 19");
+  });
+
+  it("tells the extractor to leave to-dos out of memory", async () => {
+    const { EXTRACTION_SYSTEM_PROMPT } = await import("../prompts");
+    expect(EXTRACTION_SYSTEM_PROMPT).toContain("Never extract to-dos");
+  });
+});

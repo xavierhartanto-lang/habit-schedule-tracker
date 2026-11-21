@@ -15,8 +15,8 @@ export function fallbackReply(input: { plan: PlanView | null; failed: string | n
   if (pending.length) {
     lines.push(
       pending.length === 1
-        ? "Here's what I'd suggest. Nothing changes until you approve it below."
-        : `Here are ${pending.length} changes I'd suggest. Nothing changes until you approve them below.`,
+        ? "Here's my call. Nothing changes until you approve it below."
+        : `Here are ${pending.length} changes, ready for your call. Nothing moves until you approve them below.`,
     );
   } else {
     lines.push("I couldn't find a change that fits right now, so nothing is waiting for approval.");

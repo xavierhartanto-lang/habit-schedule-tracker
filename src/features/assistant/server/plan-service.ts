@@ -52,7 +52,7 @@ import { getSchedulingPreferences, saveSchedulingPreferences } from "@/lib/db/sc
 import type { Commitment } from "@/lib/domain/types";
 import { checkPlacements, planSchedule, type PlanRequest, type SchedulingPreferences } from "@/lib/scheduling/planner";
 import { addDaysToKey, dateKeyInZone, startOfDayInZone, timeKeyInZone } from "@/lib/scheduling/zoned";
-import type { Clarify, PlanItemOutcome, PlanView } from "../plan-types";
+import { CALENDAR_ACTIONS, type Clarify, type PlanItemOutcome, type PlanView } from "../plan-types";
 
 /**
  * Phase 4 orchestration: message -> intents -> follow-up or plan -> approval.
@@ -437,7 +437,9 @@ export async function planTurn(input: {
           touchedPlanIds.add(a.planId!);
           await rejectItems(input.userId, a.planId!, a.itemIds).catch((error) => console.error("[plan] could not close failed card", error));
         }
-        const auto = plan.items.filter((i, idx) => built.items[idx]?.autoApply).map((i) => i.id);
+        // Command and concur: only records the user directly asked for apply
+        // right away. Calendar changes always wait for Approve, whatever the plan says.
+        const auto = plan.items.filter((i, idx) => built.items[idx]?.autoApply && !CALENDAR_ACTIONS.has(i.action)).map((i) => i.id);
         if (auto.length) {
           const { results } = await approveItems(input.userId, plan.id, { itemIds: auto, requestId: randomUUID(), now });
           await markAutoApplied(

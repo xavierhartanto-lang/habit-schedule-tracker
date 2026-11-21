@@ -1,4 +1,4 @@
-import { normalizeText } from "@/lib/ai/extraction";
+import { looksLikeTaskTitle, normalizeText } from "@/lib/ai/extraction";
 import type { Clarify, ClarifyField } from "@/features/assistant/plan-types";
 import type { Commitment, ContextAttributes, Goal, Habit, HabitCadence, LifeAreaRecord, Task, Weekday } from "@/lib/domain/types";
 import { WEEKDAYS } from "@/lib/domain/types";
@@ -797,6 +797,24 @@ export function assessIntent(intent: Intent, world: World): Assessment {
 
     case "save_fact": {
       if (!intent.title || !intent.factCategory) return { status: "skip", intent, reason: "Incomplete fact." };
+      // Memory holds the structure of the user's life. A to-do that slipped in
+      // as a "fact" ("History Essay Outline") goes to Tasks instead.
+      if (intent.factCategory !== "routine" && intent.factCategory !== "working_time" && intent.factCategory !== "preference" && looksLikeTaskTitle(intent.title)) {
+        return {
+          status: "ready",
+          intent,
+          spec: {
+            kind: "task_create",
+            title: intent.title,
+            lifeAreaId: lifeAreaId(world, intent.area),
+            dueDate: null,
+            dueTime: null,
+            estimatedMinutes: null,
+            priority: "medium",
+            description: intent.details,
+          },
+        };
+      }
       const attributes: ContextAttributes = {};
       if (intent.days.length) attributes.days = intent.days;
       if (intent.startTime) attributes.startTime = intent.startTime;

@@ -187,6 +187,21 @@ describe("auto-apply rules", () => {
     ]);
     expect(plan.kind).toBe("actions");
   });
+
+  it("command and concur: explicit calendar requests still wait for approval", () => {
+    const ev = intent({ type: "create_event", title: "Robotics", evidence: "add robotics", explicit: true, recurrence: "weekly", days: ["th"], start_time: "18:00", duration_minutes: 60 });
+    const plan = buildPlan(input({ specs: [specOf(ev)] }));
+    expect(plan.items.length).toBeGreaterThan(0);
+    expect(plan.items.every((i) => i.autoApply === false)).toBe(true);
+  });
+
+  it("a to-do that arrives as a fact goes to Tasks, not memory", () => {
+    const fact = intent({ type: "save_fact", title: "History Essay Outline", evidence: "my history essay outline", fact_category: "activity" });
+    const plan = buildPlan(input({ specs: [specOf(fact)] }));
+    expect(plan.items.map((i) => i.action)).toEqual(["create_task"]);
+    const routine = intent({ type: "save_fact", title: "Homework right after school", evidence: "homework right after school", fact_category: "working_time" });
+    expect(buildPlan(input({ specs: [specOf(routine)] })).items.map((i) => i.action)).toEqual(["save_fact"]);
+  });
 });
 
 describe("adaptive rescheduling", () => {

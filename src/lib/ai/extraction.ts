@@ -151,7 +151,8 @@ export type DropReason =
   | "ungrounded" // evidence is not in the user's words
   | "invalid" // malformed field (time, date, empty title)
   | "duplicate" // already known, or repeated in this batch
-  | "limit"; // over MAX_ITEMS
+  | "limit" // over MAX_ITEMS
+  | "task"; // a to-do or one-off: it belongs in Tasks, not in memory
 
 export type ExtractionResult = {
   items: ExtractedItem[];
@@ -309,6 +310,11 @@ export function validateExtraction(
     }
     const item = parsed.item;
 
+    if (isTaskLike(item)) {
+      result.dropped.push({ title: label, reason: "task" });
+      continue;
+    }
+
     if (item.supersedes && !knownByTitle.has(normalizeText(item.supersedes))) {
       item.supersedes = null;
     }
@@ -336,6 +342,33 @@ export function validateExtraction(
   }
 
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Memory hygiene: to-dos never become facts
+// ---------------------------------------------------------------------------
+
+/**
+ * Words that mark a to-do or a single piece of school work. Matching is on
+ * whole words of the title, so "AP Chemistry" or "Debate" never match.
+ */
+const TASK_WORDS =
+  /\b(homework|hw|assignments?|worksheets?|essays?|outline|drafts?|revis(e|ion|ions)|lab reports?|problem sets?|psets?|reading responses?|study guides?|flashcards|submit|turn in|due|errands?|to-?dos?|chapter \d+|unit \d+ (test|quiz)|study for)\b/i;
+
+/**
+ * True when an extracted item is really a task or one-off, not a structural
+ * fact about the user's life. Routines, working times and preferences keep
+ * their wording ("Homework right after school" is a working time), so only
+ * commitments, activities, interests and goals are checked.
+ */
+export function isTaskLike(item: ExtractedItem): boolean {
+  if (item.category === "routine" || item.category === "working_time" || item.category === "preference") return false;
+  return looksLikeTaskTitle(item.title);
+}
+
+/** True when a title names a to-do or a piece of school work ("History Essay Outline"). */
+export function looksLikeTaskTitle(title: string): boolean {
+  return TASK_WORDS.test(title);
 }
 
 // ---------------------------------------------------------------------------

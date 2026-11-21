@@ -57,7 +57,7 @@ describe("suggestion cards: before / after", () => {
     const tasks = [task({ title: "Research paper", dueAt: due("2026-11-20"), estimatedMinutes: 600, priority: "high" })];
     const risk = detect(input({ tasks })).find((c) => c.kind === "deadline_at_risk")!;
     // Before: "“Research paper” is due Friday and needs about 10 h more, but you only have about 4 h free before then. Want me to schedule what fits so you can start now?"
-    expect(risk.message).toMatch(/^“Research paper” is due Friday\. It needs about 10 h, you've got about \d+ h( \d+ min)?\. Schedule what fits\?$/);
+    expect(risk.message).toMatch(/^“Research paper” is due Friday\. It needs about 10 h, you've got about \d+ h( \d+ min)?\. I'd lock in what fits now\.$/);
     expectCinematic(risk.message);
   });
 
@@ -65,7 +65,7 @@ describe("suggestion cards: before / after", () => {
     const t = task({ title: "Lab report", dueAt: due("2026-11-17"), estimatedMinutes: 60 });
     const [c] = detect(input({ tasks: [t] }));
     // Before: "“Lab report” was due yesterday. Want me to find time to finish it, or is it already done?"
-    expect(c.message).toBe("“Lab report” was due yesterday. Want me to find time, or is it done?");
+    expect(c.message).toBe("“Lab report” is overdue. It was due yesterday. I'd find time to finish it, unless it's already done.");
   });
 
   it("start early names the real session count and the day it would pile onto", () => {
