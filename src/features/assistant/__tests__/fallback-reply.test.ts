@@ -10,7 +10,7 @@ const plan = (items: PlanItem[], unscheduled: PlanView["unscheduled"] = []): Pla
 describe("fallbackReply", () => {
   it("points to the approval card", () => {
     expect(fallbackReply({ plan: plan([item("pending")]), failed: null })).toBe(
-      "Here's what I'd suggest. Nothing changes until you approve it below.",
+      "Here's my call. Nothing changes until you approve it below.",
     );
     expect(fallbackReply({ plan: plan([item("pending"), item("conflict")]), failed: null })).toMatch(/^Here are 2 changes/);
   });

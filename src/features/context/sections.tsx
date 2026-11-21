@@ -258,13 +258,6 @@ function CommitmentForm({
         <div className="space-y-4 rounded-lg border border-border bg-surface p-3 sm:p-3.5">
           <DayPicker label="Repeats on" value={draft.days} onChange={(days) => set("days", days)} />
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            {draft.days.length === 0 && (
-              <div className="col-span-2 sm:col-span-1">
-                <Field label="Or one date">
-                  <Input type="date" value={draft.date} onChange={(e) => set("date", e.target.value)} />
-                </Field>
-              </div>
-            )}
             <Field label="Starts">
               <Input type="time" className="px-2.5" required value={draft.startTime} onChange={(e) => set("startTime", e.target.value)} />
             </Field>
@@ -272,7 +265,9 @@ function CommitmentForm({
               <Input type="time" className="px-2.5" required value={draft.endTime} onChange={(e) => set("endTime", e.target.value)} />
             </Field>
           </div>
-          <p className="text-[12px] text-ink-3">Times are in {timeZone.replaceAll("_", " ")}.</p>
+          <p className="text-[12px] text-ink-3">
+            Times are in {timeZone.replaceAll("_", " ")}. One-time events belong on your Calendar.
+          </p>
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-3 rounded-lg border border-border bg-surface p-3 sm:p-3.5">
@@ -283,9 +278,6 @@ function CommitmentForm({
               value={draft.estimatedMinutes}
               onChange={(e) => set("estimatedMinutes", e.target.value)}
             />
-          </Field>
-          <Field label="Due">
-            <Input type="date" value={draft.dueDate} onChange={(e) => set("dueDate", e.target.value)} />
           </Field>
         </div>
       )}
@@ -318,7 +310,7 @@ export function CommitmentSection({
     <EditableList
       anchor="commitments"
       title="Commitments"
-      description="School, practice, work and anything else with a set time."
+      description="Classes, practice, shifts and other things that repeat every week. To-dos live in Tasks."
       icon={CalendarClock}
       items={sorted}
       disabled={disabled}

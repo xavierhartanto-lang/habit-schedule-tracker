@@ -188,7 +188,7 @@ describe("deadline clusters", () => {
     const out = deadlineClusters(analyze(data));
     expect(out).toHaveLength(1);
     expect(out[0]).toMatchObject({ kind: "deadline_cluster", date: monday, dedupeKey: `deadline_cluster:${monday}:${tuesday}` });
-    expect(out[0].message).toMatch(/^You have 3 deadlines between Monday and Tuesday, about .+ of work, with about .+ free then\. Start earlier\?$/);
+    expect(out[0].message).toMatch(/^3 deadlines land between Monday and Tuesday: about .+ of work, about .+ free then\. I'd start before Monday\.$/);
     expect(out[0].facts[0]).toBe("Bio essay, Chem lab, History notes");
 
     // "Start earlier" plans all three together; the planner puts work before Monday.

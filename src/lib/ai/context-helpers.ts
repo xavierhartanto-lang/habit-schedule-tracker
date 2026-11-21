@@ -1,5 +1,6 @@
 import type { Commitment, ContextCategory, ContextItem, Goal } from "@/lib/domain/types";
 import { CONTEXT_CATEGORIES } from "@/lib/domain/types";
+import { isPillarCommitment } from "@/lib/domain/commitments";
 import type { OnboardingTopic, UserContext } from "./context";
 
 /**
@@ -61,9 +62,11 @@ export function computeCoverage(input: {
   goals: Goal[];
 }): Record<OnboardingTopic, boolean> {
   const { commitments, facts, goals } = input;
-  const all = [...commitments.fixed, ...commitments.flexible];
+  // One-off events and task sessions don't tell us anything about the user's week.
+  const fixed = commitments.fixed.filter(isPillarCommitment);
+  const all = [...fixed, ...commitments.flexible.filter(isPillarCommitment)];
   return {
-    fixed_commitments: commitments.fixed.length > 0,
+    fixed_commitments: fixed.length > 0,
     activities: facts.activity.length > 0 || all.some((c) => c.area !== null && ACTIVITY_AREAS.has(c.area)),
     interests: facts.interest.length > 0,
     goals: goals.length > 0,

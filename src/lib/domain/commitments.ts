@@ -26,6 +26,28 @@ export type CommitmentInput = {
 
 const RRULE_RE = /^FREQ=(DAILY|WEEKLY|MONTHLY|YEARLY)(;[A-Z]+=[A-Z0-9,+\-:]+)*$/;
 
+/**
+ * True when a row in `commitments` is a structural pillar of the user's life
+ * (a class, practice, shift or standing weekly time budget) and belongs in
+ * "What Whitespace knows". The same table also holds one-off calendar events,
+ * Whitespace work sessions for tasks (essay steps and the like) and items the
+ * AI scheduled. Those stay on the calendar and in Tasks, never in the dossier.
+ */
+export function isPillarCommitment(c: {
+  kind: CommitmentKind;
+  startsAt?: string | null;
+  dueAt?: string | null;
+  recurrenceRule?: string | null;
+  taskId?: string | null;
+  planItemId?: string | null;
+}): boolean {
+  if (c.taskId) return false; // a work session for a task
+  if (c.recurrenceRule) return true; // repeats: class, practice, routine
+  if (c.planItemId) return false; // a one-off the assistant scheduled
+  if (c.kind === "flexible") return !c.dueAt && !c.startsAt; // standing time budget ("5 h of SAT prep a week")
+  return false; // a one-off calendar event
+}
+
 export function isRecurrenceRule(value: unknown): value is string {
   return typeof value === "string" && value.length <= 300 && RRULE_RE.test(value);
 }

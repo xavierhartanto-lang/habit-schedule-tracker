@@ -5,6 +5,7 @@ import { buildUserContext } from "@/lib/ai/context-builder";
 import { localDateKey } from "@/lib/ai/context-helpers";
 import type { KnownFactRef } from "@/lib/ai/extraction";
 import { onboardingCoverage, type KnownFact, type OnboardingCoverage, type PromptContext } from "@/lib/ai/prompts";
+import { isPillarCommitment } from "@/lib/domain/commitments";
 import { dueParts } from "@/lib/domain/tasks";
 import type { Commitment, ContextItem, Task } from "@/lib/domain/types";
 
@@ -63,10 +64,37 @@ function itemDetail(item: ContextItem): string | null {
   return parts.length ? parts.join(" ") : null;
 }
 
+/**
+ * One-off calendar items in the planning window (events, Whitespace sessions,
+ * AI-scheduled items). The assistant sees them as the upcoming calendar, not
+ * as facts about the user.
+ */
+export function toUpcoming(ctx: UserContext): { title: string; line: string }[] {
+  const tz = ctx.profile.timezone;
+  return [...ctx.commitments.fixed, ...ctx.commitments.flexible]
+    .filter((c) => !isPillarCommitment(c) && c.startsAt)
+    .sort((a, b) => Date.parse(a.startsAt!) - Date.parse(b.startsAt!))
+    .slice(0, 40)
+    .map((c) => {
+      const end = c.endsAt ? `-${localTime(c.endsAt, tz)}` : "";
+      const tag = c.taskId ? " (work session)" : "";
+      return { title: c.title, line: `${c.title}${tag}: ${localDate(c.startsAt!, tz)} ${localTime(c.startsAt!, tz)}${end}` };
+    });
+}
+
+function localDate(iso: string, timeZone: string): string {
+  try {
+    return new Intl.DateTimeFormat("en-US", { timeZone, weekday: "short", month: "short", day: "numeric" }).format(new Date(iso));
+  } catch {
+    return iso.slice(0, 10);
+  }
+}
+
+/** What Whitespace knows: structural pillars only (see isPillarCommitment). */
 export function toKnownFacts(ctx: UserContext): KnownFact[] {
   const tz = ctx.profile.timezone;
   const facts: KnownFact[] = [];
-  for (const c of [...ctx.commitments.fixed, ...ctx.commitments.flexible]) {
+  for (const c of [...ctx.commitments.fixed, ...ctx.commitments.flexible].filter(isPillarCommitment)) {
     facts.push({ category: "commitment", title: c.title, area: c.area ?? "personal", detail: commitmentDetail(c, tz) });
   }
   for (const g of ctx.goals) {
@@ -106,6 +134,7 @@ export async function loadChatContext(
   const now = options.now ?? new Date();
   const ctx = await buildUserContext(userId, { excludeConversationId: options.conversationId, now });
   const facts = toKnownFacts(ctx);
+  const upcoming = toUpcoming(ctx);
   const today = todayIn(ctx.profile.timezone, now);
 
   return {
@@ -113,11 +142,16 @@ export async function loadChatContext(
       profile: ctx.profile,
       preferences: { dayStartTime: ctx.preferences.dayStartTime, dayEndTime: ctx.preferences.dayEndTime },
       facts,
+      upcoming: upcoming.map((u) => u.line),
       openTasks: ctx.openTasks.slice(0, 40).map((t) => taskLine(t, ctx.profile.timezone)),
       personalizationEnabled: ctx.permissions.personalization,
       today,
     },
-    known: facts.map((f) => ({ category: f.category, title: f.title })),
+    // Upcoming one-offs still count for de-duplication, so chat never re-proposes them.
+    known: [
+      ...facts.map((f) => ({ category: f.category, title: f.title })),
+      ...upcoming.map((u) => ({ category: "commitment" as const, title: u.title })),
+    ],
     coverage: onboardingCoverage(facts),
     timezone: ctx.profile.timezone,
     today,

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   isGrounded,
+  looksLikeTaskTitle,
   isValidIsoDate,
   scheduleToRRule,
   validateExtraction,
@@ -193,5 +194,33 @@ describe("scheduleToRRule", () => {
     );
     expect(scheduleToRRule({ days: [], startTime: "15:30", endTime: null })).toBeNull();
     expect(scheduleToRRule(null)).toBeNull();
+  });
+});
+
+describe("memory hygiene: to-dos never become facts", () => {
+  const text = "I have a history essay outline due Friday, chem homework, and I study for my bio test with flashcards. Debate practice on Tuesdays and Thursdays from 3:30 to 5. I do homework right after school.";
+  it("drops task-like items but keeps pillars and working times", () => {
+    const result = validateExtraction(
+      wire([
+        wireItem({ title: "History Essay Outline", evidence: "history essay outline due Friday", commitment_kind: "flexible", schedule: null }),
+        wireItem({ category: "goal", title: "Chemistry Homework", evidence: "chem homework", schedule: null, commitment_kind: null, goal_horizon: "short_term" }),
+        wireItem({ category: "activity", title: "Study for Bio Test", evidence: "study for my bio test", schedule: null, commitment_kind: null }),
+        wireItem({ evidence: "Debate practice on Tuesdays and Thursdays from 3:30 to 5" }),
+        wireItem({ category: "working_time", title: "Homework right after school", evidence: "I do homework right after school", schedule: null, commitment_kind: null }),
+      ]),
+      { userText: text, known: [] },
+    );
+    expect(result.items.map((i) => i.title)).toEqual(["Debate practice", "Homework right after school"]);
+    expect(result.dropped.filter((d) => d.reason === "task").map((d) => d.title)).toEqual([
+      "History Essay Outline",
+      "Chemistry Homework",
+      "Study for Bio Test",
+    ]);
+  });
+
+  it("never flags real classes or activities", () => {
+    for (const title of ["AP Chemistry", "Debate", "Model UN", "Varsity Tennis", "Math Tutoring", "SAT Prep", "Robotics Club"]) {
+      expect(looksLikeTaskTitle(title)).toBe(false);
+    }
   });
 });

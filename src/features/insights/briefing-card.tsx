@@ -89,7 +89,7 @@ export function BriefingCard(p: BriefingCardProps) {
       ) : (
         <>
           {p.days.length > 0 && <WeekStrip days={p.days} />}
-          <BriefingVisuals v={p.visual} />
+          <BriefingVisuals v={p.visual} lean={!home} />
         </>
       )}
 
@@ -171,7 +171,8 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 }
 
 /** The week's facts as chips and bars. The sentences still go to the AI summary. */
-function BriefingVisuals({ v }: { v: BriefingVisual }) {
+/** `lean` (Insights): skip the last-week rows, the sections below cover them in full. */
+function BriefingVisuals({ v, lean = false }: { v: BriefingVisual; lean?: boolean }) {
   const s = v.sessions;
   const total = s ? s.done + s.partial + s.missed + s.unrecorded : 0;
   return (
@@ -211,7 +212,7 @@ function BriefingVisuals({ v }: { v: BriefingVisual }) {
           <CapacityBar work={v.capacity.work} free={v.capacity.free} />
         </Row>
       )}
-      {v.balance.length > 0 && (
+      {!lean && v.balance.length > 0 && (
         <Row label={v.behind}>
           {v.balance.map((b) => (
             <span key={b.name} className={CHIP}>
@@ -223,7 +224,7 @@ function BriefingVisuals({ v }: { v: BriefingVisual }) {
           ))}
         </Row>
       )}
-      {s && total > 0 && (
+      {!lean && s && total > 0 && (
         <Row label="Sessions">
           <div className="flex min-w-0 flex-1 flex-col gap-1.5">
             <div role="img" aria-label={`${v.behind}'s sessions: ${shortDuration(s.done)} done, ${shortDuration(s.partial)} partly, ${shortDuration(s.missed)} missed, ${shortDuration(s.unrecorded)} not recorded`} className="flex h-2 w-full max-w-72 overflow-hidden rounded-full bg-surface-2">

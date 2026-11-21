@@ -1,5 +1,6 @@
 import { getSessionUser } from "@/lib/auth/session";
 import { listCommitments } from "@/lib/db/commitments";
+import { isPillarCommitment } from "@/lib/domain/commitments";
 import { listContextItems } from "@/lib/db/context-items";
 import { listGoals } from "@/lib/db/goals";
 import { listLifeAreas } from "@/lib/db/life-areas";
@@ -63,7 +64,9 @@ export async function KnowledgeContent() {
         listLifeAreas(user.id),
       ]);
       areas = lifeAreas;
-      data = { commitments, goals, items };
+      // Only structural pillars. One-off events, task sessions and AI-scheduled items
+      // live on the calendar and in Tasks, not in the dossier.
+      data = { commitments: commitments.filter(isPillarCommitment), goals, items };
       timeZone = profile?.timezone ?? timeZone;
       prefs = preferences ?? prefs;
     } catch {

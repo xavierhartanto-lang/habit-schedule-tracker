@@ -3,7 +3,7 @@ import { unstable_rethrow } from "next/navigation";
 import { observations } from "@/lib/insights/observations";
 import { loadPlanningContext, type PlanningContext } from "@/features/shared/planning-context";
 import { BriefingFor } from "./home-briefing";
-import { DailyLoad, GoalsLens, Observations, SessionsReality, TimeAllocation } from "./sections";
+import { DailyLoad, GoalsLens, Observations, SessionsReality, TimeAllocation, WeekStats } from "./sections";
 import { loadInsights, type InsightsCtx, type InsightsData } from "./server/weekly";
 
 /** Insights (Phase 7.6): real numbers only. Render inside <Suspense>. */
@@ -26,6 +26,7 @@ export async function InsightsContent() {
   const c: InsightsCtx = { userId: ctx.userId, timeZone: ctx.timeZone, weekStartsOn: ctx.weekStartsOn, todayKey: ctx.todayKey, areas: ctx.areas };
   return (
     <div className="space-y-5 lg:space-y-6">
+      <WeekStats thisWeek={data.thisWeek} lastWeek={data.lastWeek} />
       {data.briefing && <BriefingFor view={data.briefing} ctx={c} variant="insights" />}
       <TimeAllocation thisWeek={data.thisWeek} lastWeek={data.lastWeek} todayKey={ctx.todayKey} />
       <div className="grid gap-5 lg:grid-cols-2 lg:gap-6">
