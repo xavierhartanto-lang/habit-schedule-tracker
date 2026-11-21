@@ -26,7 +26,7 @@ const homeView = cache(async (): Promise<{ view: BriefingView; ctx: InsightsCtx 
   return { view, ctx: c };
 });
 
-/** Phones and tablets show it in the glance hub, desktop at the top of the rail: one render each, one load. */
+/** At the top of Home's side column (under "Your today" on phones). */
 export async function HomeBriefing({ className }: { className?: string }) {
   const r = await homeView();
   if (!r) return null;

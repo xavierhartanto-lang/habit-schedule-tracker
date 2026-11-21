@@ -4,13 +4,17 @@ import { RailNote, RailSection } from "../rail-section";
 import { SectionCard } from "./sections";
 
 /**
- * The adaptive part of Home's rail (Layer B, then Layer C). Today's
- * schedule above it and Tasks below it stay put (Layer A).
+ * The adaptive part of Home (Layer B, then Layer C), beside "Your today"
+ * on desktop and under it on phones. Tasks below it stay put (Layer A).
  * Render inside <Suspense>.
- *
- * On phones and tablets the lead section moves up into the glance hub
- * (AdaptiveLead) and is hidden here, so it never shows twice.
  */
+/**
+ * Home stays calm: only what needs action today (the adaptive layer), and
+ * at most two of those. The context layer (progress, coming up, goals)
+ * belongs to Insights and Calendar.
+ */
+const HOME_MAX_SECTIONS = 2;
+
 export async function AdaptiveRail() {
   const [{ ctx, error }, intel] = await Promise.all([loadHomeData(), loadHomeIntel()]);
   if (ctx.state !== "ready") return null;
@@ -26,19 +30,12 @@ export async function AdaptiveRail() {
   const view = { timeZone: ctx.timeZone, todayKey: ctx.todayKey, areas: ctx.areas };
   return (
     <>
-      {intel.layout.sections.map((s) => (
-        <SectionCard key={s.id} section={s} ctx={view} className={s.lead ? "max-xl:hidden" : undefined} />
-      ))}
+      {intel.layout.sections
+        .filter((s) => s.layer === "adaptive")
+        .slice(0, HOME_MAX_SECTIONS)
+        .map((s) => (
+          <SectionCard key={s.id} section={s} ctx={view} />
+        ))}
     </>
-  );
-}
-
-/** The lead section on phones and tablets, inside the glance hub above the conversation. */
-export async function AdaptiveLead() {
-  const [{ ctx }, intel] = await Promise.all([loadHomeData(), loadHomeIntel()]);
-  const lead = intel.layout?.sections.find((s) => s.lead);
-  if (ctx.state !== "ready" || !lead) return null;
-  return (
-    <SectionCard section={lead} ctx={{ timeZone: ctx.timeZone, todayKey: ctx.todayKey, areas: ctx.areas }} className="xl:hidden" />
   );
 }
