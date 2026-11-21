@@ -421,11 +421,27 @@ describe("Scenario D: completing a task that doesn't exist", () => {
     expect(db.tasks.every((x) => x.status === "todo")).toBe(true);
   });
 
-  it("a real match is proposed on a card, not saved silently", async () => {
+  it("a real match is checked off right away, with Undo on the card", async () => {
     const chem = addTask("Chemistry Homework");
     const t = await say("Mark chem done", [wire({ type: "complete_task", target_ref: "t1", target_name: "chem", evidence: "Mark chem done", explicit: true })]);
-    expect(t.plan?.items[0]).toMatchObject({ action: "complete_task", status: "pending", targetId: chem.id });
-    expect(db.tasks[0].status).toBe("todo");
+    expect(t.plan?.items[0]).toMatchObject({ action: "complete_task", status: "applied", targetId: chem.id });
+    expect(db.tasks[0].status).toBe("done");
+  });
+
+  it("'I finished all the tasks yesterday' checks all four off in one message, no confirm step", async () => {
+    const tasks = ["Math Test Studying", "Take out the trash", "Find quotes for room", "Email Michael Wu"].map(addTask);
+    const session = addSession("Math Test Studying", "2026-11-19", "16:00", "17:00", tasks[0].id);
+    // Not phrased as a command, so the model marks it explicit=false.
+    const t = await say(
+      "i finished all the tasks yesterday",
+      tasks.map((_, n) => wire({ type: "complete_task", target_ref: `t${n + 1}`, target_name: "all the tasks", evidence: "finished all the tasks", explicit: false })),
+    );
+    expect(t.clarify).toBeNull();
+    expect(db.tasks.map((x) => x.status)).toEqual(["done", "done", "done", "done"]);
+    expect(t.plan?.items.filter((i) => i.action === "complete_task").every((i) => i.status === "applied")).toBe(true);
+    expect(t.actions).not.toContain("NOT saved");
+    // Calendar sessions are untouched until approved.
+    expect(db.events.map((e) => e.id)).toContain(session.id);
   });
 });
 

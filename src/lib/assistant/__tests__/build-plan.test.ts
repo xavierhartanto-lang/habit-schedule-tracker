@@ -236,19 +236,22 @@ describe("adaptive rescheduling", () => {
     expect(Date.parse(String(moved.payload.startsAt)) >= Date.parse(String(basketball.payload.endsAt)) || Date.parse(String(moved.payload.endsAt)) <= Date.parse(String(basketball.payload.startsAt))).toBe(true);
   });
 
-  it("\"I finished my coding project early\" proposes completing the task (one tap, no silent save) and offers to free its sessions", () => {
+  it("\"I finished my coding project early\" checks the task off right away and offers to free its sessions", () => {
     const project = task({ title: "Coding project", estimatedMinutes: 240 });
     const b1 = blockOn("2026-11-19", "Coding project", project.id);
     const b2 = blockOn("2026-11-21", "Coding project", project.id);
     const w = world();
     w.refs.tasks.set("t1", project);
     const i = intent({ type: "finished_early", evidence: "finished my coding project early", target_ref: "t1", explicit: true });
-    const plan = buildPlan(input({ world: w, openTasks: [project], events: [...weekCalendar(), b1, b2], specs: [specOf(i, w)] }));
+    const plan = buildPlan(input({ world: w, openTasks: [project], events: [...weekCalendar(), b1, b2], specs: [{ ...specOf(i, w), actionId: "a1" }] }));
     expect(plan.items.map((x) => [x.action, x.autoApply])).toEqual([
-      ["complete_task", false],
+      ["complete_task", true],
       ["remove_block", false],
       ["remove_block", false],
     ]);
+    // Whitespace's own "did you finish this?" (no user action behind it) still waits for a tap.
+    const proactive = buildPlan(input({ world: w, openTasks: [project], events: [...weekCalendar(), b1, b2], specs: [specOf(i, w)] }));
+    expect(proactive.items[0]).toMatchObject({ action: "complete_task", autoApply: false });
   });
 
   it("skips one date of a recurring fixed event instead of deleting it", () => {

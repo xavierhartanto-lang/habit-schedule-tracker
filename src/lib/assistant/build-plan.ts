@@ -97,7 +97,8 @@ export type BuildInput = {
   sourceMessageId: string | null;
 };
 
-// Marking something done waits for a tap (or a "yes"): the user confirms it's the right task.
+// Records the user directly asked for apply right away. Finishing a task is
+// handled separately (always applies, with Undo on the card).
 const AUTO_APPLY: ReadonlySet<ActionSpec["kind"]> = new Set([
   "task_create",
   "task_update",
@@ -440,7 +441,7 @@ export function buildPlan(input: BuildInput): BuiltPlan {
   for (const { spec, explicit, actionId } of input.specs) {
     const itemsBefore = ctx.items.length;
     const requestsBefore = ctx.requests.length;
-    stampAction(ctx, itemsBefore, requestsBefore, requestAction, actionId ?? null, () => buildRecord(spec, explicit));
+    stampAction(ctx, itemsBefore, requestsBefore, requestAction, actionId ?? null, () => buildRecord(spec, explicit, !!actionId));
   }
   /**
    * Sessions the assistant placed earlier that a new or changed event now
@@ -461,7 +462,7 @@ export function buildPlan(input: BuildInput): BuiltPlan {
     if (moved) ctx.notes.push(`${moved} Whitespace session${moved === 1 ? "" : "s"} would collide with this change, so new times for ${moved === 1 ? "it are" : "them are"} on the same card.`);
   }
 
-  function buildRecord(spec: ActionSpec, explicit: boolean): void {
+  function buildRecord(spec: ActionSpec, explicit: boolean, fromUser: boolean): void {
     const auto = explicit && AUTO_APPLY.has(spec.kind);
     switch (spec.kind) {
       case "event": {
@@ -770,7 +771,9 @@ export function buildPlan(input: BuildInput): BuiltPlan {
           action: "complete_task",
           title: spec.task.title,
           targetId: spec.task.id,
-          autoApply: auto,
+          // The user said it's done: check it off now, Undo on the card.
+          // A proactive "did you finish this?" still waits for a tap.
+          autoApply: fromUser,
           payload: { taskId: spec.task.id },
           display: { ...EMPTY_DISPLAY, detail: "Mark as done", reason: "You said it's finished." },
         });
@@ -1003,7 +1006,8 @@ export function buildPlan(input: BuildInput): BuiltPlan {
             action: "complete_task",
             title: spec.task.title,
             targetId: spec.task.id,
-            autoApply: false,
+            // Checked off right away; freeing its sessions still waits for Approve.
+            autoApply: fromUser,
             payload: { taskId: spec.task.id },
             display: { ...EMPTY_DISPLAY, detail: "Mark as done", reason: "You finished it." },
           });
