@@ -6,7 +6,7 @@ import type { CommitmentKind, LifeAreaRecord, SessionOutcome } from "@/lib/domai
 import { useNow } from "@/lib/hooks/use-now";
 import { formatTimeInZone } from "@/lib/scheduling/zoned";
 import { cn } from "@/lib/utils/cn";
-import { ChevronDown, MapPin } from "lucide-react";
+import { Check, ChevronDown, MapPin } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { SessionOutcomeChips } from "./session-outcome";
@@ -23,7 +23,12 @@ export type TodayItem = {
   /** Set for a Whitespace work session: its id, so the user can say whether it happened. */
   sessionId?: string | null;
   outcome?: SessionOutcome | null;
+  /** A work session whose task is already checked off: shown as done, never as now or next. */
+  taskDone?: boolean;
 };
+
+/** Blocks the day still has to happen: finished tasks' sessions don't count. */
+const pending = (i: TodayItem) => !i.allDay && !i.taskDone;
 
 /** Earlier blocks fold away once there are more than this many, so now and next stay in front. */
 const KEEP_PAST = 1;
@@ -40,7 +45,7 @@ export function until(ms: number) {
 export function TodaySummary({ items, timeZone }: { items: TodayItem[]; timeZone: string }) {
   const now = useNow();
   if (!now) return <Skeleton className="mt-2 h-4 w-56" />;
-  const timed = items.filter((i) => !i.allDay);
+  const timed = items.filter(pending);
   const live = timed.find((i) => new Date(i.start) <= now && new Date(i.end) > now);
   const left = timed.filter((i) => new Date(i.start) > now);
   const lastEnd = timed.length ? new Date(Math.max(...timed.map((i) => new Date(i.end).getTime()))) : null;
@@ -96,11 +101,13 @@ export function TodayTimeline({ items, areas, timeZone }: { items: TodayItem[]; 
   const hidden = showPast || past.length <= KEEP_PAST ? [] : past.slice(0, past.length - KEEP_PAST).filter((i) => !(i.sessionId && !i.outcome));
   const hiddenKeys = new Set(hidden.map((i) => i.key));
   const shown = timed.filter((i) => !hiddenKeys.has(i.key));
-  const nextKey = timed.find((i) => new Date(i.start) > now)?.key ?? null;
-  const live = timed.some((i) => new Date(i.start) <= now && new Date(i.end) > now);
+  const open = timed.filter(pending);
+  const nextKey = open.find((i) => new Date(i.start) > now)?.key ?? null;
+  const live = open.some((i) => new Date(i.start) <= now && new Date(i.end) > now);
   // Where the "now" marker goes when nothing is on: before the next block, or after the last.
-  const markerBefore = !live ? nextKey : null;
-  const markerAtEnd = !live && !nextKey && timed.length > 0;
+  const ahead = timed.find((i) => new Date(i.start) > now)?.key ?? null;
+  const markerBefore = !live ? ahead : null;
+  const markerAtEnd = !live && !ahead && timed.length > 0;
 
   return (
     <div>
@@ -182,8 +189,9 @@ function Block({
 }) {
   const start = new Date(c.start);
   const end = new Date(c.end);
-  const live = now >= start && now < end;
-  const past = now >= end;
+  const done = !!c.taskDone;
+  const live = !done && now >= start && now < end;
+  const past = done || now >= end;
   const color = areaColors(findArea(areas, c.areaId)).color;
   const progress = live ? Math.min(1, Math.max(0, (now.getTime() - start.getTime()) / Math.max(1, end.getTime() - start.getTime()))) : 0;
 
@@ -214,7 +222,12 @@ function Block({
             past && "opacity-55",
           )}
         >
-          {live ? (
+          {done ? (
+            <p className="mb-0.5 flex items-center gap-1 text-[11px] font-bold uppercase tracking-[0.08em] text-success">
+              <Check aria-hidden className="size-3" strokeWidth={3} />
+              Task done
+            </p>
+          ) : live ? (
             <p className="mb-0.5 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.08em] text-accent-ink">
               <span aria-hidden className="size-1.5 animate-pulse-dot rounded-full bg-accent" />
               Now
@@ -222,7 +235,9 @@ function Block({
           ) : next ? (
             <p className="mb-0.5 text-[11px] font-bold uppercase tracking-[0.08em] tabular-nums text-ink-3">Next · {until(start.getTime() - now.getTime())}</p>
           ) : null}
-          <p className={cn("truncate font-semibold tracking-[-0.01em] text-ink", live || next ? "text-[16px]" : "text-[14.5px]")}>{c.title}</p>
+          <p className={cn("truncate font-semibold tracking-[-0.01em] text-ink", live || next ? "text-[16px]" : "text-[14.5px]", done && "line-through decoration-ink-3/60")}>
+            {c.title}
+          </p>
           <p className="mt-0.5 flex items-center gap-1 truncate text-[12.5px] tabular-nums text-ink-3">
             {formatTimeInZone(start, timeZone)} – {formatTimeInZone(end, timeZone)}
             {c.location && (
@@ -245,9 +260,10 @@ function Block({
             </div>
           )}
           {/* Plan vs reality: once a work session has started, the user can say how it went. */}
-          {c.sessionId && (live || past) && (
+          {c.sessionId && !done && (live || past) && (
             <div className="mt-2">
-              <SessionOutcomeChips id={c.sessionId} outcome={c.outcome ?? null} />
+              {/* Keyed by outcome so a refresh (e.g. the task was checked off elsewhere) shows the saved answer. */}
+              <SessionOutcomeChips key={c.outcome ?? "none"} id={c.sessionId} outcome={c.outcome ?? null} />
             </div>
           )}
         </div>
