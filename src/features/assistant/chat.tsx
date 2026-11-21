@@ -74,10 +74,13 @@ type Props = {
   suggestions?: string[];
   placeholder?: string;
   /**
-   * "embedded" (Home): starters send right away and sit under the opening
-   * line, and the URL is left alone. "page" (/assistant): the full screen.
+   * "overlay" (Home's assistant sheet): starters send right away and sit
+   * under the opening line, Home's suggestion buttons run here, and the URL
+   * is left alone. "page" (/assistant): the full screen.
    */
-  variant?: "page" | "embedded";
+  variant?: "page" | "overlay";
+  /** Overlay only: false while the sheet is closed, so it can jump to the newest message when it opens. */
+  active?: boolean;
   /** Opening line shown before the first message, built from real data (never an LLM guess). */
   opening?: string | null;
   starters?: ChatStarter[];
@@ -106,13 +109,14 @@ export function Chat({
   openingChips: openingChipsProp = [],
   nudges: nudgesProp = [],
   shownRecommendationIds = [],
+  active = true,
 }: Props) {
   // Suggestions are fixed for this view: a refresh mid-conversation (a new
   // conversation was created) must not swap them under the user.
   const [openingChips] = useState(openingChipsProp);
   const [nudges] = useState(nudgesProp);
   const [opening] = useState(openingProp);
-  const embedded = variant === "embedded";
+  const embedded = variant === "overlay";
   const router = useRouter();
   const planCardActions = useMemo(() => planActions(() => router.refresh()), [router]);
   const [conversationId, setConversationId] = useState(initialConversationId);
@@ -127,8 +131,7 @@ export function Chat({
   const started = useRef(false);
   // Keep showing the opening line once the conversation it started is under way.
   const [showOpening, setShowOpening] = useState(() => Boolean(opening) && initialMessages.length === 0);
-  // Home scrolls the page, not a panel: only follow new content after the user acts.
-  const stickToBottom = useRef(!embedded);
+  const stickToBottom = useRef(true);
   const endRef = useRef<HTMLDivElement>(null);
   // Home shows the tail of a resumed conversation; earlier turns are one tap away.
   const [hiddenCount, setHiddenCount] = useState(() => (embedded ? Math.max(0, initialMessages.length - HOME_RESUME_SHOWN) : 0));
@@ -140,26 +143,10 @@ export function Chat({
   useEffect(() => {
     // Before anything is said, the opening line (and suggestions) start at the top.
     if (messages.length === 0 && !busy) return;
-    if (!stickToBottom.current) return;
-    if (embedded) {
-      endRef.current?.scrollIntoView({ block: "nearest" });
-      return;
-    }
+    if (!stickToBottom.current || !active) return;
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [messages, streaming, failure, busy, embedded]);
-
-  // On Home the page scrolls. Scrolling up to read stops the follow.
-  useEffect(() => {
-    if (!embedded) return;
-    let last = window.scrollY;
-    const onScroll = () => {
-      if (window.scrollY < last - 4) stickToBottom.current = false;
-      last = window.scrollY;
-    };
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
-  }, [embedded]);
+  }, [messages, streaming, failure, busy, active]);
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
@@ -398,19 +385,18 @@ export function Chat({
   const tooLong = draft.length > CHAT_MESSAGE_MAX;
 
   return (
-    <div className={cn("flex flex-col", !embedded && "h-full min-h-0")}>
+    <div className="flex h-full min-h-0 flex-col">
       <div
         ref={scrollRef}
         onScroll={(e) => {
-          if (embedded) return;
           const el = e.currentTarget;
           stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
         }}
-        className={cn(!embedded && "min-h-0 flex-1 overflow-y-auto")}
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
         aria-live="polite"
         aria-busy={busy}
       >
-        <div className={cn("w-full space-y-6", embedded ? "pb-6" : "mx-auto max-w-3xl px-4 py-6 sm:px-8")}>
+        <div className={cn("w-full space-y-6", embedded ? "mx-auto max-w-2xl px-5 pb-6 pt-2 sm:px-7" : "mx-auto max-w-3xl px-4 py-6 sm:px-8")}>
           {empty && !showOpening && emptyState}
 
           {showOpening && opening && embedded && (
@@ -598,12 +584,10 @@ export function Chat({
 
       <div
         className={cn(
-          embedded
-            ? "sticky bottom-[var(--tabbar-h)] z-10 -mx-1 rounded-b-[22px] bg-surface px-1 pb-4 pt-2 before:pointer-events-none before:absolute before:inset-x-0 before:-top-6 before:h-6 before:bg-gradient-to-t before:from-surface before:to-transparent lg:bottom-0 sm:pb-6"
-            : "border-t border-border bg-surface/80 backdrop-blur",
+          embedded ? "border-t border-border/70 bg-surface-3" : "border-t border-border bg-surface/80 backdrop-blur",
         )}
       >
-        <div className={cn("w-full", embedded ? "" : "mx-auto max-w-3xl px-4 pb-4 pt-3 sm:px-8")}>
+        <div className={cn("w-full", embedded ? "mx-auto max-w-2xl px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 sm:px-6" : "mx-auto max-w-3xl px-4 pb-4 pt-3 sm:px-8")}>
           {!aiConfigured ? (
             <NotConfigured />
           ) : (

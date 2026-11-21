@@ -1,5 +1,6 @@
 import "server-only";
 
+import { cache } from "react";
 import { isAiConfigured } from "@/lib/ai/config";
 import { listConversations } from "@/lib/db/conversations";
 import { listMessages } from "@/lib/db/messages";
@@ -18,11 +19,10 @@ import {
 } from "@/lib/scheduling/zoned";
 import { dueParts } from "@/lib/domain/tasks";
 import { toChatMessage, type ChatMessage } from "@/features/assistant/types";
-import { HOME_DAYS_AHEAD, LOOKAHEAD_DAYS, loadHomeData } from "./home-data";
+import { LOOKAHEAD_DAYS, loadHomeData } from "./home-data";
 import { loadHomeIntel } from "./home-intel";
 import type { HomeProactive } from "./proactive";
 import { buildOpening, partOfDay, type Opening, type OpeningDeadline } from "./opening";
-import { summarizeWeek, type WeekSummary } from "./week-summary";
 
 /**
  * Everything the Home assistant panel needs, from real data only.
@@ -40,7 +40,6 @@ export type HomeAssistantData =
       /** Today's assistant conversation, so Home picks up where the user left off. */
       conversationId: string | null;
       messages: ChatMessage[];
-      week: WeekSummary;
       timeZone: string;
       /** "YYYY-MM-DD" in the user's time zone. */
       todayKey: string;
@@ -53,7 +52,8 @@ const RESUME_MESSAGES = 40;
 const weekdayName = (key: string) => formatDateKey(key, { weekday: "long" });
 const shortDate = (key: string) => formatDateKey(key, { month: "short", day: "numeric" });
 
-export async function loadHomeAssistant(): Promise<HomeAssistantData> {
+/** Cached per request: the header and the assistant sheet both read it. */
+export const loadHomeAssistant = cache(async (): Promise<HomeAssistantData> => {
   const { ctx, events, openTasks, error } = await loadHomeData();
   const now = new Date();
   const hour = Math.floor(minutesInZone(now, ctx.timeZone) / 60);
@@ -88,13 +88,11 @@ export async function loadHomeAssistant(): Promise<HomeAssistantData> {
 
   // ---- Deadlines: task due dates (incl. overdue) and fixed commitments ahead ----
   const deadlines: OpeningDeadline[] = [];
-  const taskDeadlines: { dateKey: string }[] = [];
   for (const t of openTasks) {
     const due = dueParts(t.dueAt, tz);
     if (!due) continue;
     const days = daysBetweenKeys(today, due.date);
     if (days < -7 || days > 13) continue;
-    taskDeadlines.push({ dateKey: due.date });
     deadlines.push({
       title: t.title,
       kind: "task",
@@ -123,19 +121,6 @@ export async function loadHomeAssistant(): Promise<HomeAssistantData> {
     empty: events.length === 0 && openTasks.length === 0,
   });
 
-  const weekEnd = addDaysToKey(today, HOME_DAYS_AHEAD);
-  const days = Array.from({ length: HOME_DAYS_AHEAD }, (_, i) => addDaysToKey(today, i));
-  const week = summarizeWeek(
-    days,
-    occurrences.filter((o) => dateKeyInZone(o.start, tz) < weekEnd).map((o) => ({
-      dateKey: dateKeyInZone(o.start, tz),
-      minutes: Math.round((o.end.getTime() - o.start.getTime()) / 60000),
-      kind: o.event.kind,
-      allDay: o.allDay,
-    })),
-    taskDeadlines,
-  );
-
   // ---- Resume today's conversation, if there is one ----
   let conversationId: string | null = null;
   let messages: ChatMessage[] = [];
@@ -156,5 +141,5 @@ export async function loadHomeAssistant(): Promise<HomeAssistantData> {
     }
   }
 
-  return { state: "ready", aiConfigured, opening, conversationId, messages, week, timeZone: tz, todayKey: today, proactive };
-}
+  return { state: "ready", aiConfigured, opening, conversationId, messages, timeZone: tz, todayKey: today, proactive };
+});
