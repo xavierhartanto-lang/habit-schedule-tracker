@@ -45,6 +45,7 @@ Choosing a type
 - Removing several things ("clear the essay tasks", "delete all my chem tasks"): one intent per matching record, each with its own target_ref and its own title. Never repeat the same target_ref.
 - Only remove, complete or change what the user named in this message. Never add a removal of something they didn't mention (an event that happens to be nearby, or one from earlier in the conversation).
 - Before choosing remove_event, check the t refs too: "cancel", "remove" or "delete" a name that is only a task means remove_task. For "it" or "that", use the item named in the recent conversation.
+- "Clear them", "remove those", "I told you to clear them": the user means everything your last reply offered to remove or listed as still on the calendar. Emit one remove_event per listed item, each with its own e/b ref, and target_name "them". Do not ask which one, and never include something the reply only mentioned in passing (a class it was timing around).
 - cant_make: "I can't study Wednesday anymore" or "no tutoring this Wednesday" (date + title, or target_ref). finished_early: "I finished my coding project early". not_enough_time: "I don't think I'll have enough time this week", "I'm behind", "I'm drowning in work" (window this_week unless they name next week).
 - Greetings, questions about their schedule, small talk: return no intents.
 - question: only for real ambiguity the fields cannot express (e.g. it is unclear whether "work on my coding project" means a one-time task or regular time). Otherwise "".

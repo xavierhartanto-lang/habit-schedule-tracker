@@ -80,6 +80,18 @@ function applyOp(op: Record<string, unknown>): string | null {
       ev.recurrenceExceptions = [...(ev.recurrenceExceptions ?? []), String(op.date)];
       return ev.id;
     }
+    case "delete_block": {
+      const ev = db.events.find((e) => e.id === op.id);
+      if (!ev || ev.kind !== "flexible" || !ev.planItemId) throw new Error("Only sessions the assistant scheduled can be removed");
+      db.events = db.events.filter((e) => e.id !== op.id);
+      return String(op.id);
+    }
+    case "remove_task": {
+      if (!db.tasks.some((t) => t.id === op.id)) throw new Error("Task not found");
+      db.tasks = db.tasks.filter((t) => t.id !== op.id);
+      for (const e of db.events) if (e.taskId === op.id) e.taskId = null;
+      return String(op.id);
+    }
     case "delete_event": {
       db.events = db.events.filter((e) => e.id !== op.id);
       return String(op.id);
@@ -291,6 +303,13 @@ const at = (day: string, time: string) => zonedToUtc(day, time, TZ).toISOString(
 
 function addEvent(title: string, day: string, start: string, end: string, rrule: string | null = null): Commitment {
   const ev: Commitment = { id: id(), title, area: null, kind: "fixed", startsAt: at(day, start), endsAt: at(day, end), timezone: TZ, recurrenceRule: rrule };
+  db.events.push(ev);
+  return ev;
+}
+
+/** A work session the assistant scheduled (flexible, with a plan item). */
+function addSession(title: string, day: string, start: string, end: string, taskId: string | null = null): Commitment {
+  const ev: Commitment = { id: id(), title, area: null, kind: "flexible", startsAt: at(day, start), endsAt: at(day, end), timezone: TZ, recurrenceRule: null, planItemId: id(), taskId };
   db.events.push(ev);
   return ev;
 }
@@ -602,5 +621,78 @@ describe("Stored conversation state", () => {
     expect(JSON.stringify(written).length).toBeLessThanOrEqual(STATE_BUDGET_CHARS);
     expect(written.actions[0].id).toBe("open1");
     expect(written.actions.length).toBeGreaterThan(1);
+  });
+});
+
+describe("Scenario I: 'clear them' after the assistant listed leftover sessions", () => {
+  // The exact reply from xavi's screenshot (2026-11-21).
+  const OFFER =
+    "Saturday 12-2 it is. That leaves you 10 minutes before Pre-calculus at 2:10, so go straight from one to the other. Tennis is off your calendar. " +
+    "Biology Essay, Choose Topic and Gather Sources, and Draft the Body Paragraphs are still on tonight's calendar. Say the word and I'll clear them. " +
+    "Is tutoring every Saturday, or just this one?";
+
+  function setup() {
+    const tutoring = addEvent("Tutoring", "2026-11-21", "12:00", "14:00");
+    const precalc = addEvent("Pre-calculus Class", "2026-11-21", "14:10", "15:30");
+    // Sessions whose task was already deleted: still on the calendar.
+    addSession("Biology Essay", "2026-11-18", "18:00", "18:45");
+    addSession("Choose Topic and Gather Sources", "2026-11-18", "19:00", "19:45");
+    addSession("Draft the Body Paragraphs", "2026-11-18", "20:00", "21:00");
+    history.push({ role: "user", content: "I'm tutoring Saturday 12-2, and tennis is cancelled" }, { role: "assistant", content: OFFER });
+    return { tutoring, precalc };
+  }
+
+  it("'clear them' removes exactly the three listed sessions, never Pre-calculus", async () => {
+    const { tutoring, precalc } = setup();
+    // Worst case: the model points at Pre-calculus, which the reply only mentioned in passing.
+    const t = await say("clear them", [wire({ type: "remove_event", target_ref: "e2", target_name: "them", evidence: "clear them", explicit: true })]);
+    expect(t.clarify).toBeNull();
+    expect(t.plan?.items.map((i) => i.title)).toEqual(["Biology Essay", "Choose Topic and Gather Sources", "Draft the Body Paragraphs"]);
+    await approveItems("u1", t.plan!.id, { requestId: id(), now: NOW });
+    expect(db.events.map((e) => e.id)).toEqual([tutoring.id, precalc.id]);
+  });
+
+  it("one remove per listed item (the prompt's rule) still removes all three, once each", async () => {
+    setup();
+    const t = await say("yeah clear them", [
+      wire({ type: "remove_event", target_ref: "b1", target_name: "them", evidence: "clear them", explicit: true }),
+      wire({ type: "remove_event", target_ref: "b2", target_name: "them", evidence: "clear them", explicit: true }),
+      wire({ type: "remove_event", target_ref: "b3", target_name: "them", evidence: "clear them", explicit: true }),
+    ]);
+    expect(t.plan?.items.map((i) => i.title)).toEqual(["Biology Essay", "Choose Topic and Gather Sources", "Draft the Body Paragraphs"]);
+  });
+
+  it("'I told you to clear them a while ago' acts on the earlier offer instead of asking which", async () => {
+    const { tutoring, precalc } = setup();
+    history.push({ role: "user", content: "ok" }, { role: "assistant", content: "Which did you mean: Pre-calculus class or Draft the Body Paragraphs?" });
+    // The model may call them tasks; they're calendar sessions, so they're removed from the calendar.
+    const t = await say("bro i told you to clear them a while ago", [wire({ type: "remove_task", target_name: "them", title: "them", evidence: "clear them", explicit: true })]);
+    expect(t.clarify).toBeNull();
+    expect(t.plan?.items.map((i) => i.action)).toEqual(["remove_event", "remove_event", "remove_event"]);
+    await approveItems("u1", t.plan!.id, { requestId: id(), now: NOW });
+    expect(db.events.map((e) => e.id)).toEqual([tutoring.id, precalc.id]);
+  });
+
+  it("a named item still wins over the offer", async () => {
+    setup();
+    const t = await say("just clear draft the body paragraphs", [
+      wire({ type: "remove_event", target_ref: "b3", target_name: "draft the body paragraphs", evidence: "clear draft the body paragraphs", explicit: true }),
+    ]);
+    expect(t.plan?.items.map((i) => i.title)).toEqual(["Draft the Body Paragraphs"]);
+  });
+});
+
+describe("Deleting a task takes its work sessions with it", () => {
+  it("'delete my history essay task' also frees its scheduled sessions", async () => {
+    const essay = addTask("History Essay");
+    const other = addTask("Chemistry Homework");
+    addSession("History Essay", "2026-11-18", "19:00", "20:00", essay.id);
+    addSession("History Essay", "2026-11-19", "19:00", "20:00", essay.id);
+    const chem = addSession("Chemistry Homework", "2026-11-19", "20:00", "21:00", other.id);
+    const t = await say("delete my history essay task", [wire({ type: "remove_task", target_ref: "t1", title: "history essay", evidence: "delete my history essay task", explicit: true })]);
+    expect(t.plan?.items.map((i) => i.action)).toEqual(["remove_task", "remove_block", "remove_block"]);
+    await approveItems("u1", t.plan!.id, { requestId: id(), now: NOW });
+    expect(db.tasks.map((x) => x.title)).toEqual(["Chemistry Homework"]);
+    expect(db.events.map((e) => e.id)).toEqual([chem.id]);
   });
 });

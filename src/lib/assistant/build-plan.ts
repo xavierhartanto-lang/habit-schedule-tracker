@@ -786,6 +786,22 @@ export function buildPlan(input: BuildInput): BuiltPlan {
           payload: { taskId: spec.task.id },
           display: { ...EMPTY_DISPLAY, detail: "Delete this task", reason: "You asked to remove it. Undo brings it back." },
         });
+        // Its work sessions go too, or they'd stay on the calendar with nothing to work on.
+        for (const b of futureBlocks.filter((b) => b.taskId === spec.task.id)) {
+          ctx.items.push({
+            action: "remove_block",
+            title: b.title,
+            targetId: b.id,
+            autoApply: false,
+            payload: { commitmentId: b.id },
+            display: {
+              ...EMPTY_DISPLAY,
+              timing: timingFor(b.startsAt!, b.endsAt!, input.world.timeZone),
+              detail: "Free up this time",
+              reason: `Work session for ${spec.task.title}, which you're deleting.`,
+            },
+          });
+        }
         break;
       }
       case "habit_create":

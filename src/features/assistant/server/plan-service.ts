@@ -198,6 +198,30 @@ export function focusRefs(refs: RefTable, actions: ActionContext[], recentText: 
   return out.slice(0, 6);
 }
 
+const REMOVE_WORDS = /\b(clear|remove|delete|cancel|take (?:it|them|those) off)\b/i;
+
+/**
+ * Records the assistant's last message offered to remove: named in a sentence
+ * that says clear/remove/delete, or in the sentence just before one
+ * ("Biology Essay and Draft are still on tonight's calendar. Say the word and I'll clear them.").
+ */
+export function offeredRefs(refs: RefTable, lastReply: string): string[] {
+  const sentences = lastReply.split(/(?<=[.!?])\s+|\n+/).filter(Boolean);
+  const picked = sentences.filter((s, i) => REMOVE_WORDS.test(s) || (i + 1 < sentences.length && REMOVE_WORDS.test(sentences[i + 1]) && !/\b(?:it|this|that)\b/i.test(sentences[i + 1])));
+  if (!picked.length) return [];
+  const words = new Set(nameTokens(picked.join(" ")));
+  const out: string[] = [];
+  for (const ref of refIndex(refs).values()) {
+    const title = titleOf(refs, ref);
+    if (!title) continue;
+    const tokens = nameTokens(title);
+    const specific = tokens.filter((t) => !isGenericToken(t));
+    const need = specific.length ? specific : tokens;
+    if (need.length && need.every((t) => words.has(t)) && !out.includes(ref)) out.push(ref);
+  }
+  return out;
+}
+
 /** Refs in an action's intent go stale when numbering changes; re-point them at today's refs. */
 function remapTargets(actions: ActionContext[], refs: RefTable): ActionContext[] {
   const byId = refIndex(refs);
@@ -301,6 +325,12 @@ export async function planTurn(input: {
   let actions = remapTargets(pruneActions(syncActions(stored, states, now), now), world.refs);
   const recentHistory = input.history.slice(-6);
   world.focus = focusRefs(world.refs, actions, [...recentHistory.slice(-4).map((t) => t.content), input.userText]);
+  // "I told you to clear them a while ago": the newest recent reply that offered a removal.
+  world.offered = [...recentHistory]
+    .reverse()
+    .filter((t) => t.role === "assistant")
+    .map((t) => offeredRefs(world.refs, t.content))
+    .find((refs) => refs.length) ?? [];
   const byRecord = refIndex(world.refs);
   const savedRefs = new Map(
     actions.flatMap((a) => (a.status === "saved" && a.resultIds[0] && byRecord.has(a.resultIds[0]) ? [[a.id, byRecord.get(a.resultIds[0])!] as const] : [])),
