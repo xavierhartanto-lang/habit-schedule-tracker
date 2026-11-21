@@ -3,6 +3,7 @@ import { areaColors } from "@/lib/domain/life-areas";
 import type { AreaTime, GoalTime, TimeBucket, WeekTime } from "@/lib/insights/area-time";
 import { compareWeeks } from "@/lib/insights/area-time";
 import type { Observation } from "@/lib/insights/observations";
+import { shortDuration } from "@/features/assistant/plan-visual";
 import { duration } from "@/lib/proactive/text";
 import { formatDateKey } from "@/lib/scheduling/zoned";
 import { cn } from "@/lib/utils/cn";
@@ -41,6 +42,56 @@ function Delta({ minutes }: { minutes: number }) {
   );
 }
 
+function Stat({ label, value, sub }: { label: string; value: string; sub: React.ReactNode }) {
+  return (
+    <div className="min-w-0 rounded-[18px] border border-border/70 bg-surface px-4 py-3.5 shadow-card dark:border-border">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3">{label}</p>
+      <p className="mt-1.5 truncate text-[22px] font-semibold leading-none tracking-[-0.02em] tabular-nums text-ink">{value}</p>
+      <p className="mt-1.5 truncate text-[12px] text-ink-3">{sub}</p>
+    </div>
+  );
+}
+
+/** The week in four numbers: load, its trend, the heaviest day and follow-through. */
+export function WeekStats({ thisWeek, lastWeek }: { thisWeek: WeekTime; lastWeek: WeekTime }) {
+  const total = thisWeek.totals.scheduled;
+  const delta = total - lastWeek.totals.scheduled;
+  const busiest = thisWeek.perDay.reduce((m, d) => (d.scheduled > m.scheduled ? d : m), thisWeek.perDay[0]);
+  const top = [...thisWeek.areas].filter((a) => a.areaId).sort((a, b) => b.scheduled - a.scheduled)[0];
+  const t = thisWeek.totals;
+  const past = t.done + t.partial + t.missed + t.unrecorded;
+  const worked = t.done + t.partial;
+  const trend =
+    Math.abs(delta) < 15 ? (
+      "Same as last week"
+    ) : (
+      <span className="inline-flex items-center gap-0.5">
+        {delta > 0 ? <ArrowUpRight aria-hidden className="size-3" /> : <ArrowDownRight aria-hidden className="size-3" />}
+        {shortDuration(Math.abs(delta))} vs last week
+      </span>
+    );
+  return (
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
+      <Stat label="Scheduled" value={total ? duration(total) : "None"} sub={trend} />
+      <Stat
+        label="Heaviest day"
+        value={busiest && busiest.scheduled ? formatDateKey(busiest.date, { weekday: "long" }, "en-US") : "None"}
+        sub={busiest && busiest.scheduled ? duration(busiest.scheduled) : "Nothing timed yet"}
+      />
+      <Stat
+        label="Top area"
+        value={top && top.scheduled ? top.name : "None"}
+        sub={top && total ? `${Math.round((top.scheduled / total) * 100)}% of the week` : "No areas yet"}
+      />
+      <Stat
+        label="Follow-through"
+        value={past ? `${Math.round((worked / past) * 100)}%` : "None yet"}
+        sub={past ? `${duration(worked)} of ${duration(past)} worked` : "No past sessions this week"}
+      />
+    </div>
+  );
+}
+
 /** Where the time went this week, per life area, against last week. */
 export function TimeAllocation({ thisWeek, lastWeek, todayKey }: { thisWeek: WeekTime; lastWeek: WeekTime; todayKey: string }) {
   const rows = compareWeeks(thisWeek, lastWeek);
@@ -70,26 +121,28 @@ export function TimeAllocation({ thisWeek, lastWeek, todayKey }: { thisWeek: Wee
                 ))}
               </div>
             )}
-            <div className="mt-4 hidden grid-cols-[1fr_auto_5rem] gap-3 px-0.5 text-[11px] font-medium uppercase tracking-[0.06em] text-ink-3 sm:grid">
+            <div className="mt-4 grid grid-cols-[1fr_auto_5rem] gap-3 px-0.5 text-[11px] font-medium uppercase tracking-[0.06em] text-ink-3">
               <span>Area</span>
               <span className="text-right">This week</span>
-              <span className="text-right">vs last week</span>
+              <span className="text-right">Change</span>
             </div>
             <ul className="mt-1">
               {rows.map((r) => {
                 const a = byId.get(r.areaId ?? "none");
                 const detail = a ? breakdown(a) : `Nothing this week, ${duration(r.lastWeek)} last week`;
+                const share = total && r.thisWeek ? Math.round((r.thisWeek / total) * 100) : 0;
                 return (
-                  <li key={r.areaId ?? "none"} className="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-0.5 border-b border-border py-2.5 last:border-0 sm:grid-cols-[1fr_auto_5rem]">
-                    <span className="flex min-w-0 items-center gap-2.5">
-                      <span aria-hidden className="size-2.5 shrink-0 rounded-full" style={{ background: colorOf(r).color }} />
-                      <span className={cn("truncate text-sm", r.areaId ? "text-ink" : "text-ink-2")}>{r.name}</span>
+                  <li key={r.areaId ?? "none"} className="grid grid-cols-[1fr_auto_5rem] items-center gap-x-3 border-b border-border py-2.5 last:border-0">
+                    <span className="min-w-0">
+                      <span className="flex min-w-0 items-center gap-2.5">
+                        <span aria-hidden className="size-2.5 shrink-0 rounded-full" style={{ background: colorOf(r).color }} />
+                        <span className={cn("truncate text-sm", r.areaId ? "text-ink" : "text-ink-2")}>{r.name}</span>
+                        {share > 0 && <span className="shrink-0 text-[12px] tabular-nums text-ink-3">{share}%</span>}
+                      </span>
+                      {detail && <span className="mt-0.5 block truncate pl-5 text-[12px] text-ink-3">{detail}</span>}
                     </span>
-                    <span className="text-right text-sm tabular-nums text-ink">{duration(r.thisWeek)}</span>
-                    <span className="col-span-2 row-start-2 pl-5 text-[12px] text-ink-3 sm:col-span-1 sm:col-start-1 sm:row-start-2">{detail}</span>
-                    <span className="col-start-2 row-start-2 justify-self-end sm:col-start-3 sm:row-span-2 sm:row-start-1">
-                      <Delta minutes={r.delta} />
-                    </span>
+                    <span className="text-right text-sm font-medium tabular-nums text-ink">{duration(r.thisWeek)}</span>
+                    <Delta minutes={r.delta} />
                   </li>
                 );
               })}
@@ -104,16 +157,10 @@ export function TimeAllocation({ thisWeek, lastWeek, todayKey }: { thisWeek: Wee
   );
 }
 
+/** Calendar vs Whitespace sessions. Follow-through lives in "Planned vs what happened". */
 function breakdown(a: TimeBucket): string {
-  const parts = [
-    a.calendar && `${duration(a.calendar)} on the calendar`,
-    a.done && `${duration(a.done)} done`,
-    a.partial && `${duration(a.partial)} partly done`,
-    a.missed && `${duration(a.missed)} missed`,
-    a.unrecorded && `${duration(a.unrecorded)} not recorded`,
-    a.upcoming && `${duration(a.upcoming)} of sessions ahead`,
-  ].filter(Boolean);
-  return parts.join(" · ");
+  const sessions = a.done + a.partial + a.missed + a.unrecorded + a.upcoming;
+  return [a.calendar && `${duration(a.calendar)} calendar`, sessions && `${duration(sessions)} in sessions`].filter(Boolean).join(" · ");
 }
 
 /** Scheduled hours per day this week: calendar and Whitespace sessions. */
@@ -169,7 +216,7 @@ export function SessionsReality({ totals }: { totals: TimeBucket }) {
     { label: "Partly done", minutes: totals.partial, tone: "color-mix(in oklab, var(--success) 50%, var(--surface-2))" },
     { label: "Missed", minutes: totals.missed, tone: "var(--area-amber)" },
     { label: "Not recorded", minutes: totals.unrecorded, tone: "var(--area-none)" },
-    { label: "Still ahead", minutes: totals.upcoming, tone: CAL_TONE },
+    { label: "Still ahead", minutes: totals.upcoming, tone: "var(--accent)" },
   ];
   const sum = rows.reduce((s, r) => s + r.minutes, 0);
   return (
