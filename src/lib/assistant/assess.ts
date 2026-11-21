@@ -41,6 +41,8 @@ export type World = {
   focus?: string[];
   /** Local time now, "HH:MM", for "in two hours". */
   nowTime?: string;
+  /** Refs the assistant's last message offered to remove ("…are still on tonight's calendar. Say the word and I'll clear them."). */
+  offered?: string[];
 };
 
 /** What changes on an existing event. Fields left undefined stay as they are. */
@@ -187,7 +189,25 @@ function lower(title: string): string {
 }
 
 
+const PLURAL = /^(?:them|those|these|all of them|all of those|all those|both|all|all three|all four|the rest)[.!?]*$/i;
 const PRONOUN = /^(?:it|that|this|them|those|these|the one|that one|this one|the other one|the other|same|same one)$/i;
+
+/**
+ * "Clear them" right after the assistant listed what's still on the calendar:
+ * remove exactly those items, never a disambiguation question. One listed ref
+ * named on the intent removes just that one.
+ */
+function offeredRemoval(intent: Intent, world: World, calendar: Map<string, Commitment>): Assessment | null {
+  const offered = (world.offered ?? []).filter((r) => calendar.has(r));
+  if (!offered.length) return null;
+  const words = (intent.targetName ?? intent.title ?? "").trim();
+  if (words && !PLURAL.test(words) && !PRONOUN.test(words)) return null;
+  const picked = intent.targetRef && offered.includes(intent.targetRef) ? [intent.targetRef] : offered;
+  // A singular "it" pointing somewhere else is not about the list.
+  if (PRONOUN.test(words) && !PLURAL.test(words) && picked.length > 1) return null;
+  const events = picked.map((r) => calendar.get(r)!);
+  return { status: "ready", intent, spec: { kind: "remove_event", events, title: events[0].title } };
+}
 
 type Found<T> = { ok: true; ref: string; item: T } | { ok: false; result: Assessment };
 
@@ -670,6 +690,11 @@ export function assessIntent(intent: Intent, world: World): Assessment {
     case "update_task":
     case "complete_task":
     case "remove_task": {
+      if (intent.type === "remove_task") {
+        // "Clear them" after the assistant listed sessions: those are calendar items, not tasks.
+        const offered = offeredRemoval(intent, world, new Map<string, Commitment>([...refs.events, ...refs.blocks]));
+        if (offered) return offered;
+      }
       // Verified against the user's words: never a similar-sounding stand-in (see findTarget).
       const found = findTarget(intent, world, refs.tasks, "task", {
         words: intent.targetName ?? (intent.type === "update_task" ? null : intent.title) ?? intent.title,
@@ -847,6 +872,9 @@ export function assessIntent(intent: Intent, world: World): Assessment {
         const matches = matchEvents([...calendar.values()], words);
         if (matches.length) return { status: "ready", intent, spec: { kind: "remove_event", events: matches, title: matches[0].title } };
       }
+      // "Clear them" / "I told you to clear them": everything the last reply offered to remove.
+      const offered = offeredRemoval(intent, world, calendar);
+      if (offered) return offered;
       const found = findTarget(intent, world, calendar, "event", { words, onDate: day });
       if (!found.ok) {
         // Tasks aren't on the calendar. If only a task matches, the user meant that.
