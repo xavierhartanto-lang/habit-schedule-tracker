@@ -57,7 +57,7 @@ export function TodayHeroSkeleton() {
 }
 
 export async function TodayHero({ className }: { className?: string }) {
-  const [{ ctx, events, error }, intel] = await Promise.all([loadHomeData(), loadHomeIntel()]);
+  const [{ ctx, events, openTasks, error }, intel] = await Promise.all([loadHomeData(), loadHomeIntel()]);
 
   if (ctx.state !== "ready" || error) {
     const note = error
@@ -76,6 +76,8 @@ export async function TodayHero({ className }: { className?: string }) {
   const tz = ctx.timeZone;
   const from = startOfDayInZone(ctx.todayKey, tz);
   const to = startOfDayInZone(addDaysToKey(ctx.todayKey, 1), tz);
+  // A session for a task that's no longer open was finished (Home and Tasks refresh after a check-off).
+  const openTaskIds = new Set(openTasks.map((t) => t.id));
   const items = expandEvents(events, from, to, tz).map((o) => ({
     key: o.key,
     title: o.event.title,
@@ -87,6 +89,7 @@ export async function TodayHero({ className }: { className?: string }) {
     areaId: o.event.lifeAreaId ?? null,
     sessionId: isSession(o.event) ? o.event.id : null,
     outcome: o.event.outcome ?? null,
+    taskDone: isSession(o.event) && !!o.event.taskId && !openTaskIds.has(o.event.taskId),
   }));
 
   // The engine's own wording: "Plan my day", or "Plan tomorrow" once today has no real time left.
