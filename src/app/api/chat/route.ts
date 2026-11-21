@@ -13,6 +13,7 @@ import type { Conversation, Message, MessageMetadata } from "@/lib/domain/types"
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { loadChatContext } from "@/features/assistant/server/context";
 import { checkInText, loadCheckIn } from "@/features/assistant/server/checkin";
+import { weeklyBriefingText } from "@/features/insights/server/weekly";
 import { planTurn } from "@/features/assistant/server/plan-service";
 import type { Clarify, PlanView } from "@/features/assistant/plan-types";
 import { plannerResultBlock, type PlannerKnowledge } from "@/lib/assistant/planner-prompt";
@@ -443,7 +444,10 @@ async function runPhase4(
     if (!body.checkIn) return { plan: null, clarify: null, extras: undefined };
     try {
       const checkIn = await loadCheckIn(userId, body.checkIn);
-      return { plan: null, clarify: null, extras: { checkIn: { kind: body.checkIn, data: checkInText(checkIn) }, actions: null } };
+      // The weekly check-in uses the same facts as the weekly briefing on Home and Insights.
+      const weekly = body.checkIn === "weekly" ? await weeklyBriefingText(userId).catch(() => null) : null;
+      const data = weekly ? `${checkInText(checkIn)}\nWeekly briefing facts (same as Home and Insights):\n${weekly}` : checkInText(checkIn);
+      return { plan: null, clarify: null, extras: { checkIn: { kind: body.checkIn, data }, actions: null } };
     } catch (error) {
       console.error("[chat] check-in data failed", error);
       return {

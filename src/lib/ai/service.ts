@@ -25,6 +25,7 @@ import { PlannerApiSchema, fromApiWire, validatePlannerOutput, type Draft, type 
 import { formatFactTitle, type NamingContext } from "@/lib/assistant/naming";
 import { PLANNER_SYSTEM_PROMPT } from "@/lib/assistant/planner-prompt";
 import { BREAKDOWN_SYSTEM_PROMPT, BreakdownWireSchema, type BreakdownWire } from "@/lib/assistant/breakdown";
+import { BRIEFING_SYSTEM_PROMPT, BriefingWireSchema, type BriefingWire } from "@/lib/insights/briefing-ai";
 
 /**
  * Entry points Chunk C calls from route handlers / server actions.
@@ -245,6 +246,35 @@ export async function suggestBreakdown(input: { prompt: string; signal?: AbortSi
   if (response.stop_reason === "refusal") throw new AiError("refused");
   if (response.stop_reason === "max_tokens" || response.parsed_output == null) {
     throw new AiError("invalid_output", { message: `Breakdown unusable (stop_reason=${response.stop_reason})` });
+  }
+  return response.parsed_output;
+}
+
+/** Phase 7.6: the weekly briefing's summary. The caller validates it against the facts (validateBriefing). */
+export async function summarizeWeek(input: { prompt: string; signal?: AbortSignal }): Promise<BriefingWire> {
+  const { client, model } = getAiClient();
+  let response;
+  try {
+    response = await client.beta.messages.parse(
+      {
+        model,
+        max_tokens: 2_000,
+        output_config: { effort: "low", format: zodOutputFormat(BriefingWireSchema) },
+        system: [{ type: "text", text: BRIEFING_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
+        messages: [{ role: "user", content: input.prompt }],
+        ...fallbackParams(model),
+      },
+      { signal: input.signal },
+    );
+  } catch (error) {
+    if (error instanceof Anthropic.AnthropicError && !(error instanceof Anthropic.APIError)) {
+      throw new AiError("invalid_output", { cause: error });
+    }
+    throw toAiError(error);
+  }
+  if (response.stop_reason === "refusal") throw new AiError("refused");
+  if (response.stop_reason === "max_tokens" || response.parsed_output == null) {
+    throw new AiError("invalid_output", { message: `Briefing unusable (stop_reason=${response.stop_reason})` });
   }
   return response.parsed_output;
 }

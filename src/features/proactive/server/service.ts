@@ -22,11 +22,15 @@ import { getAssistantSettings } from "@/lib/db/scheduling-preferences";
 import { analyze, type Analysis } from "@/lib/proactive/analyze";
 import { catchUpPlan } from "@/lib/proactive/catch-up";
 import { buildBrief } from "@/lib/proactive/brief";
-import { detectFromAnalysis, type Candidate } from "@/lib/proactive/detect";
+import { detectFromAnalysis, type AreaHistory, type Candidate } from "@/lib/proactive/detect";
 import { reconcile } from "@/lib/proactive/reconcile";
 import { specsForAction } from "@/lib/proactive/specs";
 import { isQuietTime, surface as surfaceRecommendations } from "@/lib/proactive/surface";
-import { addDaysToKey, dateKeyInZone, isValidTimeZone, zonedToUtc } from "@/lib/scheduling/zoned";
+import { addDaysToKey, dateKeyInZone, isValidTimeZone, startOfDayInZone, zonedToUtc } from "@/lib/scheduling/zoned";
+import { listEventsForRange } from "@/lib/db/events";
+import { listLifeAreas } from "@/lib/db/life-areas";
+import { listTasks } from "@/lib/db/tasks";
+import { areaHistory, HISTORY_EARLIER_DAYS } from "@/lib/insights/area-time";
 import type { PlanView } from "@/features/assistant/plan-types";
 import { loadWorld } from "@/features/assistant/server/plan-service";
 import { PHASE7_KINDS, PHASE73_KINDS, type AssistantSettings, type DailyBrief, type ProactiveState, type Recommendation, type RecommendationAction } from "../types";
@@ -51,6 +55,8 @@ const LOOKAHEAD_MS = 16 * 86_400_000;
 type Fresh = {
   analysis: Analysis | null;
   settings: AssistantSettings;
+  /** Phase 7.6: per-area history for the neglected-area detector. Only read at the "proactive" level. */
+  history: AreaHistory | null;
 };
 
 /** What loadSchedulingBase returns. Callers that already loaded it can pass it in. */
@@ -87,7 +93,26 @@ async function loadFresh(userId: string, now: Date, preloaded?: SchedulingBase):
     // Invalid stored preferences or time zone: no recommendations, but the page still works.
     console.error("[proactive] analysis failed", error);
   }
-  return { analysis, settings };
+  // A dropped life area is a low-priority nudge that only the "proactive" level
+  // raises on its own, so only that level pays for the extra history read.
+  const history = analysis && settings.proactivity === "proactive" ? await loadAreaHistory(userId, analysis, base.openTasks).catch((error) => {
+    console.error("[proactive] area history failed", error);
+    return null;
+  }) : null;
+  return { analysis, settings, history };
+}
+
+async function loadAreaHistory(userId: string, a: Analysis, openTasks: SchedulingBase["openTasks"]): Promise<AreaHistory> {
+  const tz = a.timeZone;
+  const [{ events }, areas, tasks] = await Promise.all([
+    listEventsForRange(userId, {
+      from: startOfDayInZone(addDaysToKey(a.todayKey, -HISTORY_EARLIER_DAYS), tz).toISOString(),
+      to: startOfDayInZone(addDaysToKey(a.todayKey, 8), tz).toISOString(),
+    }),
+    listLifeAreas(userId),
+    listTasks(userId, { doneWithinDays: HISTORY_EARLIER_DAYS }).catch(() => openTasks),
+  ]);
+  return areaHistory({ now: new Date(a.nowMs).toISOString(), timeZone: tz, weekStartsOn: a.weekStartsOn, events, tasks, areas }, a.todayKey);
 }
 
 function emptyBrief(timeZone: string, now: Date): DailyBrief {
@@ -121,10 +146,10 @@ export async function loadProactiveWithAnalysis(
   options: { now?: Date; surface?: "home" | "all"; base?: SchedulingBase } = {},
 ): Promise<{ state: ProactiveState; analysis: Analysis | null }> {
   const now = options.now ?? new Date();
-  const { analysis, settings } = await loadFresh(userId, now, options.base);
+  const { analysis, settings, history } = await loadFresh(userId, now, options.base);
   const timeZone = analysis?.timeZone ?? "UTC";
   const today = analysis ? buildBrief(analysis) : emptyBrief(timeZone, now);
-  const candidates: Candidate[] = analysis ? detectFromAnalysis(analysis) : [];
+  const candidates: Candidate[] = analysis ? detectFromAnalysis(analysis, { history }) : [];
 
   let recommendations: Recommendation[] = [];
   try {

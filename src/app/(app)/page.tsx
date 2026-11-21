@@ -2,6 +2,7 @@ import { Skeleton } from "@/components/ui";
 import { AdaptiveLead, AdaptiveRail } from "@/features/home/adaptive/adaptive-rail";
 import { GlanceSkeleton, HomeGlance } from "@/features/home/glance";
 import { HomeAssistant, HomeAssistantSkeleton } from "@/features/home/home-assistant";
+import { HomeBriefing } from "@/features/insights/home-briefing";
 import { PriorityTasks } from "@/features/home/priority-tasks";
 import { RailSection } from "@/features/home/rail-section";
 import { RefreshOnReturn } from "@/features/home/refresh-on-return";
@@ -48,6 +49,9 @@ export default function HomePage(props: PageProps<"/">) {
         aria-label="Your schedule at a glance"
         className="grid min-w-0 content-start gap-4 sm:grid-cols-2 lg:gap-5 xl:sticky xl:top-3 xl:max-h-[calc(100dvh-1.5rem)] xl:grid-cols-1 xl:self-start xl:overflow-y-auto xl:rounded-[20px] xl:pb-1"
       >
+        <Suspense fallback={null}>
+          <HomeBriefing className="max-xl:hidden" />
+        </Suspense>
         <Suspense fallback={<TodayScheduleSkeleton />}>
           <TodaySchedule />
         </Suspense>
@@ -71,6 +75,9 @@ async function HomeAssistantFromParams({ searchParams }: { searchParams: PagePro
         <>
           <Suspense fallback={<GlanceSkeleton />}>
             <HomeGlance />
+          </Suspense>
+          <Suspense fallback={null}>
+            <HomeBriefing className="xl:hidden" />
           </Suspense>
           <Suspense fallback={null}>
             <AdaptiveLead />
