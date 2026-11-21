@@ -15,7 +15,7 @@ import {
   syncActions,
   type ActionContext,
 } from "@/lib/assistant/action-state";
-import { assessIntent, occursOn, type Assessment, type KnownActivity, type RefTable, type World } from "@/lib/assistant/assess";
+import { assessIntent, separateSharedTargets, occursOn, type Assessment, type KnownActivity, type RefTable, type World } from "@/lib/assistant/assess";
 import { buildPlan, timingFor, type ItemDisplay } from "@/lib/assistant/build-plan";
 import { clockLabel, shortDate } from "@/lib/assistant/dates";
 import { dedupeIntents, mergeIntent, type Intent } from "@/lib/assistant/intents";
@@ -353,8 +353,8 @@ export async function planTurn(input: {
   interpreted.confirmed = interpreted.confirmed.filter((id) => !retry.some((a) => a.id === id) && !(id === "latest" && retry.length));
 
   const notes: string[] = [];
-  const assessments = prepared.map((intent) => {
-    const a = assessIntent(intent, world);
+  const assessments = separateSharedTargets(prepared.map((intent) => assessIntent(intent, world)), world).map((a) => {
+    const intent = a.intent;
     if (a.status === "skip" && a.note) notes.push(a.note);
     const dup = duplicateNote(a, actions, loaded);
     if (dup) {

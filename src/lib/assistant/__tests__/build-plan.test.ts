@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { Commitment } from "@/lib/domain/types";
 import { expandEvents } from "@/lib/scheduling/recurrence";
 import { dateKeyInZone, timeKeyInZone, zonedToUtc } from "@/lib/scheduling/zoned";
-import { assessIntent, type ActionSpec } from "../assess";
+import { assessIntent, separateSharedTargets, type ActionSpec } from "../assess";
 import { buildPlan, type BuildInput } from "../build-plan";
 import { toOp } from "../ops";
 import { applyPreferenceChanges } from "../prefs";
@@ -346,5 +346,37 @@ describe("stepInfo", () => {
     expect(info?.parentTitle).toBe("p");
     expect(info?.steps.map((s) => s.id)).toEqual(["a", "b", "c"]);
     expect(stepInfo(tasks[0], tasks)).toBeNull();
+  });
+});
+
+describe("removing several tasks at once", () => {
+  const titles = ["Outline the Essay", "Choose Topic and Gather Sources", "Draft the Body Paragraphs", "Write Introduction and Conclusion"];
+  function setup() {
+    const tasks = titles.map((title) => task({ title }));
+    const w = world();
+    tasks.forEach((t, n) => w.refs.tasks.set(`t${n + 1}`, t));
+    return { tasks, w };
+  }
+
+  it("gives each named task its own row, even when 'them' points at one task in focus", () => {
+    const { tasks, w } = setup();
+    w.focus = ["t1"];
+    const intents = tasks.map((_, n) => intent({ type: "remove_task", title: "them", evidence: "clear the essay tasks", target_ref: `t${n + 1}`, explicit: true }));
+    const before = intents.map((i) => assessIntent(i, w));
+    // Without the fix every intent resolved to the task in focus.
+    expect(new Set(before.map((a) => (a.status === "ready" && a.spec.kind === "task_remove" ? a.spec.task.id : null))).size).toBe(1);
+
+    const after = separateSharedTargets(before, w);
+    const specs = after.flatMap((a) => (a.status === "ready" ? [{ spec: a.spec, explicit: true }] : []));
+    const plan = buildPlan(input({ world: w, openTasks: tasks, specs }));
+    expect(plan.items.map((i) => i.targetId)).toEqual(tasks.map((t) => t.id));
+  });
+
+  it("never lists the same change twice", () => {
+    const { tasks, w } = setup();
+    const spec = { spec: { kind: "task_remove" as const, task: tasks[0] }, explicit: true };
+    const plan = buildPlan(input({ world: w, openTasks: tasks, specs: [spec, spec, spec, spec] }));
+    expect(plan.items).toHaveLength(1);
+    expect(plan.items[0]).toMatchObject({ action: "remove_task", targetId: tasks[0].id });
   });
 });

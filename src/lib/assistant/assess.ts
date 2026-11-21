@@ -911,3 +911,33 @@ function matchEvents(events: Commitment[], title: string): Commitment[] {
 function localDate(iso: string, timeZone: string): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
 }
+
+/**
+ * "Clear the essay tasks": several intents can land on the same task when
+ * each one was resolved through the conversation's focus instead of its own
+ * ref. When that happens and the model gave each intent a different ref,
+ * trust those refs so every named task gets its own card row.
+ */
+export function separateSharedTargets(assessments: Assessment[], world: World): Assessment[] {
+  const taskId = (a: Assessment) =>
+    a.status === "ready" && (a.spec.kind === "task_remove" || a.spec.kind === "task_complete" || a.spec.kind === "task_update")
+      ? `${a.spec.kind}:${a.spec.task.id}`
+      : null;
+  const groups = new Map<string, number[]>();
+  assessments.forEach((a, i) => {
+    const key = taskId(a);
+    if (key) groups.set(key, [...(groups.get(key) ?? []), i]);
+  });
+  const out = [...assessments];
+  for (const indexes of groups.values()) {
+    if (indexes.length < 2) continue;
+    const refs = indexes.map((i) => assessments[i].intent.targetRef);
+    const distinct = new Set(refs.filter((r): r is string => !!r && world.refs.tasks.has(r)));
+    if (distinct.size < 2) continue;
+    for (const i of indexes) {
+      const intent = assessments[i].intent;
+      if (intent.targetRef && world.refs.tasks.has(intent.targetRef)) out[i] = assessIntent({ ...intent, targetConfirmed: true }, world);
+    }
+  }
+  return out;
+}
