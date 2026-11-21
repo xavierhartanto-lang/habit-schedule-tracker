@@ -190,6 +190,7 @@ function lower(title: string): string {
 
 
 const PLURAL = /^(?:them|those|these|all of them|all of those|all those|both|all|all three|all four|the rest)[.!?]*$/i;
+const COLLECTIVE = /^(?:(?:all|both|each|every)(?: of)?(?: (?:the|my|them|those|these|three|four|five|six))*(?: (?:tasks?|to-?dos?|things|of them|ones))?|everything(?: on my list)?|(?:my|the) (?:tasks|to-?dos|list|whole list)|them|those|these)[.!?]*$/i;
 const PRONOUN = /^(?:it|that|this|them|those|these|the one|that one|this one|the other one|the other|same|same one)$/i;
 
 /**
@@ -694,6 +695,12 @@ export function assessIntent(intent: Intent, world: World): Assessment {
         // "Clear them" after the assistant listed sessions: those are calendar items, not tasks.
         const offered = offeredRemoval(intent, world, new Map<string, Commitment>([...refs.events, ...refs.blocks]));
         if (offered) return offered;
+      }
+      // "I finished all the tasks": each intent carries its own ref, and the
+      // words name the whole list, so they can't be checked against one title.
+      // Only for checking off (Undo is right there), never for deleting.
+      if (intent.type === "complete_task" && intent.targetRef && refs.tasks.has(intent.targetRef) && COLLECTIVE.test((intent.targetName ?? intent.title ?? "").trim())) {
+        return { status: "ready", intent, spec: { kind: "task_complete", task: refs.tasks.get(intent.targetRef)! } };
       }
       // Verified against the user's words: never a similar-sounding stand-in (see findTarget).
       const found = findTarget(intent, world, refs.tasks, "task", {
