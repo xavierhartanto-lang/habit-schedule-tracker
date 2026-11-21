@@ -297,3 +297,37 @@ export function factsHash(f: WeeklyFacts): string {
   }
   return h.toString(16).padStart(8, "0");
 }
+
+/** What the briefing card draws instead of sentences: chips, a work-vs-free bar, area changes and a sessions bar. */
+export type BriefingVisual = {
+  problems: { title: string; message: string }[];
+  due: { title: string; when: string; high: boolean }[];
+  moreDue: number;
+  events: { title: string; when: string; exam: boolean }[];
+  moreEvents: number;
+  capacity: { work: number; free: number } | null;
+  balance: { name: string; color: string | null; delta: number }[];
+  sessions: { done: number; partial: number; missed: number; unrecorded: number } | null;
+  /** "Last week" or "This week" (preview), for the history rows. */
+  behind: string;
+};
+
+export function briefingVisual(f: WeeklyFacts, todayKey: string, options: { compact?: boolean } = {}): BriefingVisual {
+  const compact = options.compact ?? false;
+  const when = (k: string) => (daysBetweenKeys(todayKey, k) < 7 && daysBetweenKeys(todayKey, k) >= 0 ? dayName(k, todayKey) : shortDate(k));
+  const s = f.sessions;
+  const anySessions = s.done + s.partial + s.missed + s.unrecorded > 0;
+  const dueLimit = compact ? 3 : 6;
+  const eventLimit = 5;
+  return {
+    problems: f.problems.slice(0, compact ? 2 : 4).map((p) => ({ title: p.title, message: p.message })),
+    due: f.deadlines.slice(0, dueLimit).map((d) => ({ title: d.title, when: when(d.date), high: d.priority === "high" })),
+    moreDue: Math.max(0, f.deadlines.length - dueLimit) + f.moreDeadlines,
+    events: compact ? [] : f.commitments.slice(0, eventLimit).map((c) => ({ title: c.title, when: `${when(c.date)}${c.time ? ` ${c.time}` : ""}`, exam: c.exam })),
+    moreEvents: compact ? 0 : Math.max(0, f.commitments.length - eventLimit) + f.moreCommitments,
+    capacity: f.days.length ? { work: roughly(f.workMinutes), free: roughly(f.capacityMinutes) } : null,
+    balance: compact ? [] : f.balance.filter((b) => Math.abs(b.delta) >= 60).slice(0, 4).map((b) => ({ name: b.name, color: b.color, delta: b.delta })),
+    sessions: compact || !anySessions ? null : { done: roughly(s.done), partial: roughly(s.partial), missed: roughly(s.missed), unrecorded: roughly(s.unrecorded) },
+    behind: f.preview ? "This week" : "Last week",
+  };
+}

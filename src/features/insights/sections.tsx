@@ -6,7 +6,7 @@ import type { Observation } from "@/lib/insights/observations";
 import { duration } from "@/lib/proactive/text";
 import { formatDateKey } from "@/lib/scheduling/zoned";
 import { cn } from "@/lib/utils/cn";
-import { ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, ChevronDown, Minus } from "lucide-react";
 
 /**
  * Phase 7.6 Insights sections. Real numbers only (lib/insights), honest
@@ -211,12 +211,7 @@ export function Observations({ items }: { items: Observation[] }) {
         {!items.length ? (
           <Empty>Nothing stands out this week. That&apos;s a fine answer.</Empty>
         ) : (
-          items.map((o) => (
-            <div key={o.id} className="rounded-xl border border-border px-4 py-3">
-              <p className="text-sm font-medium text-ink">{o.title}</p>
-              <p className="mt-1 text-[13px] leading-relaxed text-ink-2">{o.body}</p>
-            </div>
-          ))
+          items.map((o) => <ObservationItem key={o.id} o={o} />)
         )}
       </CardBody>
     </Card>
@@ -246,5 +241,36 @@ export function GoalsLens({ goals, areas }: { goals: GoalTime[]; areas: { id: st
         </ul>
       </CardBody>
     </Card>
+  );
+}
+
+const BAR_TONE = { accent: "bg-accent", muted: "bg-ink-3/40", warn: "bg-[var(--cat-creative)]" } as const;
+
+/** One observation: the headline and its comparison as bars. The sentence is one tap away. */
+function ObservationItem({ o }: { o: Observation }) {
+  const max = Math.max(1, ...(o.bars ?? []).map((b) => b.minutes));
+  return (
+    <details className="group rounded-xl border border-border px-4 py-3 [&_summary::-webkit-details-marker]:hidden">
+      <summary className="block cursor-pointer list-none">
+        <span className="flex items-center gap-2">
+          <span className="min-w-0 flex-1 text-sm font-medium text-ink">{o.title}</span>
+          <ChevronDown aria-hidden className="size-4 shrink-0 text-ink-3 transition-transform group-open:rotate-180" />
+        </span>
+        {o.bars && o.bars.length > 0 && (
+          <span className="mt-2.5 block space-y-1.5" role="img" aria-label={o.bars.map((b) => `${b.label}: ${duration(b.minutes)}`).join(", ")}>
+            {o.bars.map((b) => (
+              <span key={b.label} className="flex items-center gap-2.5 text-[11.5px] tabular-nums">
+                <span className="w-16 shrink-0 text-ink-3">{b.label}</span>
+                <span className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-surface-2">
+                  <span className={cn("block h-full rounded-full", BAR_TONE[b.tone])} style={{ width: `${Math.max((b.minutes / max) * 100, b.minutes ? 3 : 0)}%` }} />
+                </span>
+                <span className="shrink-0 whitespace-nowrap text-right font-semibold text-ink">{duration(b.minutes)}</span>
+              </span>
+            ))}
+          </span>
+        )}
+      </summary>
+      <p className="mt-2.5 text-[13px] leading-relaxed text-ink-2">{o.body}</p>
+    </details>
   );
 }

@@ -53,6 +53,13 @@ describe("conversation-based planning", () => {
     expect(studyBlocks.reduce((s, b) => s + b.display.timing!.durationMinutes, 0)).toBe(180);
     expect(studyBlocks.length).toBeGreaterThan(1); // split into sessions
     expect(pianoBlocks).toHaveLength(2);
+    // Short chips for the card, a deadline for the strip, and no step info for plain requests.
+    for (const b of studyBlocks) {
+      expect(b.display.chips?.length).toBeGreaterThan(0);
+      expect(b.display.chips!.every((c) => c.label.split(" ").length <= 4)).toBe(true);
+      expect(b.display.deadline).toBeTruthy();
+      expect(b.display.step).toBeNull();
+    }
     // Numbered in calendar order, and the reason doesn't repeat the numbering.
     const pianoTitles = pianoBlocks
       .slice()
@@ -325,5 +332,19 @@ describe("approval payloads", () => {
     expect(next.protectedTimes.map((p) => p.label)).toContain("Dinner");
     expect(PREFS.maxSessionMinutes).not.toBe(60); // input untouched
     expect(dateKeyInZone(NOW, TZ)).toBe("2026-11-18");
+  });
+});
+
+describe("stepInfo", () => {
+  it("lists a step's open siblings in due order", async () => {
+    const { stepInfo } = await import("../build-plan");
+    const t = (id: string, due: string | null, parentTaskId: string | null = "p") =>
+      ({ id, title: id, parentTaskId, dueAt: due, status: "todo", priority: "medium", estimatedMinutes: 30 }) as unknown as import("@/lib/domain/types").Task;
+    const tasks = [t("p", null, null), t("b", "2026-11-21T07:00:00Z"), t("a", "2026-11-20T07:00:00Z"), t("c", null)];
+    const info = stepInfo(tasks[1], tasks);
+    expect(info?.currentId).toBe("b");
+    expect(info?.parentTitle).toBe("p");
+    expect(info?.steps.map((s) => s.id)).toEqual(["a", "b", "c"]);
+    expect(stepInfo(tasks[0], tasks)).toBeNull();
   });
 });

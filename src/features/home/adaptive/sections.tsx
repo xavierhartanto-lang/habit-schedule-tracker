@@ -82,9 +82,15 @@ function FocusView({ section, ctx }: ViewProps<"focus">) {
         <p className="mt-3 rounded-xl bg-surface-2 px-3 py-2 text-[12.5px] tabular-nums text-ink-2">{free}</p>
       )}
       {f.then.length > 0 && (
-        <p className="mt-3 text-[12.5px] text-ink-3">
-          Then: <span className="text-ink-2">{f.then.map((t) => t.title).join(", ")}</span>
-        </p>
+        <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[12px]">
+          <span className="font-semibold text-ink-3">Then</span>
+          {f.then.map((t, i) => (
+            <span key={`${i}-${t.title}`} className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-surface-2 px-2.5 py-1 font-medium text-ink-2">
+              <span aria-hidden className="text-[10.5px] font-bold text-ink-3">{i + 2}</span>
+              <span className="truncate">{t.title}</span>
+            </span>
+          ))}
+        </div>
       )}
       {f.behind && <BehindButton />}
     </div>

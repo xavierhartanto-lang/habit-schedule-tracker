@@ -329,17 +329,17 @@ function toSession(
   const next = ctx.busy.find((b) => b.start >= s.end && b.start < dayEnd && dateKeyInZone(new Date(b.start), tz) === s.day.date);
 
   if (prev && next) {
-    reasons.push({ code: "free_gap", text: `Fits between ${prev.title} and ${next.title} at ${timeLabel(next.start, tz)}.` });
+    reasons.push({ code: "free_gap", text: `Fits between ${prev.title} and ${next.title} at ${timeLabel(next.start, tz)}.`, short: `After ${prev.title}` });
   } else if (prev) {
-    reasons.push({ code: "free_gap", text: `You're free after ${prev.title} (ends ${timeLabel(prev.end, tz)}).` });
+    reasons.push({ code: "free_gap", text: `You're free after ${prev.title} (ends ${timeLabel(prev.end, tz)}).`, short: `After ${prev.title}` });
   } else if (next) {
-    reasons.push({ code: "free_gap", text: `Done before ${next.title} at ${timeLabel(next.start, tz)}.` });
+    reasons.push({ code: "free_gap", text: `Done before ${next.title} at ${timeLabel(next.start, tz)}.`, short: `Before ${next.title}` });
   } else {
-    reasons.push({ code: "free_gap", text: `Nothing else is on your calendar ${weekdayLabel(s.day.date)} at this time.` });
+    reasons.push({ code: "free_gap", text: `Nothing else is on your calendar ${weekdayLabel(s.day.date)} at this time.`, short: "Wide open" });
   }
   const snug = (gap: number) => gap <= ctx.buffer + 5 * MINUTE;
   if (ctx.buffer > 0 && ((prev && snug(s.start - prev.end)) || (next && snug(next.start - s.end)))) {
-    reasons.push({ code: "buffer", text: `Leaves ${durationLabel(ctx.preferences.bufferMinutes)} of breathing room around your other plans.` });
+    reasons.push({ code: "buffer", text: `Leaves ${durationLabel(ctx.preferences.bufferMinutes)} of breathing room around your other plans.`, short: `${durationLabel(ctx.preferences.bufferMinutes)} buffer` });
   }
 
   // Only claim "lighter" when it's actually true compared with other days.
@@ -349,9 +349,9 @@ function toSession(
   const heavier = eligible.filter((d) => ratio(d) > mine).length;
   const lighter = eligible.filter((d) => ratio(d) < mine).length;
   if (heavier > 0 && lighter === 0 && eligible.filter((d) => ratio(d) === mine).length === 1) {
-    reasons.push({ code: "light_day", text: `${weekdayLabel(s.day.date)} is your lightest day in this plan.` });
+    reasons.push({ code: "light_day", text: `${weekdayLabel(s.day.date)} is your lightest day in this plan.`, short: "Lightest day" });
   } else if (heavier > 0 && lighter < heavier) {
-    reasons.push({ code: "light_day", text: `${weekdayLabel(s.day.date)} is one of your lighter days.` });
+    reasons.push({ code: "light_day", text: `${weekdayLabel(s.day.date)} is one of your lighter days.`, short: "Lighter day" });
   }
 
   if (p.deadline !== null) {
@@ -360,24 +360,25 @@ function toSession(
     reasons.push({
       code: "before_deadline",
       text: days >= 1 ? `Done ${plural(days, "day")} before your deadline.` : `Done ${plural(Math.max(hours, 0), "hour")} before your deadline.`,
+      short: days >= 1 ? `${days}d before due` : hours >= 1 ? `${hours}h before due` : "Just before due",
     });
-    if (p.deadline - s.end < DAY) tradeoffs.push({ code: "near_deadline", text: "This is close to your deadline, so there's little room if plans change." });
+    if (p.deadline - s.end < DAY) tradeoffs.push({ code: "near_deadline", text: "This is close to your deadline, so there's little room if plans change.", short: "Close to due" });
   }
   if (count > 1) reasons.push({ code: "spread", text: `Session ${index} of ${count}, spaced out from the others.` });
-  if (r.priority === "high") reasons.push({ code: "priority", text: "Placed early because it's high priority." });
+  if (r.priority === "high") reasons.push({ code: "priority", text: "Placed early because it's high priority.", short: "High priority" });
   if (r.preferredDays.length) {
-    if (r.preferredDays.includes(s.day.weekday)) reasons.push({ code: "preferred_day", text: `${weekdayLabel(s.day.date)} is one of the days you asked for.` });
-    else tradeoffs.push({ code: "not_preferred_day", text: `Not on a day you asked for; those were full.` });
+    if (r.preferredDays.includes(s.day.weekday)) reasons.push({ code: "preferred_day", text: `${weekdayLabel(s.day.date)} is one of the days you asked for.`, short: "Your day" });
+    else tradeoffs.push({ code: "not_preferred_day", text: `Not on a day you asked for; those were full.`, short: "Not your day" });
   }
 
   if (allPlaced.some((o) => o !== s && o.requestId === s.requestId && o.day.date === s.day.date)) {
-    tradeoffs.push({ code: "same_day", text: "Shares the day with another session of this, because other days were full." });
+    tradeoffs.push({ code: "same_day", text: "Shares the day with another session of this, because other days were full.", short: "Doubled up" });
   }
-  if (s.shortened) tradeoffs.push({ code: "shortened", text: "Split into a shorter session because no longer free stretch was available." });
+  if (s.shortened) tradeoffs.push({ code: "shortened", text: "Split into a shorter session because no longer free stretch was available.", short: "Shortened" });
   const lastWorkEnd = s.day.working.length ? s.day.working[s.day.working.length - 1].end : s.end;
-  if (s.end > lastWorkEnd - HOUR) tradeoffs.push({ code: "late", text: "Runs into the last hour of your evening." });
+  if (s.end > lastWorkEnd - HOUR) tradeoffs.push({ code: "late", text: "Runs into the last hour of your evening.", short: "Runs late" });
   if ((s.day.busyMinutes + sumOnDay(allPlaced, s.day.date)) / Math.max(s.day.workingMinutes, 1) > 0.7) {
-    tradeoffs.push({ code: "busy_day", text: `${weekdayLabel(s.day.date)} is already fairly full.` });
+    tradeoffs.push({ code: "busy_day", text: `${weekdayLabel(s.day.date)} is already fairly full.`, short: "Busy day" });
   }
 
   // Alternatives must still be free once every session is placed.
@@ -400,6 +401,11 @@ function toSession(
     count,
     reasons,
     tradeoffs,
+    nearby: ctx.busy
+      .filter((b) => b.end > s.start - 3 * HOUR && b.start < s.end + 3 * HOUR && dateKeyInZone(new Date(b.start), tz) === s.day.date)
+      .slice(0, 6)
+      .map((b) => ({ title: b.title, start: new Date(b.start).toISOString(), end: new Date(b.end).toISOString() })),
+    deadline: p.deadline !== null ? new Date(p.deadline).toISOString() : null,
     alternatives: alternatives.map((a) => ({ start: new Date(a.start).toISOString(), end: new Date(a.end).toISOString() })),
     lifeAreaId: r.lifeAreaId,
     taskId: r.taskId,
