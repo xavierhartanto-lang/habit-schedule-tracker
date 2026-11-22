@@ -1,10 +1,12 @@
 import type { Commitment, Task } from "@/lib/domain/types";
 import { zonedToUtc } from "@/lib/scheduling/zoned";
 import { newId, state } from "./fake-db";
+import { addGoogle } from "./fake-google";
 
 /**
  * A busy high schooler's week, the way it looks in Whitespace:
- * school and practices that repeat, Google Calendar events (read-only),
+ * school and practices that repeat, Google Calendar events (Whitespace can
+ * change them in Google; one is an invite from someone else),
  * one-off appointments, tasks with priorities and optional due dates, and
  * work sessions Whitespace scheduled for those tasks.
  *
@@ -25,9 +27,12 @@ type EventInput = {
   google?: boolean;
   session?: { task: Task | null };
   location?: string;
+  /** Google: an invite from someone else (removable, not movable). */
+  invite?: boolean;
 };
 
 export function addEvent(e: EventInput): Commitment {
+  if (e.google) return addGoogle({ title: e.title, day: e.day, start: e.start, end: e.end, weekly: !!e.rrule, invite: e.invite, location: e.location });
   const ev: Commitment = {
     id: newId(),
     title: e.title,
@@ -81,10 +86,10 @@ export function seedWeek() {
     school: addEvent({ title: "School", day: "2026-09-01", start: "08:00", end: "15:00", rrule: "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR" }),
     basketball: addEvent({ title: "Basketball Practice", day: "2026-09-01", start: "17:00", end: "19:00", rrule: "FREQ=WEEKLY;BYDAY=TU,TH" }),
     piano: addEvent({ title: "Piano Lesson", day: "2026-09-02", start: "18:30", end: "19:15", rrule: "FREQ=WEEKLY;BYDAY=WE" }),
-    // From Google Calendar: read-only.
+    // From Google Calendar (the user's own calendar; Family Dinner is Mom's invite).
     debate: addEvent({ title: "Debate Club", day: "2026-09-05", start: "10:00", end: "12:00", rrule: "FREQ=WEEKLY;BYDAY=SA", google: true }),
     labReview: addEvent({ title: "Chemistry Lab Review", day: "2026-11-19", start: "15:30", end: "16:30", google: true }),
-    familyDinner: addEvent({ title: "Family Dinner", day: "2026-11-22", start: "18:00", end: "20:00", google: true }),
+    familyDinner: addEvent({ title: "Family Dinner", day: "2026-11-22", start: "18:00", end: "20:00", google: true, invite: true }),
     // One-offs made in Whitespace.
     dentist: addEvent({ title: "Dentist Appointment", day: "2026-11-20", start: "16:00", end: "17:00" }),
     tutoring: addEvent({ title: "Math Tutoring", day: "2026-11-19", start: "19:30", end: "20:30" }),

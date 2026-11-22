@@ -7,6 +7,7 @@ import { defaultSchedulingPreferences } from "@/lib/scheduling/planner";
 import { AREAS, date, wire } from "@/lib/assistant/__tests__/fixtures";
 import { allItems, resetDb, state } from "./sim/fake-db";
 import { NOW, TZ, seedWeek, addEvent, type Seed } from "./sim/world";
+import { addGoogle, google, googleSnapshot, mirrorDifferences, resetGoogle } from "./sim/fake-google";
 
 /**
  * Life simulation: everyday requests from a busy high schooler, replayed
@@ -17,8 +18,11 @@ import { NOW, TZ, seedWeek, addEvent, type Seed } from "./sim/world";
  * output a good model gives) and the database (sim/fake-db.ts) are stand-ins.
  *
  * Every scenario checks the database afterwards, and what the reply model
- * is told happened. Two rules hold in every scenario:
- * - Google Calendar events are never changed.
+ * is told happened. Rules that hold in every scenario:
+ * - Google Calendar (sim/fake-google.ts) changes only when the user asked
+ *   for that change directly, or approved Whitespace's suggestion; every
+ *   other scenario leaves Google exactly as it was.
+ * - Whitespace's copy of Google events always matches Google, after Undo too.
  * - Direct commands are done now (with Undo); only Whitespace's own ideas wait for Approve.
  *
  * Today is Wednesday 2026-11-18, 4:00 PM in Los Angeles.
@@ -40,7 +44,15 @@ vi.mock("@/lib/db/scheduling", async () => {
   };
 });
 vi.mock("@/lib/db/events", () => ({ linkSessionsToTask: async () => {}, markPastSessionsDone: async () => {} }));
-vi.mock("@/lib/db/profiles", () => ({ getPreferences: async () => ({ weekStartsOn: 1 }) }));
+vi.mock("@/lib/db/profiles", () => ({ getPreferences: async () => ({ weekStartsOn: 1 }), getProfile: async () => ({ timezone: "America/Los_Angeles" }) }));
+vi.mock("@/features/google/server/client", async () => {
+  const { fakeClient } = await import("./sim/fake-google");
+  return { googleClientFor: async () => fakeClient };
+});
+vi.mock("@/lib/db/google", async () => {
+  const { dbGoogleModule } = await import("./sim/fake-google");
+  return dbGoogleModule;
+});
 vi.mock("@/lib/db/life-areas", () => ({ listLifeAreas: async () => AREAS }));
 vi.mock("@/lib/db/habits", () => ({ listActiveHabits: async () => [] }));
 vi.mock("@/lib/db/goals", () => ({ listGoals: async () => [] }));
@@ -131,29 +143,49 @@ const task = (t: { id: string }) => state.db.tasks.find((x) => x.id === t.id);
 const pending = () => allItems().filter((i) => i.status === "pending" || i.status === "conflict");
 const applied = () => allItems().filter((i) => i.status === "applied");
 const named = (title: string) => state.db.events.filter((e) => e.title === title);
+/** Clock times of every Debate Club occurrence Whitespace holds (all from Google). */
+const debateTimes = () => [...new Set(named("Debate Club").map((e) => when(e).slice(11)))];
+/** Whether Google still holds the occurrence Whitespace's row points at. */
+const inGoogle = (e: Commitment) => {
+  const row = e as Commitment & { externalCalendarId?: string; externalId?: string };
+  return [...google.events.values()].some((g) => g.calendarId === row.externalCalendarId && g.id === row.externalId && g.status !== "cancelled");
+};
 
 /** Undo every item applied in the newest plan, through the real undo path. */
 async function undoLatest() {
   const { undoItem } = await import("../plan-service");
   const plan = [...state.db.plans.values()].at(-1)!;
-  for (const i of plan.items.filter((x) => x.status === "applied")) await undoItem("u1", plan.id, i.id);
+  for (const i of plan.items.filter((x) => x.status === "applied")) await undoItem("u1", plan.id, i.id, NOW);
 }
 
-const googleSnapshot = () => JSON.stringify(state.db.events.filter((e) => e.externalSource).sort((a, b) => a.id.localeCompare(b.id)));
+/** Set by scenarios where the user asked for (or approved) a Google change. */
+let googleMayChange = false;
+/** Set by scenarios where Whitespace suggests a Google change on a card (waits for Approve). */
+let googleSuggestionOk = false;
+const expectGoogleChange = () => {
+  googleMayChange = true;
+};
 
 beforeEach(() => {
   resetDb(NOW);
+  resetGoogle();
   history = [];
   s = seedWeek();
   googleBefore = googleSnapshot();
+  googleMayChange = false;
+  googleSuggestionOk = false;
 });
 
 afterEach(() => {
-  // Rule 1: Google events are read-only, in every scenario.
-  expect(googleSnapshot()).toBe(googleBefore);
-  // Nothing open may target a Google event either (approving it would edit Google data).
-  const googleIds = new Set(state.db.events.filter((e) => e.externalSource).map((e) => e.id));
-  expect(pending().filter((i) => i.targetId && googleIds.has(i.targetId)).map((i) => `${i.action}: ${i.title}`)).toEqual([]);
+  // Rule 1: Google changes only when the user asked for it (or approved it).
+  if (!googleMayChange) expect(googleSnapshot()).toBe(googleBefore);
+  // Rule 2: Whitespace's copy of Google always matches Google.
+  expect(mirrorDifferences()).toEqual([]);
+  // Rule 3: a suggestion that would change Google waits on a card only where the scenario expects one.
+  if (!googleSuggestionOk) {
+    const googleIds = new Set(state.db.events.filter((e) => e.externalSource).map((e) => e.id));
+    expect(pending().filter((i) => i.targetId && googleIds.has(i.targetId)).map((i) => `${i.action}: ${i.title}`)).toEqual([]);
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -311,12 +343,58 @@ describe("Moving and changing", () => {
     expect(when(s.tutoring)).toBe("2026-11-19 19:00-20:00");
   });
 
-  it("move 7. 'Move Debate Club to 1pm' changes nothing and says it's from Google Calendar", async () => {
-    const r = await say("Move Debate Club to 1pm", (m) => [
-      w("update_event", "Move Debate Club to 1pm", { target_ref: m.ref(s.debate), target_name: "Debate Club", start_time: "13:00", scope: "all" }),
+  it("move 7. 'Move Debate Club to 1pm, every week' moves the whole Google series now; Undo puts Google back", async () => {
+    expectGoogleChange();
+    const r = await say("Move Debate Club to 1pm, every week", (m) => [
+      w("update_event", "Move Debate Club to 1pm, every week", { target_ref: m.ref(s.debate), target_name: "Debate Club", start_time: "13:00", scope: "all" }),
     ]);
-    expect(r.said).toMatch(/Google Calendar/);
+    expect(r.said).toContain("Already done");
+    expect(r.said).toMatch(/every week, in Google Calendar too/);
+    expect(debateTimes()).toEqual(["13:00-15:00"]);
+    await undoLatest();
+    expect(debateTimes()).toEqual(["10:00-12:00"]);
+    expect(googleSnapshot()).toBe(googleBefore);
+  });
+
+  it("move 7b. 'Move debate to 1pm' asks this week or every week; 'just this week' moves only Saturday's, in Google too", async () => {
+    expectGoogleChange();
+    const t = await say("Move debate to 1pm", (m) => [w("update_event", "Move debate to 1pm", { target_ref: m.ref(s.debate), target_name: "debate", start_time: "13:00" })]);
+    expect(t.clarify?.field).toBe("scope");
+    expect(google.writes).toEqual([]);
+    await say("just this week", (m) => [w("update_event", "just this week", { draft_id: m.action(), scope: "one", explicit: false })]);
+    const debates = named("Debate Club").sort((a, b) => Date.parse(a.startsAt!) - Date.parse(b.startsAt!));
+    const sat = debates.find((e) => when(e).startsWith("2026-11-21"))!;
+    expect(when(sat)).toBe("2026-11-21 13:00-15:00");
+    expect(debates.filter((e) => e !== sat && Date.parse(e.startsAt!) > NOW.getTime()).every((e) => when(e).endsWith("10:00-12:00"))).toBe(true);
+  });
+
+  it("move 7c. 'Move family dinner to 7' (Mom's invite) is refused: only the organizer can move it", async () => {
+    const r = await say("Move family dinner to 7", (m) => [
+      w("update_event", "Move family dinner to 7", { target_ref: m.ref(s.familyDinner), target_name: "family dinner", start_time: "19:00" }),
+    ]);
+    expect(when(s.familyDinner)).toBe("2026-11-22 18:00-20:00");
+    expect(r.said).toMatch(/invite/);
     expect(applied()).toEqual([]);
+  });
+
+  it("move 7d. a view-only shared calendar's event can't be changed, and it says why", async () => {
+    const assembly = addGoogle({ title: "School Assembly", day: "2026-11-20", start: "09:00", end: "10:00", calendar: "school" });
+    googleBefore = googleSnapshot();
+    const r = await say("Move the assembly to 11", (m) => [
+      w("update_event", "Move the assembly to 11", { target_ref: m.ref(assembly), target_name: "assembly", start_time: "11:00" }),
+    ]);
+    expect(when(assembly)).toBe("2026-11-20 09:00-10:00");
+    expect(r.said).toMatch(/only view/);
+  });
+
+  it("move 7e. without edit permission yet, a Google change asks the user to reconnect", async () => {
+    google.canWrite = false;
+    for (const e of state.db.events) if (e.externalSource === "google") e.externalAccess = "read";
+    const r = await say("Delete the chemistry lab review", (m) => [
+      w("remove_event", "Delete the chemistry lab review", { target_ref: m.ref(s.labReview), target_name: "chemistry lab review" }),
+    ]);
+    expect(ev(s.labReview)).toBeDefined();
+    expect(r.said).toMatch(/Reconnect|reconnect/);
   });
 
   it("move 8. 'Make the SAT practice test 4 hours' changes its length now", async () => {
@@ -351,7 +429,8 @@ describe("Moving and changing", () => {
     expect(when(s.dentist)).toBe("2026-11-19 16:30-17:30");
   });
 
-  it("move 12. 'Push everything tomorrow back an hour': one-offs and sessions move; repeating and Google events stay, and it says why", async () => {
+  it("move 12. 'Push everything tomorrow back an hour': one-offs (Google's too) and sessions move; repeating events stay, and it says why", async () => {
+    expectGoogleChange();
     const r = await say("Push everything tomorrow back an hour", () => [
       w("move_events", "Push everything tomorrow back an hour", { date: date({ day_offset: 1 }), shift_minutes: 60 }),
     ]);
@@ -360,7 +439,8 @@ describe("Moving and changing", () => {
     expect(when(s.essaySession1)).toBe("2026-11-19 21:45-22:45");
     expect(skipped(s.school)).toEqual([]);
     expect(skipped(s.basketball)).toEqual([]);
-    expect(r.said).toMatch(/Chemistry Lab Review/);
+    expect(when(s.labReview)).toBe("2026-11-19 16:30-17:30");
+    expect(r.said).toMatch(/Chemistry Lab Review.*in Google Calendar too/);
     expect(r.said).toMatch(/School|Basketball Practice/);
   });
 
@@ -416,19 +496,49 @@ describe("Cancelling and deleting", () => {
     expect(ev(s.basketball)).toBeUndefined();
   });
 
-  it("cancel 4. 'Cancel debate this Saturday' (Google) changes nothing and explains", async () => {
+  it("cancel 4. 'Cancel debate this Saturday' removes only Saturday's Debate Club, in Google too; Undo brings it back", async () => {
+    expectGoogleChange();
+    const count = named("Debate Club").length;
     const r = await say("Cancel debate this Saturday", (m) => [
       w("remove_event", "Cancel debate this Saturday", { target_ref: m.ref(s.debate), target_name: "debate", date: date({ weekday: "sa" }) }),
     ]);
-    expect(r.said).toMatch(/Google Calendar/);
-    expect(applied()).toEqual([]);
+    expect(r.said).toContain("Already done");
+    expect(ev(s.debate)).toBeUndefined();
+    expect(named("Debate Club")).toHaveLength(count - 1);
+    await undoLatest();
+    expect(named("Debate Club")).toHaveLength(count);
+    expect(googleSnapshot()).toBe(googleBefore);
   });
 
-  it("cancel 5. 'Delete the chemistry lab review' (Google) changes nothing and explains", async () => {
+  it("cancel 5. 'Delete the chemistry lab review' removes it from Google now; Undo restores it", async () => {
+    expectGoogleChange();
     const r = await say("Delete the chemistry lab review", (m) => [
       w("remove_event", "Delete the chemistry lab review", { target_ref: m.ref(s.labReview), target_name: "chemistry lab review" }),
     ]);
-    expect(r.said).toMatch(/Google Calendar/);
+    expect(ev(s.labReview)).toBeUndefined();
+    expect(r.said).toMatch(/in Google Calendar too/);
+    await undoLatest();
+    expect(named("Chemistry Lab Review").map(when)).toEqual(["2026-11-19 15:30-16:30"]);
+    expect(googleSnapshot()).toBe(googleBefore);
+  });
+
+  it("cancel 5b. 'I quit debate, delete it from my calendar' removes the whole Google series; Undo restores every week", async () => {
+    expectGoogleChange();
+    await say("I quit debate, delete it from my calendar", (m) => [
+      w("remove_event", "I quit debate, delete it from my calendar", { target_ref: m.ref(s.debate), target_name: "debate", scope: "all" }),
+    ]);
+    expect(named("Debate Club")).toEqual([]);
+    await undoLatest();
+    expect(debateTimes()).toEqual(["10:00-12:00"]);
+    expect(googleSnapshot()).toBe(googleBefore);
+  });
+
+  it("cancel 5c. 'Remove family dinner' (an invite) is allowed: it comes off the user's calendar", async () => {
+    expectGoogleChange();
+    await say("Remove family dinner from my calendar", (m) => [
+      w("remove_event", "Remove family dinner from my calendar", { target_ref: m.ref(s.familyDinner), target_name: "family dinner" }),
+    ]);
+    expect(ev(s.familyDinner)).toBeUndefined();
   });
 
   it("cancel 6. 'Delete my Spanish vocab task' deletes it and its session now", async () => {
@@ -594,14 +704,16 @@ describe("Making room", () => {
     expect(pending().filter((i) => i.action === "move_block")).toEqual([]);
   });
 
-  it("room 2. 'Tournament Saturday 9-5, clear whatever's in the way': the session moves now, Google's Debate Club stays (explained)", async () => {
+  it("room 2. 'Tournament Saturday 9-5, clear whatever's in the way': the session moves and Saturday's Debate Club comes off Google, now", async () => {
+    expectGoogleChange();
     const r = await say("Basketball tournament Saturday 9am to 5pm, clear whatever's in the way", () => [
       w("create_event", "Basketball tournament Saturday 9am to 5pm, clear whatever's in the way", { title: "Basketball Tournament", date: date({ weekday: "sa" }), start_time: "09:00", end_time: "17:00", recurrence: "once", make_room: true }),
     ]);
     expect(named("Basketball Tournament")).toHaveLength(1);
     expect(when(s.collegeSession).slice(0, 10)).not.toBe("2026-11-21");
-    expect(r.said).toMatch(/Debate Club/);
-    expect(r.said).toMatch(/Google Calendar/);
+    expect(ev(s.debate)).toBeUndefined();
+    expect(named("Debate Club").length).toBeGreaterThan(0);
+    expect(r.said).toMatch(/Debate Club.*Google Calendar/);
   });
 
   it("room 3. 'I need 90 minutes Friday for the college essay, make room': lower-priority Spanish moves out of the way, the high-priority essay stays", async () => {
@@ -665,11 +777,13 @@ describe("Vague references", () => {
     expect(when(s.essaySession1)).toBe("2026-11-19 20:45-21:45");
   });
 
-  it("vague 5. 'cancel tomorrow's stuff after school' clears the afternoon/evening, not school", async () => {
+  it("vague 5. 'cancel tomorrow's stuff after school' clears the afternoon/evening (Google's lab review too), not school", async () => {
+    expectGoogleChange();
     await say("cancel tomorrow's stuff after school", () => [w("clear_events", "cancel tomorrow's stuff after school", { date: date({ day_offset: 1 }), start_time: "15:00" })]);
     expect(skipped(s.school)).toEqual([]);
     expect(skipped(s.basketball)).toEqual(["2026-11-19"]);
     expect(ev(s.tutoring)).toBeUndefined();
+    expect(ev(s.labReview)).toBeUndefined();
   });
 });
 
@@ -708,13 +822,16 @@ describe("Multi-step messages", () => {
     expect(minutes).toBe(120);
   });
 
-  it("multi 4. a removal plus a Google event in one message: the removal is done, the Google one is explained", async () => {
+  it("multi 4. 'Cancel robotics and debate this week': both are done now, Debate in Google too", async () => {
+    expectGoogleChange();
     const r = await say("Cancel robotics and debate this week", (m) => [
       w("remove_event", "Cancel robotics", { target_ref: m.ref(s.robotics), target_name: "robotics" }),
       w("remove_event", "debate this week", { target_ref: m.ref(s.debate), target_name: "debate", date: date({ weekday: "sa" }) }),
     ]);
     expect(ev(s.robotics)).toBeUndefined();
-    expect(r.said).toMatch(/Google Calendar/);
+    expect(ev(s.debate)).toBeUndefined();
+    expect(inGoogle(named("Debate Club")[0])).toBe(true);
+    expect(r.said).toMatch(/Debate Club.*Google Calendar too/);
   });
 });
 
@@ -801,18 +918,22 @@ describe("Honesty", () => {
 // ---------------------------------------------------------------------------
 
 describe("Round two", () => {
-  it("r2 1. 'Move everything tomorrow to Friday': one-offs keep their clock time, sessions find free time Friday", async () => {
+  it("r2 1. 'Move everything tomorrow to Friday': one-offs (Google's too) keep their clock time, sessions find free time Friday", async () => {
+    expectGoogleChange();
     const r = await say("Move everything tomorrow to Friday", () => [w("move_events", "Move everything tomorrow to Friday", { date: date({ day_offset: 1 }), target_date: date({ weekday: "fr" }) })]);
     expect(when(s.tutoring)).toBe("2026-11-20 19:30-20:30");
     expect(when(s.robotics)).toBe("2026-11-20 15:30-16:30");
     expect(skipped(s.basketball)).toEqual([]);
+    expect(when(s.labReview)).toBe("2026-11-20 15:30-16:30");
     expect(r.said).toMatch(/Chemistry Lab Review/);
   });
 
-  it("r2 2. 'Clear Saturday': Debate Club (Google) stays and is explained, the college essay session moves elsewhere", async () => {
+  it("r2 2. 'Clear Saturday': Saturday's Debate Club comes off Google, the college essay session moves elsewhere", async () => {
+    expectGoogleChange();
     const r = await say("Clear Saturday", () => [w("clear_events", "Clear Saturday", { date: date({ weekday: "sa" }) })]);
     expect(ev(s.collegeSession)).toBeDefined();
     expect(when(s.collegeSession).slice(0, 10)).not.toBe("2026-11-21");
+    expect(ev(s.debate)).toBeUndefined();
     expect(r.said).toMatch(/Debate Club/);
   });
 
@@ -823,10 +944,13 @@ describe("Round two", () => {
   });
 
   it("r2 4. 'Move tomorrow's stuff' with no new time asks when, once", async () => {
+    expectGoogleChange();
     const r = await say("Move tomorrow's stuff", () => [w("move_events", "Move tomorrow's stuff", { date: date({ day_offset: 1 }), target_name: "stuff" })]);
     expect(r.clarify?.question).toMatch(/when/i);
+    expect(google.writes).toEqual([]);
     await say("an hour later", (m) => [w("move_events", "an hour later", { draft_id: m.action(), shift_minutes: 60, explicit: false })]);
     expect(when(s.tutoring)).toBe("2026-11-19 20:30-21:30");
+    expect(when(s.labReview)).toBe("2026-11-19 16:30-17:30");
   });
 
   it("r2 5. two undos in a row reverse the two newest changes", async () => {
@@ -868,13 +992,23 @@ describe("Round two", () => {
     expect(pending().filter((i) => i.action === "skip_occurrence")).toEqual([]);
   });
 
-  it("r2 10. 'Add a hackathon Saturday 11 to 2' over Google's Debate Club: saved, Debate stays, overlap mentioned", async () => {
+  it("r2 10. 'Add a hackathon Saturday 11 to 2' over Google's Debate Club: saved now; removing that Debate waits for Approve", async () => {
+    expectGoogleChange();
+    googleSuggestionOk = true;
     const r = await say("Add a hackathon Saturday 11 to 2", () => [
       w("create_event", "Add a hackathon Saturday 11 to 2", { title: "Hackathon", date: date({ weekday: "sa" }), start_time: "11:00", end_time: "14:00", recurrence: "once" }),
     ]);
     expect(named("Hackathon")).toHaveLength(1);
     expect(r.said).toMatch(/Debate Club/);
     expect(r.said).toMatch(/Google Calendar/);
+    // Whitespace's own idea: nothing in Google changes before Approve.
+    expect(googleSnapshot()).toBe(googleBefore);
+    expect(ev(s.debate)).toBeDefined();
+    const card = pending().filter((i) => i.action === "remove_event");
+    expect(card.map((i) => i.title)).toEqual(["Debate Club"]);
+    const plan = [...state.db.plans.values()].at(-1)!;
+    await approveItems("u1", plan.id, { itemIds: card.map((i) => i.id), requestId: "40000000-0000-4000-8000-000000000010", now: NOW });
+    expect(ev(s.debate)).toBeUndefined();
   });
 
   it("r2 11. 'I can't make tutoring tomorrow' (a one-time event) proposes cancelling it; nothing changes before Approve", async () => {
@@ -931,10 +1065,14 @@ describe("Round two", () => {
     expect(ev(s.tutoring)).toBeUndefined();
   });
 
-  it("r2 18. 'clear this week' never touches Google events and leaves nothing pending", async () => {
+  it("r2 18. 'clear this week' clears Google's own events too, leaves the shared Family Dinner, and leaves nothing pending", async () => {
+    expectGoogleChange();
     await say("clear this week", () => [w("clear_events", "clear this week", { window: "this_week", target_name: "everything" })]);
     expect(ev(s.dentist)).toBeUndefined();
     expect(skipped(s.basketball)).toEqual(["2026-11-19"]);
+    expect(ev(s.labReview)).toBeUndefined();
+    expect(ev(s.debate)).toBeUndefined();
+    expect(ev(s.familyDinner)).toBeDefined();
     expect(pending()).toEqual([]);
   });
 });

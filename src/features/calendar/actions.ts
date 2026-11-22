@@ -9,15 +9,16 @@ import { dateKeyInZone, isDateKey, isValidTimeZone } from "@/lib/scheduling/zone
 import { DEFAULT_PROFILE } from "@/features/settings/defaults";
 import type { ActionResult } from "@/features/shared/action-result";
 import { PLANNING_PATHS, runAction } from "@/features/shared/run-action";
+import { removeGoogleEvent } from "@/features/google/server/writes";
 
 /**
  * Calendar writes. Every change here comes from the user pressing a
  * button: the app never creates, moves or deletes events on its own.
  */
 
-const IMPORTED = "This event comes from Google Calendar. Change it there and Whitespace updates on its own.";
+const IMPORTED = "This event comes from Google Calendar. Ask Whitespace to move it, or change it in Google Calendar.";
 
-/** Imported events are read-only here: the next sync would undo any change. */
+/** The event form doesn't edit Google events (the assistant and Delete below do, in Google too). */
 async function assertEditable(userId: string, id: string): Promise<void> {
   const event = await getEvent(userId, id);
   if (event.externalSource) throw new DataValidationError(IMPORTED);
@@ -88,5 +89,16 @@ export async function removeEvent(args: {
         : DEFAULT_PROFILE.timezone;
     const firstDate = dateKeyInZone(new Date(event.startsAt!), tz);
     return endSeriesBefore(userId, args.id, date, firstDate);
+  });
+}
+
+/**
+ * Deletes a Google Calendar event from Google and from Whitespace.
+ * "single" removes that occurrence; "all" the whole repeating series.
+ */
+export async function removeGoogleCalendarEvent(args: { id: string; scope: "single" | "all" }): Promise<ActionResult> {
+  return runAction([...PLANNING_PATHS, "/insights"], async (userId) => {
+    if (!isUuid(args.id)) throw new NotFoundError("Event");
+    await removeGoogleEvent(userId, args.id, args.scope === "all" ? "series" : "one");
   });
 }

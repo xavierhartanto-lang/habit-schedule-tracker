@@ -11,10 +11,10 @@ import {
   updateGoogleConnection,
   upsertImportedEvents,
 } from "@/lib/db/google";
-import type { GoogleConnectionRow } from "@/lib/db/database.types";
 import { getProfile } from "@/lib/db/profiles";
-import { GoogleAuthError, getGoogleConfig, listCalendars, listEvents, refreshAccessToken, type GoogleConfig } from "@/lib/google/api";
-import { decryptToken, encryptToken } from "@/lib/google/crypto";
+import { DataValidationError } from "@/lib/db/client";
+import { GoogleAuthError, getGoogleConfig } from "@/lib/google/api";
+import { accessToken, clientFromToken } from "./client";
 import { mapGoogleEvent, staleIds, syncWindow, type ImportedEvent } from "@/lib/google/map";
 
 /**
@@ -35,21 +35,6 @@ export type SyncOutcome =
   | { status: "synced"; imported: number; removed: number }
   | { status: "error"; error: string };
 
-async function accessToken(userId: string, conn: GoogleConnectionRow, config: GoogleConfig, now: Date): Promise<string> {
-  const cached = conn.access_token ? decryptToken(conn.access_token, config.clientSecret) : null;
-  const expires = conn.access_token_expires_at ? Date.parse(conn.access_token_expires_at) : 0;
-  if (cached && expires - now.getTime() > 60_000) return cached;
-
-  const refresh = decryptToken(conn.refresh_token, config.clientSecret);
-  if (!refresh) throw new GoogleAuthError();
-  const t = await refreshAccessToken(config, refresh);
-  await updateGoogleConnection(userId, {
-    access_token: encryptToken(t.access_token, config.clientSecret),
-    access_token_expires_at: new Date(now.getTime() + t.expires_in * 1000).toISOString(),
-  });
-  return t.access_token;
-}
-
 export async function syncGoogleCalendar(
   userId: string,
   options: { force?: boolean; now?: Date } = {},
@@ -67,11 +52,11 @@ export async function syncGoogleCalendar(
   if (!(await claimGoogleSync(userId, now))) return { status: "busy" };
 
   try {
-    const token = await accessToken(userId, conn, config, now);
+    const client = clientFromToken(await accessToken(userId, conn, config, now), conn.can_write === true);
     const profile = await getProfile(userId);
     const userTimeZone = profile?.timezone ?? "UTC";
 
-    const list = await listCalendars(token);
+    const list = await client.listCalendars();
     const zones = new Map(list.map((c) => [c.id, c.timeZone ?? null]));
     await replaceGoogleCalendars(
       userId,
@@ -80,6 +65,7 @@ export async function syncGoogleCalendar(
         name: c.summaryOverride ?? c.summary ?? "Calendar",
         color: c.backgroundColor ?? null,
         primary: Boolean(c.primary),
+        accessRole: c.accessRole ?? null,
       })),
     );
 
@@ -93,9 +79,10 @@ export async function syncGoogleCalendar(
         removed += await deleteImportedEvents(userId, cal.google_calendar_id);
         continue;
       }
-      const page = await listEvents(token, cal.google_calendar_id, window);
+      const page = await client.listEvents(cal.google_calendar_id, window);
+      const calendarWritable = client.canWrite && (cal.access_role === "owner" || cal.access_role === "writer");
       const events = page.items
-        .map((e) => mapGoogleEvent(e, { userTimeZone, calendarTimeZone: page.timeZone ?? zones.get(cal.google_calendar_id) }))
+        .map((e) => mapGoogleEvent(e, { userTimeZone, calendarTimeZone: page.timeZone ?? zones.get(cal.google_calendar_id), calendarWritable }))
         .filter((e): e is ImportedEvent => e !== null);
       // One row per Google id, even if a page repeats one.
       const byId = new Map(events.map((e) => [e.externalId, e]));
@@ -117,8 +104,10 @@ export async function syncGoogleCalendar(
     return { status: "synced", imported, removed };
   } catch (e) {
     const message =
-      e instanceof GoogleAuthError ? e.message : "Couldn't reach Google Calendar. Whitespace will try again soon.";
-    if (!(e instanceof GoogleAuthError)) console.error("[google-sync]", e);
+      e instanceof GoogleAuthError || e instanceof DataValidationError
+        ? e.message
+        : "Couldn't reach Google Calendar. Whitespace will try again soon.";
+    if (!(e instanceof GoogleAuthError) && !(e instanceof DataValidationError)) console.error("[google-sync]", e);
     await updateGoogleConnection(userId, { last_sync_error: message, sync_started_at: null }).catch(() => undefined);
     return { status: "error", error: message };
   }

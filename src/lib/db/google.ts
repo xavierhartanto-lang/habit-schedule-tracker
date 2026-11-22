@@ -20,7 +20,7 @@ export function isMissingSchema(error: { code?: string; message?: string }): boo
     error.code === "42703" ||
     error.code === "PGRST204" ||
     error.code === "PGRST205" ||
-    /google_(connections|calendars)|external_(source|id|calendar_id|url)/.test(error.message ?? "")
+    /google_(connections|calendars)|external_(source|id|calendar_id|url|series_id|access|shared)|can_write|access_role/.test(error.message ?? "")
   );
 }
 
@@ -39,7 +39,7 @@ export async function getGoogleConnection(userId: string): Promise<GoogleConnect
 
 export async function saveGoogleConnection(
   userId: string,
-  v: { email: string | null; refreshToken: string; accessToken: string; expiresAt: string },
+  v: { email: string | null; refreshToken: string; accessToken: string; expiresAt: string; canWrite: boolean },
 ): Promise<void> {
   const supabase = await requireDb();
   const { error } = await supabase.from("google_connections").upsert(
@@ -49,6 +49,9 @@ export async function saveGoogleConnection(
       refresh_token: v.refreshToken,
       access_token: v.accessToken,
       access_token_expires_at: v.expiresAt,
+      can_write: v.canWrite,
+      // Access may have changed (e.g. edit permission granted): re-import now.
+      last_synced_at: null,
       last_sync_error: null,
       sync_started_at: null,
     },
@@ -114,7 +117,7 @@ export async function listGoogleCalendars(userId: string): Promise<GoogleCalenda
  */
 export async function replaceGoogleCalendars(
   userId: string,
-  calendars: { googleId: string; name: string; color: string | null; primary: boolean }[],
+  calendars: { googleId: string; name: string; color: string | null; primary: boolean; accessRole: GoogleCalendarRow["access_role"] }[],
 ): Promise<void> {
   const supabase = await requireDb();
   const existing = await listGoogleCalendars(userId);
@@ -127,6 +130,7 @@ export async function replaceGoogleCalendars(
     name: c.name.slice(0, 200) || "Calendar",
     color: c.color && /^#[0-9a-f]{3,8}$/i.test(c.color) ? c.color : null,
     is_primary: c.primary,
+    access_role: c.accessRole ?? null,
     selected: known.get(c.googleId)?.selected ?? (c.primary && existing.length === 0),
   }));
   if (rows.length) {
@@ -195,6 +199,9 @@ export async function upsertImportedEvents(
       external_calendar_id: calendarId,
       external_id: e.externalId,
       external_url: e.externalUrl,
+      external_series_id: e.seriesId,
+      external_access: e.access,
+      external_shared: e.shared,
     }));
     const { error } = await supabase
       .from("commitments")
@@ -256,4 +263,65 @@ export async function setImportedEventsArea(userId: string, calendarId: string, 
     .eq("external_source", "google")
     .eq("external_calendar_id", calendarId);
   if (error) throw fail(error);
+}
+
+// ---------- Writing back to Google ----------
+
+export type ImportedEventRef = {
+  id: string;
+  title: string;
+  location: string | null;
+  startsAt: string;
+  endsAt: string;
+  allDay: boolean;
+  timezone: string | null;
+  calendarId: string;
+  externalId: string;
+  seriesId: string | null;
+  access: "read" | "delete" | "edit";
+  shared: boolean;
+};
+
+/** An imported event with everything needed to change it in Google. Null if it isn't one. */
+export async function getImportedEvent(userId: string, id: string): Promise<ImportedEventRef | null> {
+  const supabase = await requireDb();
+  const { data, error } = await supabase.from("commitments").select("*").eq("user_id", userId).eq("id", id).maybeSingle();
+  if (error) throw fail(error);
+  if (!data || data.external_source !== "google" || !data.external_id || !data.external_calendar_id || !data.starts_at || !data.ends_at) return null;
+  return {
+    id: data.id,
+    title: data.title,
+    location: data.location,
+    startsAt: data.starts_at,
+    endsAt: data.ends_at,
+    allDay: data.all_day,
+    timezone: data.timezone,
+    calendarId: data.external_calendar_id,
+    externalId: data.external_id,
+    seriesId: data.external_series_id ?? null,
+    access: data.external_access ?? "read",
+    shared: data.external_shared ?? false,
+  };
+}
+
+/** Rows of one repeating Google event (optionally only those overlapping a window). */
+export async function listSeriesRows(
+  userId: string,
+  calendarId: string,
+  seriesId: string,
+  window?: { from: string; to: string },
+): Promise<{ id: string; externalId: string }[]> {
+  const supabase = await requireDb();
+  let q = supabase
+    .from("commitments")
+    .select("id, external_id")
+    .eq("user_id", userId)
+    .eq("external_source", "google")
+    .eq("external_calendar_id", calendarId)
+    .eq("external_series_id", seriesId)
+    .limit(5000);
+  if (window) q = q.gt("ends_at", window.from).lt("starts_at", window.to);
+  const { data, error } = await q;
+  if (error) throw fail(error);
+  return data.map((r) => ({ id: r.id, externalId: r.external_id ?? "" }));
 }

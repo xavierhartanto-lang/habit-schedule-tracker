@@ -4,11 +4,19 @@ import type { GoogleEvent } from "./map";
 
 /**
  * Thin wrapper over Google's OAuth and Calendar REST endpoints.
- * Read-only: Whitespace asks only for calendar.readonly and never writes
- * to Google.
+ * calendar.readonly lists calendars and events; calendar.events lets
+ * Whitespace change, move and remove events the user asked it to.
+ * Every write passes sendUpdates=none: Whitespace never emails guests.
  */
 
-export const GOOGLE_SCOPES = ["openid", "email", "https://www.googleapis.com/auth/calendar.readonly"];
+export const READ_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
+export const WRITE_SCOPE = "https://www.googleapis.com/auth/calendar.events";
+export const GOOGLE_SCOPES = ["openid", "email", READ_SCOPE, WRITE_SCOPE];
+
+/** True when a granted scope string allows event writes. */
+export function canWrite(scope: string | undefined): boolean {
+  return (scope ?? "").split(/\s+/).some((s) => s === WRITE_SCOPE || s === "https://www.googleapis.com/auth/calendar");
+}
 
 export type GoogleConfig = { clientId: string; clientSecret: string };
 
@@ -36,10 +44,13 @@ export class GoogleAuthError extends Error {
 
 export class GoogleApiError extends Error {
   readonly status: number;
-  constructor(message: string, status: number) {
+  /** Google's own error code, e.g. "invalid_client" or "redirect_uri_mismatch". */
+  readonly code: string | null;
+  constructor(message: string, status: number, code: string | null = null) {
     super(message);
     this.name = "GoogleApiError";
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -76,7 +87,7 @@ async function tokenRequest(body: Record<string, string>): Promise<TokenResponse
   const json = (await res.json().catch(() => ({}))) as Partial<TokenResponse> & { error?: string };
   if (!res.ok || !json.access_token) {
     if (json.error === "invalid_grant") throw new GoogleAuthError();
-    throw new GoogleApiError(`Google token request failed (${json.error ?? res.status}).`, res.status);
+    throw new GoogleApiError(`Google token request failed (${json.error ?? res.status}).`, res.status, json.error ?? null);
   }
   return json as TokenResponse;
 }
@@ -123,14 +134,97 @@ export function emailFromIdToken(idToken: string | undefined): string | null {
   }
 }
 
-async function get<T>(accessToken: string, url: string): Promise<T> {
-  const res = await fetch(url, { headers: { authorization: `Bearer ${accessToken}` }, cache: "no-store" });
+/** The event is gone in Google (deleted there, or never existed). */
+export class GoogleGoneError extends Error {
+  constructor() {
+    super("That event no longer exists in Google Calendar.");
+    this.name = "GoogleGoneError";
+  }
+}
+
+/** Google refused a write: the scope is missing, or the user can't edit this event. */
+export class GoogleForbiddenError extends Error {
+  readonly missingScope: boolean;
+  constructor(missingScope: boolean) {
+    super(missingScope ? "Whitespace needs permission to edit Google Calendar." : "Google Calendar didn't allow this change.");
+    this.name = "GoogleForbiddenError";
+    this.missingScope = missingScope;
+  }
+}
+
+async function call<T>(accessToken: string, url: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
+  const res = await fetch(url, {
+    method: init.method ?? "GET",
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      ...(init.body !== undefined ? { "content-type": "application/json" } : {}),
+    },
+    body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
+    cache: "no-store",
+  });
   if (res.status === 401) throw new GoogleAuthError();
+  if (res.status === 404 || res.status === 410) throw new GoogleGoneError();
   if (!res.ok) {
-    const json = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
+    const json = (await res.json().catch(() => null)) as { error?: { message?: string; errors?: { reason?: string }[] } } | null;
+    if (res.status === 403) {
+      const reasons = (json?.error?.errors ?? []).map((e) => e.reason);
+      if (reasons.includes("insufficientPermissions") || /insufficient.*scope/i.test(json?.error?.message ?? "")) throw new GoogleForbiddenError(true);
+      if (reasons.includes("forbidden") || reasons.includes("forbiddenForNonOrganizer")) throw new GoogleForbiddenError(false);
+    }
     throw new GoogleApiError(json?.error?.message ?? `Google Calendar request failed (${res.status}).`, res.status);
   }
-  return (await res.json()) as T;
+  if (res.status === 204) return undefined as T;
+  const text = await res.text();
+  return (text ? JSON.parse(text) : undefined) as T;
+}
+
+const get = <T>(accessToken: string, url: string) => call<T>(accessToken, url);
+
+const EVENT_FIELDS =
+  "id,status,htmlLink,summary,description,location,eventType,start,end,attendees(self,responseStatus,resource),recurringEventId,organizer(self),guestsCanModify,recurrence";
+
+const eventUrl = (calendarId: string, eventId: string, query = "") =>
+  `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}${query}`;
+
+export function getEvent(accessToken: string, calendarId: string, eventId: string): Promise<GoogleEvent> {
+  return call<GoogleEvent>(accessToken, eventUrl(calendarId, eventId, `?fields=${encodeURIComponent(EVENT_FIELDS)}`));
+}
+
+/** Removes an event (an occurrence's id removes that day; a series' id removes every day). */
+export async function deleteEvent(accessToken: string, calendarId: string, eventId: string): Promise<void> {
+  await call<void>(accessToken, eventUrl(calendarId, eventId, "?sendUpdates=none"), { method: "DELETE" });
+}
+
+/** Changes some fields. `{ status: "confirmed" }` brings back a recently deleted event. */
+export function patchEvent(accessToken: string, calendarId: string, eventId: string, body: Record<string, unknown>): Promise<GoogleEvent> {
+  return call<GoogleEvent>(accessToken, eventUrl(calendarId, eventId, `?sendUpdates=none&fields=${encodeURIComponent(EVENT_FIELDS)}`), {
+    method: "PATCH",
+    body,
+  });
+}
+
+/** Every occurrence of a repeating event in the window. */
+export async function listInstances(
+  accessToken: string,
+  calendarId: string,
+  seriesId: string,
+  window: { from: Date; to: Date },
+): Promise<GoogleEvent[]> {
+  const items: GoogleEvent[] = [];
+  let pageToken: string | undefined;
+  do {
+    const params = new URLSearchParams({
+      timeMin: window.from.toISOString(),
+      timeMax: window.to.toISOString(),
+      maxResults: "250",
+      fields: `nextPageToken,items(${EVENT_FIELDS})`,
+    });
+    if (pageToken) params.set("pageToken", pageToken);
+    const page = await get<{ items?: GoogleEvent[]; nextPageToken?: string }>(accessToken, eventUrl(calendarId, seriesId, `/instances?${params}`));
+    items.push(...(page.items ?? []));
+    pageToken = page.nextPageToken;
+  } while (pageToken && items.length < MAX_EVENTS_PER_CALENDAR);
+  return items;
 }
 
 export type GoogleCalendarListEntry = {
@@ -141,6 +235,7 @@ export type GoogleCalendarListEntry = {
   primary?: boolean;
   timeZone?: string;
   hidden?: boolean;
+  accessRole?: "owner" | "writer" | "reader" | "freeBusyReader";
 };
 
 export async function listCalendars(accessToken: string): Promise<GoogleCalendarListEntry[]> {
@@ -177,8 +272,7 @@ export async function listEvents(
       timeMin: window.from.toISOString(),
       timeMax: window.to.toISOString(),
       maxResults: "250",
-      fields:
-        "nextPageToken,timeZone,items(id,status,htmlLink,summary,description,location,eventType,start,end,attendees(self,responseStatus))",
+      fields: `nextPageToken,timeZone,items(${EVENT_FIELDS})`,
     });
     if (pageToken) params.set("pageToken", pageToken);
     const page = await get<{ items?: GoogleEvent[]; nextPageToken?: string; timeZone?: string }>(

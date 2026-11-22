@@ -12,6 +12,8 @@ export type GoogleStatus =
   | {
       state: "connected";
       email: string | null;
+      /** Granted edit access (calendar.events). */
+      canWrite: boolean;
       lastSyncedAt: string | null;
       lastError: string | null;
       calendars: GoogleCalendarChoice[];

@@ -77,6 +77,15 @@ export type Commitment = {
   externalSource?: "google" | null;
   /** Link to open the event in its own calendar. */
   externalUrl?: string | null;
+  /** The repeating Google event this occurrence belongs to. */
+  externalSeriesId?: string | null;
+  /**
+   * What Whitespace may do to an imported event in its own calendar:
+   * read only, remove it, or edit it (move, rename). Null = read only.
+   */
+  externalAccess?: "read" | "delete" | "edit" | null;
+  /** Other people are invited: bulk changes leave it alone. */
+  externalShared?: boolean;
   /** When the row was created (ISO). */
   createdAt?: string;
   /** Work sessions: what actually happened. Null = not recorded (assumed done once past). */

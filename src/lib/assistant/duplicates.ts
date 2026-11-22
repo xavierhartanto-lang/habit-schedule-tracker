@@ -16,9 +16,10 @@ import { isGenericToken, nameTokens } from "./resolve";
  * w/ Mr. Lee"). Unrelated names that only partly overlap are a conflict.
  * Two Whitespace events need a shared word, or the exact same times and related names.
  *
- * The copy that goes is always a Whitespace one. Google events are read-only
- * here, so the Google copy is the one kept. Between two Whitespace copies the
- * more specific (longer) name stays.
+ * The copy that goes is always a Whitespace one: Google Calendar is the
+ * source of truth (other people and devices see it), so the Google copy is the
+ * one kept, and a cleanup never deletes anything from Google. Between two
+ * Whitespace copies the more specific (longer) name stays.
  */
 export type DuplicatePair = { keep: Occurrence; drop: Occurrence };
 
@@ -90,7 +91,7 @@ export function findDuplicates(events: readonly Commitment[], from: Date, to: Da
       const a = occ[i];
       const b = occ[j];
       if (dropped.has(a.key) || dropped.has(b.key) || a.event.id === b.event.id) continue;
-      if (isGoogle(a) && isGoogle(b)) continue; // both from Google: nothing Whitespace can remove
+      if (isGoogle(a) && isGoogle(b)) continue; // both in Google: a cleanup never deletes from Google
       if (!sameCommitment(a, b)) continue;
       const keep = keeper(a, b);
       const drop = keep === a ? b : a;

@@ -100,6 +100,10 @@ export type CommitmentRow = Timestamps & {
   external_calendar_id?: string | null;
   external_id?: string | null;
   external_url?: string | null;
+  /** Two-way Google (20261202000000). */
+  external_series_id?: string | null;
+  external_access?: "read" | "delete" | "edit" | null;
+  external_shared?: boolean;
 } & Provenance;
 
 export type TaskRow = Timestamps & {
@@ -267,6 +271,8 @@ export type GoogleConnectionRow = Timestamps & {
   last_synced_at: string | null;
   last_sync_error: string | null;
   sync_started_at: string | null;
+  /** Granted calendar.events (20261202000000). */
+  can_write?: boolean;
 };
 
 export type GoogleCalendarRow = Timestamps & {
@@ -278,6 +284,8 @@ export type GoogleCalendarRow = Timestamps & {
   is_primary: boolean;
   selected: boolean;
   life_area_id: string | null;
+  /** 20261202000000. */
+  access_role?: "owner" | "writer" | "reader" | "freeBusyReader" | null;
 };
 
 export type PlanKindEnum = "actions" | "schedule" | "reschedule";
