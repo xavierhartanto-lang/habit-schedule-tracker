@@ -36,10 +36,13 @@ export class GoogleAuthError extends Error {
 
 export class GoogleApiError extends Error {
   readonly status: number;
-  constructor(message: string, status: number) {
+  /** Google's own error code, e.g. "invalid_client" or "redirect_uri_mismatch". */
+  readonly code: string | null;
+  constructor(message: string, status: number, code: string | null = null) {
     super(message);
     this.name = "GoogleApiError";
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -76,7 +79,7 @@ async function tokenRequest(body: Record<string, string>): Promise<TokenResponse
   const json = (await res.json().catch(() => ({}))) as Partial<TokenResponse> & { error?: string };
   if (!res.ok || !json.access_token) {
     if (json.error === "invalid_grant") throw new GoogleAuthError();
-    throw new GoogleApiError(`Google token request failed (${json.error ?? res.status}).`, res.status);
+    throw new GoogleApiError(`Google token request failed (${json.error ?? res.status}).`, res.status, json.error ?? null);
   }
   return json as TokenResponse;
 }
