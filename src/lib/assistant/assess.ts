@@ -3,7 +3,7 @@ import type { Clarify, ClarifyField } from "@/features/assistant/plan-types";
 import type { Commitment, ContextAttributes, Goal, Habit, HabitCadence, LifeAreaRecord, Task, Weekday } from "@/lib/domain/types";
 import { WEEKDAYS } from "@/lib/domain/types";
 import { expandEvent } from "@/lib/scheduling/recurrence";
-import { addDaysToKey, dateKeyInZone, startOfDayInZone, timeKeyInZone } from "@/lib/scheduling/zoned";
+import { addDaysToKey, dateKeyInZone, startOfDayInZone, startOfWeekKey, timeKeyInZone } from "@/lib/scheduling/zoned";
 import { addMinutesToTime, clockLabel, firstMatchingDay, hasDateRef, minutesBetweenTimes, resolveDateRef, shortDate, weekdayName, weekdayOf } from "./dates";
 import type { Intent, PlanWindow } from "./intents";
 import { isGenericToken, nameScore, nameTokens, resolveEntity } from "./resolve";
@@ -74,6 +74,8 @@ export type ActionSpec =
       notes: string | null;
       /** What Whitespace filled in from what it already knows ("Same length as your usual Basketball Practice."). */
       assumed?: string | null;
+      /** "Make room": sessions in the way move and repeating events skip that day, as part of the command. */
+      makeRoom?: boolean;
     }
   | {
       /** Change a saved event. scope "one" = only `occurrenceDate` of a repeating event. */
@@ -146,9 +148,33 @@ export type ActionSpec =
       deadlineDate: string | null;
       deadlineTime: string | null;
       window: PlanWindow;
+      /** "2 hours on Friday": the work happens that day. */
+      onDate?: string | null;
       preferredDays: Weekday[];
       taskId: string | null;
       lifeAreaId: string | null;
+      /** "Make room": lower-priority sessions in the way move elsewhere when it doesn't fit. */
+      makeRoom?: boolean;
+    }
+  | {
+      /**
+       * Several calendar items at once, picked by period and (optionally) name:
+       * "push everything tomorrow back an hour", "clear tomorrow", "cancel my study sessions this week".
+       * The items are chosen in buildPlan from the full calendar.
+       */
+      kind: "bulk_change";
+      mode: "move" | "clear";
+      /** Local dates: from (inclusive) to (exclusive). */
+      from: string;
+      to: string;
+      /** Only items starting at or after this local time on `from` ("after school"). */
+      fromTime: string | null;
+      /** The user's words for which items, or null for everything in the period. */
+      filter: string | null;
+      /** Named explicitly as the period's items, so repeating events in it move too. */
+      shiftMinutes: number | null;
+      targetDate: string | null;
+      label: string;
     }
   | { kind: "cant_make"; date: string | null; blocks: Commitment[]; event: Commitment | null; title: string }
   /** Every matching event goes (a repeating event goes as a whole series). Empty when nothing matched. */
@@ -317,6 +343,17 @@ function listLabels(labels: string[]): string {
   return `${l.slice(0, -1).join(", ")} or ${l[l.length - 1]}`;
 }
 
+/**
+ * Where to look for "the event" the user means. "My chem session" is one of the
+ * work sessions Whitespace scheduled, not the Chemistry Lab Review on the calendar.
+ */
+function calendarFor(words: string | null, refs: RefTable): Map<string, Commitment> {
+  const all = new Map<string, Commitment>([...refs.events, ...refs.blocks]);
+  if (!words || !/\b(?:sessions?|study time|work time|study blocks?)\b/i.test(words)) return all;
+  const named = [...refs.blocks.values()].some((b) => nameScore(words, b.title) >= 0.15);
+  return named ? new Map(refs.blocks) : all;
+}
+
 /** Does the event (or any repeat of it) happen on this local day? */
 export function occursOn(item: { startsAt?: string | null }, dateKey: string, timeZone: string): boolean {
   const event = item as Commitment;
@@ -359,16 +396,25 @@ function candidates<T extends { title: string }>(map: Map<string, T>, title: str
     .map((v) => v.title);
 }
 
+/** "11:30 PM for an hour" ends at 12:30 AM the next day; the end time is then earlier than the start. */
+function wrapTime(start: string, minutes: number): string {
+  const [h, m] = start.split(":").map(Number);
+  const total = (h * 60 + m + minutes) % (24 * 60);
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
 function eventTimes(intent: Intent): { start: string; end: string } | { missing: "time" | "duration" } {
   if (!intent.startTime) return { missing: "time" };
   if (intent.endTime) {
-    if (minutesBetweenTimes(intent.startTime, intent.endTime) <= 0) return { missing: "duration" };
+    const length = minutesBetweenTimes(intent.startTime, intent.endTime);
+    // "10pm to 1am": an evening start and an early-morning end run overnight.
+    const overnight = length < 0 && intent.startTime >= "17:00" && intent.endTime <= "06:00";
+    if (length <= 0 && !overnight) return { missing: "duration" };
     return { start: intent.startTime, end: intent.endTime };
   }
   if (intent.durationMinutes) {
-    const end = addMinutesToTime(intent.startTime, intent.durationMinutes);
-    if (!end) return { missing: "duration" };
-    return { start: intent.startTime, end };
+    if (intent.durationMinutes >= 24 * 60) return { missing: "duration" };
+    return { start: intent.startTime, end: addMinutesToTime(intent.startTime, intent.durationMinutes) ?? wrapTime(intent.startTime, intent.durationMinutes) };
   }
   return { missing: "duration" };
 }
@@ -417,6 +463,11 @@ function assessEvent(raw: Intent, world: World): Assessment {
   if (!date && recurringDays.length) date = firstMatchingDay(world.todayKey, recurringDays);
   if (!date && !hasDateRef(intent.date) && intent.days.length) date = firstMatchingDay(world.todayKey, intent.days);
   if (!date) return needs(intent, "date", title, `What day is ${lower(title)}?`);
+  // "Gym every weekday at 6am", said in the afternoon: the series starts with the next one, not this morning's.
+  if (date === world.todayKey && intent.recurrence && intent.recurrence !== "once" && intent.startTime && world.nowTime && intent.startTime < world.nowTime && !intent.date) {
+    const days: Weekday[] = intent.recurrence === "daily" ? [...WEEKDAYS] : intent.recurrence === "weekdays" ? ["mo", "tu", "we", "th", "fr"] : recurringDays.length ? recurringDays : intent.days;
+    date = firstMatchingDay(addDaysToKey(world.todayKey, 1), days.length ? days : [weekdayOf(date)]) ?? date;
+  }
 
   // One time or repeating. Only ask when it reads like a routine (weekday given, no calendar date).
   if (intent.recurrence === null) {
@@ -470,6 +521,7 @@ function assessEvent(raw: Intent, world: World): Assessment {
       location: intent.location,
       notes: intent.details,
       assumed,
+      makeRoom: intent.makeRoom,
     },
   };
 }
@@ -489,10 +541,12 @@ function usual(world: World, title: string): KnownActivity | null {
 function assessEventUpdate(original: Intent, world: World): Assessment {
   // "Just this week" next to another change means only that day, not "stop repeating".
   const otherChange = !!(original.startTime || original.endTime || original.durationMinutes || original.date || original.location || (original.title && original.targetName));
-  const intent: Intent =
-    original.recurrence === "once" && otherChange && !original.scope ? { ...original, recurrence: null, scope: "one" } : original;
-  const calendar = new Map<string, Commitment>([...world.refs.events, ...world.refs.blocks]);
-  const found = findTarget(intent, world, calendar, "event", { words: intent.targetName });
+  const otherChangeOrShift = otherChange || !!original.shiftMinutes;
+  let intent: Intent =
+    original.recurrence === "once" && otherChangeOrShift && !original.scope ? { ...original, recurrence: null, scope: "one" } : original;
+  const calendar = calendarFor(intent.targetName, world.refs);
+  // The day may name which one ("Friday's essay session") when the name alone doesn't.
+  const found = findTarget(intent, world, calendar, "event", { words: intent.targetName, onDate: resolveDateRef(intent.date, world.todayKey, world.weekStartsOn) });
   if (!found.ok) return found.result;
   const event = found.item;
   const tz = event.timezone ?? world.timeZone;
@@ -505,6 +559,15 @@ function assessEventUpdate(original: Intent, world: World): Assessment {
   const oldEnd = timeKeyInZone(end, tz);
   const length = Math.round((end.getTime() - start.getTime()) / 60_000);
   const recurring = !!event.recurrenceRule;
+
+  // "An hour later" / "30 minutes earlier": the same day, a new start.
+  if (intent.shiftMinutes && !intent.startTime && !intent.endTime) {
+    const shifted = addMinutesToTime(oldStart, intent.shiftMinutes);
+    if (!shifted) {
+      return { status: "skip", intent, reason: "Crosses midnight.", note: `Moving ${event.title} by ${intent.shiftMinutes} minutes would cross midnight, so nothing was changed. Ask for the new day and time.` };
+    }
+    intent = { ...intent, startTime: shifted };
+  }
 
   const change: EventChange = {};
   const newTitle = intent.title && normalizeText(intent.title) !== normalizeText(event.title) && nameScore(intent.targetName, intent.title) < 0.99 ? intent.title : null;
@@ -651,6 +714,8 @@ function assessPlanTime(intent: Intent, world: World): Assessment {
     return needs(intent, "deadline", title, `That date has passed. When is ${lower(title)} due?`);
   }
   if (!deadlineDate) deadlineTime = null;
+  const onDate = resolveDateRef(intent.date, world.todayKey, world.weekStartsOn);
+  if (onDate && onDate < world.todayKey) return needs(intent, "date", title, `That day has passed. Which day should I find time for ${lower(title)}?`);
 
   const window: PlanWindow =
     intent.window ?? (deadlineDate || task?.dueAt ? "until_deadline" : "this_week");
@@ -667,8 +732,63 @@ function assessPlanTime(intent: Intent, world: World): Assessment {
       deadlineTime,
       window,
       preferredDays: intent.days,
+      onDate,
       taskId: task?.id ?? null,
       lifeAreaId: lifeAreaId(world, intent.area) ?? task?.lifeAreaId ?? null,
+      makeRoom: intent.makeRoom,
+    },
+  };
+}
+
+const EVERYTHING = /^(?:everything|all|all of it|stuff|my stuff|things|it all|anything|whatever|the day|my day|my schedule|my calendar|all my stuff|all my things|everything on (?:it|my calendar)|events|my events|plans|my plans)$/i;
+
+/** Which period a bulk change covers: a day, a named period, or (with only a name) the next two weeks. */
+function bulkRange(intent: Intent, world: World): { from: string; to: string } | null {
+  const day = resolveDateRef(intent.date, world.todayKey, world.weekStartsOn);
+  if (day) return { from: day, to: addDaysToKey(day, 1) };
+  const today = world.todayKey;
+  const weekStart = startOfWeekKey(today, world.weekStartsOn);
+  switch (intent.window) {
+    case "today":
+      return { from: today, to: addDaysToKey(today, 1) };
+    case "tomorrow":
+      return { from: addDaysToKey(today, 1), to: addDaysToKey(today, 2) };
+    case "this_week":
+      return { from: today, to: addDaysToKey(weekStart, 7) };
+    case "next_week":
+      return { from: addDaysToKey(weekStart, 7), to: addDaysToKey(weekStart, 14) };
+    default:
+      return null;
+  }
+}
+
+function assessBulk(intent: Intent, world: World): Assessment {
+  const words = (intent.targetName ?? "").trim().replace(/[.!?]+$/, "");
+  const filter = words && !EVERYTHING.test(words) && !PRONOUN.test(words) ? words : null;
+  const mode = intent.type === "move_events" ? "move" : "clear";
+  let range = bulkRange(intent, world);
+  if (!range && filter) range = { from: world.todayKey, to: addDaysToKey(world.todayKey, 14) };
+  if (!range) {
+    return needs(intent, "date", "Calendar", mode === "move" ? "Which day should I move things from?" : "Which day should I clear?", ["Today", "Tomorrow", "This week"]);
+  }
+  const targetDate = mode === "move" ? resolveDateRef(intent.targetDate, world.todayKey, world.weekStartsOn) : null;
+  if (mode === "move" && !intent.shiftMinutes && !targetDate) {
+    return needs(intent, "other", "Moving", "Move them to when? A new day, or earlier or later by how much?", ["An hour later", "30 minutes earlier", "Tomorrow"]);
+  }
+  if (targetDate && targetDate < world.todayKey) return needs(intent, "date", "Moving", "That day has passed. Which day should they move to?");
+  return {
+    status: "ready",
+    intent,
+    spec: {
+      kind: "bulk_change",
+      mode,
+      from: range.from,
+      to: range.to,
+      fromTime: mode === "clear" ? intent.startTime : null,
+      filter,
+      shiftMinutes: mode === "move" ? intent.shiftMinutes : null,
+      targetDate,
+      label: filter ?? "everything",
     },
   };
 }
@@ -882,8 +1002,8 @@ export function assessIntent(intent: Intent, world: World): Assessment {
 
     case "remove_event": {
       const day = resolveDateRef(intent.date, world.todayKey, world.weekStartsOn);
-      const calendar = new Map<string, Commitment>([...refs.events, ...refs.blocks]);
       const words = intent.targetName ?? intent.title;
+      const calendar = calendarFor(words, refs);
       // "Cancel all math tutoring": every event with that name goes.
       if (intent.scope === "all" && words && !PRONOUN.test(words)) {
         const matches = matchEvents([...calendar.values()], words);
@@ -956,6 +1076,13 @@ export function assessIntent(intent: Intent, world: World): Assessment {
 
     case "cancel_draft":
       return { status: "skip", intent, reason: "Cancelled." };
+
+    case "move_events":
+    case "clear_events":
+      return assessBulk(intent, world);
+
+    case "undo":
+      return { status: "skip", intent, reason: "Handled by the action state." };
   }
 }
 

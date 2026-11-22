@@ -439,20 +439,23 @@ describe("Scenario D: completing a task that doesn't exist", () => {
     expect(t.clarify).toBeNull();
     expect(db.tasks.map((x) => x.status)).toEqual(["done", "done", "done", "done"]);
     expect(t.plan?.items.filter((i) => i.action === "complete_task").every((i) => i.status === "applied")).toBe(true);
-    expect(t.actions).not.toContain("NOT saved");
-    // Calendar sessions are untouched until approved.
+    expect(t.actions).not.toMatch(/NOT saved[^]*complete task/);
+    // Calendar sessions are untouched until approved (freeing the leftover one is suggested).
     expect(db.events.map((e) => e.id)).toContain(session.id);
   });
 });
 
 describe("Scenario E: repeated instructions", () => {
-  it("approve in chat, then the same request again adds nothing", async () => {
+  it("a direct add is saved at once, and the same request again adds nothing", async () => {
     const add = () =>
       wire({ type: "create_event", title: "Math Tutoring", evidence: "math tutoring tomorrow at 5 for an hour", date: date({ day_offset: 1 }), start_time: "17:00", duration_minutes: 60, explicit: true });
-    await say("Add math tutoring tomorrow at 5 for an hour", [add()]);
+    // A direct "add" is saved right away (with Undo); a "yes" after it changes nothing more.
+    const first = await say("Add math tutoring tomorrow at 5 for an hour", [add()]);
+    expect(first.actions).toContain("Already done");
+    expect(db.events.map((e) => e.title)).toEqual(["Math Tutoring"]);
     const yes = await say("yes", (a) => [wire({ type: "confirm_action", draft_id: a[0].id, evidence: "yes" })]);
     expect(db.events.map((e) => e.title)).toEqual(["Math Tutoring"]);
-    expect(yes.actions).toContain("The database confirmed it is saved");
+    expect(yes.actions).toContain("saved");
     expect(actions()[0].status).toBe("saved");
 
     const again = await say("Add math tutoring tomorrow at 5 for an hour", [add()]);
