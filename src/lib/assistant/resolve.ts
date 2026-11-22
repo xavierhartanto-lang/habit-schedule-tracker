@@ -118,6 +118,9 @@ export function resolveEntity<T extends { title: string }>(
 
   // Several records with the same name (one event per week, say) are one thing to the user.
   const top = scored[0];
+  // The user said the full name: "chemistry test" is Chemistry Test, not Study for Chemistry Test.
+  const exact = scored.filter((s) => normalizeText(s.item.title) === normalizeText(words));
+  if (exact.length === 1) return { kind: "one", ref: exact[0].ref, item: exact[0].item, via: "name" };
   const sameName = scored.filter((s) => normalizeText(s.item.title) === normalizeText(top.item.title));
   const rest = scored.filter((s) => normalizeText(s.item.title) !== normalizeText(top.item.title));
   if (top.score >= STRONG && (!rest.length || rest[0].score < top.score - 0.2) && sameName.length === 1) {

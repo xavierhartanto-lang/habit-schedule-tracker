@@ -4,7 +4,7 @@ import type { Commitment, ContextAttributes, Goal, Habit, HabitCadence, LifeArea
 import { WEEKDAYS } from "@/lib/domain/types";
 import { expandEvent } from "@/lib/scheduling/recurrence";
 import { addDaysToKey, dateKeyInZone, startOfDayInZone, timeKeyInZone } from "@/lib/scheduling/zoned";
-import { addMinutesToTime, firstMatchingDay, hasDateRef, minutesBetweenTimes, resolveDateRef, shortDate, weekdayName, weekdayOf } from "./dates";
+import { addMinutesToTime, clockLabel, firstMatchingDay, hasDateRef, minutesBetweenTimes, resolveDateRef, shortDate, weekdayName, weekdayOf } from "./dates";
 import type { Intent, PlanWindow } from "./intents";
 import { isGenericToken, nameScore, nameTokens, resolveEntity } from "./resolve";
 
@@ -189,7 +189,7 @@ function lower(title: string): string {
 }
 
 
-const PLURAL = /^(?:them|those|these|all of them|all of those|all those|both|all|all three|all four|the rest)[.!?]*$/i;
+const PLURAL = /^(?:them|those|these|all of them|all of those|all of these|all those|all these|both|both of them|all|all three|all four|the rest)[.!?]*$/i;
 const COLLECTIVE = /^(?:(?:all|both|each|every)(?: of)?(?: (?:the|my|them|those|these|three|four|five|six))*(?: (?:tasks?|to-?dos?|things|of them|ones))?|everything(?: on my list)?|(?:my|the) (?:tasks|to-?dos|list|whole list)|them|those|these)[.!?]*$/i;
 const PRONOUN = /^(?:it|that|this|them|those|these|the one|that one|this one|the other one|the other|same|same one)$/i;
 
@@ -203,7 +203,9 @@ function offeredRemoval(intent: Intent, world: World, calendar: Map<string, Comm
   if (!offered.length) return null;
   const words = (intent.targetName ?? intent.title ?? "").trim();
   if (words && !PLURAL.test(words) && !PRONOUN.test(words)) return null;
-  const picked = intent.targetRef && offered.includes(intent.targetRef) ? [intent.targetRef] : offered;
+  // "All of them" / "both": every listed item, whatever single ref the model attached.
+  const everything = /^(?:all|both)\b/i.test(words);
+  const picked = !everything && intent.targetRef && offered.includes(intent.targetRef) ? [intent.targetRef] : offered;
   // A singular "it" pointing somewhere else is not about the list.
   if (PRONOUN.test(words) && !PLURAL.test(words) && picked.length > 1) return null;
   const events = picked.map((r) => calendar.get(r)!);
@@ -213,10 +215,14 @@ function offeredRemoval(intent: Intent, world: World, calendar: Map<string, Comm
 type Found<T> = { ok: true; ref: string; item: T } | { ok: false; result: Assessment };
 
 /** "Basketball Game (Fri Nov 20)" when several records share a name. */
-function optionLabel(item: { title: string; startsAt?: string | null }, all: { title: string }[], timeZone: string): string {
-  const twins = all.filter((o) => normalizeText(o.title) === normalizeText(item.title)).length > 1;
-  if (twins && item.startsAt) return `${item.title} (${shortDate(dateKeyInZone(new Date(item.startsAt), timeZone))})`;
-  return item.title;
+function optionLabel(item: { title: string; startsAt?: string | null }, all: { title: string; startsAt?: string | null }[], timeZone: string): string {
+  const twins = all.filter((o) => normalizeText(o.title) === normalizeText(item.title));
+  if (twins.length < 2 || !item.startsAt) return item.title;
+  const day = dateKeyInZone(new Date(item.startsAt), timeZone);
+  // Two on the same day: the time tells them apart.
+  const sameDay = twins.filter((o) => o.startsAt && dateKeyInZone(new Date(o.startsAt), timeZone) === day).length > 1;
+  const time = sameDay ? `, ${clockLabel(timeKeyInZone(new Date(item.startsAt), timeZone))}` : "";
+  return `${item.title} (${shortDate(day)}${time})`;
 }
 
 /**
@@ -237,8 +243,11 @@ function findTarget<T extends { id: string; title: string; startsAt?: string | n
   const pronoun = !words || PRONOUN.test(words.trim().replace(/[.!?]+$/, ""));
   const all = [...map.values()];
   const ask = (refs: string[], about: string): Found<T> => {
-    const labels = refs.map((r) => optionLabel(map.get(r)!, all, world.timeZone));
-    return { ok: false, result: needs(intent, "target", about, `Which ${noun}: ${listLabels(labels)}?`, labels.slice(0, 4)) };
+    const labels = [...new Set(refs.map((r) => optionLabel(map.get(r)!, all, world.timeZone)))];
+    // Removing: "All of them" is one tap ("clear them" then removes exactly these).
+    const choices = intent.type === "remove_event" && labels.length > 1 ? [...labels.slice(0, 4), "All of them"] : labels.slice(0, 4);
+    const verb = intent.type === "remove_event" ? ` should I remove` : "";
+    return { ok: false, result: needs(intent, "target", about, `Which ${noun}${verb}: ${listLabels(labels)}?`, choices) };
   };
   // The user just picked from our own options: trust the pick.
   if (intent.targetConfirmed && intent.targetRef && map.has(intent.targetRef)) {

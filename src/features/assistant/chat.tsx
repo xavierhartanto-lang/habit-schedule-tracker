@@ -496,8 +496,8 @@ export function Chat({
                 )}
                 {m.role === "assistant" && m.clarify && i === messages.length - 1 && !busy && aiConfigured && m.clarify.choices.length > 0 && (
                   <div className="flex flex-wrap gap-1.5 pl-10">
-                    {m.clarify.choices.map((c) => (
-                      <button key={c} type="button" onClick={() => void run({ message: c })} className={CHIP_BUTTON}>
+                    {m.clarify.choices.map((c, n) => (
+                      <button key={`${n}:${c}`} type="button" onClick={() => void run({ message: c })} className={CHIP_BUTTON}>
                         {c}
                       </button>
                     ))}
