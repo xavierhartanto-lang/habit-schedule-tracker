@@ -8,7 +8,7 @@ import { addDaysToKey, dateKeyInZone, formatDateKey, formatTimeInZone } from "@/
 import { buttonClasses } from "@/components/ui";
 import { CalendarSync, ExternalLink, Lock, MapPin, MoveVertical, PenLine, Repeat, Trash2, TriangleAlert } from "lucide-react";
 import { useState, useTransition } from "react";
-import { removeEvent, type DeleteScope } from "./actions";
+import { removeEvent, removeGoogleCalendarEvent, type DeleteScope } from "./actions";
 
 export function describeWhen(occ: Occurrence, timeZone: string): string {
   const startKey = dateKeyInZone(occ.start, timeZone);
@@ -104,16 +104,22 @@ export function EventDetails({
       )}
 
       {imported ? (
-        <div className="space-y-3 border-t border-border pt-4">
-          <p className="text-[13px] text-ink-3">From Google Calendar. Change it there and Whitespace updates on its own.</p>
-          {e.externalUrl && (
-            <div className="flex justify-end">
-              <a href={e.externalUrl} target="_blank" rel="noopener noreferrer" className={buttonClasses("secondary", "sm")}>
-                <ExternalLink className="size-3.5" /> Open in Google Calendar
-              </a>
-            </div>
-          )}
-        </div>
+        <GoogleActions
+          title={e.title}
+          url={e.externalUrl ?? null}
+          canDelete={e.externalAccess === "delete" || e.externalAccess === "edit"}
+          series={!!e.externalSeriesId}
+          disabled={disabled}
+          onDelete={(scope) =>
+            start(async () => {
+              setError(null);
+              const r = await removeGoogleCalendarEvent({ id: e.id, scope });
+              if (r.ok) onDone();
+              else setError(r.error);
+            })
+          }
+          pending={pending}
+        />
       ) : confirming ? (
         <div className="space-y-2 border-t border-border pt-4">
           <p className="text-[13px] font-medium text-ink">{rule ? "Delete which events?" : "Delete this event?"}</p>
@@ -150,6 +156,75 @@ export function EventDetails({
           </Button>
         </div>
       )}
+    </div>
+  );
+}
+
+function GoogleActions({
+  title,
+  url,
+  canDelete,
+  series,
+  disabled,
+  pending,
+  onDelete,
+}: {
+  title: string;
+  url: string | null;
+  canDelete: boolean;
+  series: boolean;
+  disabled: boolean;
+  pending: boolean;
+  onDelete: (scope: "single" | "all") => void;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  if (confirming) {
+    return (
+      <div className="space-y-2 border-t border-border pt-4">
+        <p className="text-[13px] font-medium text-ink">
+          {series ? `Delete which ${title}? It's removed from Google Calendar too.` : `Delete ${title} from Google Calendar too?`}
+        </p>
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button variant="ghost" size="sm" onClick={() => setConfirming(false)} disabled={pending}>
+            Cancel
+          </Button>
+          {series ? (
+            <>
+              <Button variant="secondary" size="sm" onClick={() => onDelete("single")} disabled={pending}>
+                This event
+              </Button>
+              <Button size="sm" className="bg-danger hover:bg-danger/90" onClick={() => onDelete("all")} disabled={pending}>
+                All events
+              </Button>
+            </>
+          ) : (
+            <Button size="sm" className="bg-danger hover:bg-danger/90" onClick={() => onDelete("single")} disabled={pending}>
+              {pending ? "Deleting…" : "Delete"}
+            </Button>
+          )}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-3 border-t border-border pt-4">
+      <p className="text-[13px] text-ink-3">
+        {canDelete
+          ? "From Google Calendar. Ask Whitespace to move it, or delete it here. Either way it changes in Google too."
+          : "From a Google calendar you can only view. Change it in Google Calendar."}
+      </p>
+      <div className="flex flex-wrap justify-end gap-2">
+        {canDelete && (
+          <Button variant="ghost" size="sm" onClick={() => setConfirming(true)} disabled={disabled}>
+            <Trash2 className="size-3.5" /> Delete
+          </Button>
+        )}
+        {url && (
+          <a href={url} target="_blank" rel="noopener noreferrer" className={buttonClasses("secondary", "sm")}>
+            <ExternalLink className="size-3.5" /> Open in Google Calendar
+          </a>
+        )}
+      </div>
     </div>
   );
 }

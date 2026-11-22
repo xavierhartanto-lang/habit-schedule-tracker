@@ -5,7 +5,7 @@ export const GOOGLE_STATE_COOKIE = "ws-google-oauth";
 export const GOOGLE_RETURN_MESSAGES: Record<string, { tone: "success" | "danger"; text: string }> = {
   connected: { tone: "success", text: "Google Calendar connected. Your events are on the calendar." },
   cancelled: { tone: "danger", text: "Google Calendar wasn't connected. You closed the Google screen." },
-  missing_scope: { tone: "danger", text: "Google didn't share calendar access. Connect again and tick the calendar box." },
+  missing_scope: { tone: "danger", text: "Google didn't share calendar access. Connect again and tick both calendar boxes." },
   sync_error: { tone: "danger", text: "Connected, but the first import failed. Press Sync now to try again." },
   not_configured: { tone: "danger", text: "Google Calendar isn't set up on this server yet." },
   invalid_client: {

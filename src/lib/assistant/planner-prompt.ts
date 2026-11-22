@@ -49,12 +49,12 @@ Choosing a type
 - "Clear them", "remove those", "I told you to clear them": the user means everything your last reply offered to remove or listed as still on the calendar. Emit one remove_event per listed item, each with its own e/b ref, and target_name "them". Do not ask which one, and never include something the reply only mentioned in passing (a class it was timing around).
 - Several items at once: never emit one intent per event for a whole day or period.
   move_events: "push everything tomorrow back an hour" (date tomorrow, shift_minutes 60), "move all my history essay sessions to Saturday" (target_name "history essay sessions", target_date sa, window this_week), "push my afternoon an hour later". target_name = which items in the user's words, or "everything". Fill date for one day, or window for a period.
-  clear_events: "clear tomorrow, I'm sick" (date tomorrow, target_name "everything"), "cancel all my study sessions this week" (target_name "study sessions", window this_week), "cancel tomorrow's stuff after school" (date tomorrow, start_time 15:00). The server keeps Google Calendar events, skips just that day of repeating events, and moves the work sessions so the work still gets done.
+  clear_events: "clear tomorrow, I'm sick" (date tomorrow, target_name "everything"), "cancel all my study sessions this week" (target_name "study sessions", window this_week), "cancel tomorrow's stuff after school" (date tomorrow, start_time 15:00). The server removes that day's events (Google Calendar ones from Google too, except ones with other people invited), skips just that day of repeating events, and moves the work sessions so the work still gets done.
   Both are explicit = true when the user asks directly.
-- make_room = true when the user says "make room", "clear whatever's in the way", "move stuff if you have to" with create_event or plan_time. The server moves lower-priority sessions out of the way and never touches more important work or Google events.
+- make_room = true when the user says "make room", "clear whatever's in the way", "move stuff if you have to" with create_event or plan_time. The server moves lower-priority sessions out of the way, skips that day of a repeating event in the way (Google Calendar ones too), and never touches more important work or one-time appointments.
 - plan_time on one day: "I need 2 hours on Friday for the essay" -> date fr (the work happens that day). deadline is only for "by Friday" / "before Friday".
 - undo: "undo that", "undo", "put it back", "change it back", "wait no, undo" -> one undo intent (explicit true). The server reverses the newest change Whitespace made in this chat.
-- Google Calendar events (marked "from Google Calendar" in <current_plan>) are read-only. Still emit the intent the user asked for with its ref; the server explains it can't change them.
+- Google Calendar events (marked "from Google Calendar" in <current_plan>) can be moved, renamed and removed like any other event: Whitespace changes them in Google too. Emit the same intents as for any event. Google sends a repeating event as one row per occurrence (marked "repeats"): "cancel debate Saturday" is that day only (date sa); "remove debate club" is the whole series; "move debate to 1pm" without a day gets scope only if the user said "every week" or "just this one". Events marked "view only" or "someone else's invite" can't be changed: still emit the intent; the server explains.
 - remove_duplicates: "check my calendar this week for duplicates", "remove the doubled events, keep the Google one", "clean up duplicates". window this_week when they say this week; null for "every duplicate", "on the calendar" or no period. explicit = true. Emit it every time they ask, even if duplicates were removed earlier in the conversation: the server re-checks the calendar. One intent covers the whole cleanup: never emit remove_event per duplicate, and never ask which copy to keep (the server always keeps the Google Calendar copy).
 - cant_make: "I can't study Wednesday anymore" or "no tutoring this Wednesday" (date + title, or target_ref). finished_early: "I finished my coding project early". not_enough_time: "I don't think I'll have enough time this week", "I'm behind", "I'm drowning in work" (window this_week unless they name next week).
 - Greetings, questions about their schedule, small talk: return no intents.
@@ -82,6 +82,15 @@ function eventLine(e: Commitment, timeZone: string): string {
   return `${e.title}: ${when}, ${time}${e.kind === "fixed" ? "" : " (flexible)"}`;
 }
 
+function googleNote(e: Commitment): string {
+  if (e.externalSource !== "google") return "";
+  const bits = ["from Google Calendar"];
+  if (e.externalSeriesId) bits.push("repeats");
+  if (!e.externalAccess || e.externalAccess === "read") bits.push("view only");
+  else if (e.externalAccess === "delete") bits.push("someone else's invite");
+  return ` (${bits.join(", ")})`;
+}
+
 export function formatRefs(refs: RefTable, timeZone: string): string {
   const lines: string[] = [];
   for (const [ref, t] of refs.tasks) {
@@ -92,7 +101,7 @@ export function formatRefs(refs: RefTable, timeZone: string): string {
     ].filter(Boolean);
     lines.push(`${ref} task: ${t.title}${bits.length ? ` (${bits.join(", ")})` : ""}`);
   }
-  for (const [ref, e] of refs.events) lines.push(`${ref} event: ${eventLine(e, timeZone)}${e.externalSource ? " (from Google Calendar, read-only)" : ""}`);
+  for (const [ref, e] of refs.events) lines.push(`${ref} event: ${eventLine(e, timeZone)}${googleNote(e)}`);
   for (const [ref, b] of refs.blocks) lines.push(`${ref} session Whitespace scheduled: ${eventLine(b, timeZone)}`);
   for (const [ref, h] of refs.habits) lines.push(`${ref} habit: ${h.title}`);
   for (const [ref, g] of refs.goals) lines.push(`${ref} goal: ${g.title}${typeof g.progress === "number" ? ` (${g.progress}%)` : ""}`);

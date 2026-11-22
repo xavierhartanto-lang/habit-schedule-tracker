@@ -57,32 +57,47 @@ The signup trigger creates a `profiles` row and a `user_preferences` row for eve
 
 The service-role / secret key is **not used** and must never be given a `NEXT_PUBLIC_` prefix.
 
-## Google Calendar import
+## Google Calendar
 
-Settings → Google Calendar connects a Google account (read-only scope
-`calendar.readonly`), lets the user pick calendars and a life area for each,
-and imports events as fixed events. It is a one-way sync: Google is the
-source of truth. Every sync upserts events from two weeks back to six months
-ahead (keyed on the Google event id, so no duplicates), removes ones deleted
-or declined in Google, and runs on its own when the app is open (at most every
-15 minutes) or from "Sync now". Imported events are read-only in Whitespace,
-and the assistant won't edit or remove them.
+Settings → Google Calendar connects a Google account (scopes
+`calendar.readonly` + `calendar.events`), lets the user pick calendars and a
+life area for each, and imports events as fixed events. Google is the source
+of truth. Every sync upserts events from two weeks back to six months ahead
+(keyed on the Google event id, so no duplicates), removes ones deleted or
+declined in Google, and runs on its own when the app is open (at most every
+15 minutes) or from "Sync now".
+
+Two-way: the assistant (and the event panel on the calendar) can remove,
+move and rename Google events, one occurrence or the whole repeating series.
+Google is written first, then Whitespace's copy is refreshed from Google's
+answer. Every change has Undo, which restores Google too (deleted events come
+back with the same id). Writes never email guests (`sendUpdates=none`).
+Limits, enforced per event (`external_access`): view-only calendars can't be
+changed; someone else's invite can be removed but not moved; a series can get
+a new time on the same day, but its repeat day changes only in Google. Bulk
+asks ("clear tomorrow") leave events with other guests alone. Connections made
+before `calendar.events` was added stay read-only until the user reconnects.
 
 Setup:
 
 1. Google Cloud console → create a project → APIs & Services → Library →
    enable **Google Calendar API**.
 2. Google Auth Platform → Get started: app name, support email, audience
-   **External**. Data Access → add scope `https://www.googleapis.com/auth/calendar.readonly`.
+   **External**. Data Access → add scopes
+   `https://www.googleapis.com/auth/calendar.readonly` and
+   `https://www.googleapis.com/auth/calendar.events`.
    Audience → add yourself as a test user.
 3. Clients → Create client → **Web application** → Authorized redirect URI
    `http://localhost:3000/api/google/callback`.
 4. Put the client ID and secret in `.env.local` as `GOOGLE_CLIENT_ID` and
-   `GOOGLE_CLIENT_SECRET`, run migration `20261201000000_google_calendar_import.sql`,
-   and restart `npm run dev`.
+   `GOOGLE_CLIENT_SECRET`, run migrations `20261201000000_google_calendar_import.sql`
+   and `20261202000000_google_calendar_write.sql`, and restart `npm run dev`.
 
 While the Google app is in "Testing", Google expires the connection after 7
-days; reconnect from Settings, or publish the app (Audience → Publish app).
+days and only listed test users can connect; reconnect from Settings. Letting
+anyone else connect means publishing the app, and because `calendar.events`
+is a sensitive scope, Google must verify the app first (privacy policy,
+domain, demo video; it takes days to weeks).
 
 ## Project structure
 

@@ -52,6 +52,7 @@ import { getSchedulingPreferences, saveSchedulingPreferences } from "@/lib/db/sc
 import type { Commitment } from "@/lib/domain/types";
 import { checkPlacements, planSchedule, type PlanRequest, type SchedulingPreferences } from "@/lib/scheduling/planner";
 import { addDaysToKey, dateKeyInZone, startOfDayInZone, timeKeyInZone } from "@/lib/scheduling/zoned";
+import { removeGoogleEvent, undoGoogleChange, updateGoogleEvent, type GoogleScope, type GoogleUndo } from "@/features/google/server/writes";
 import { CALENDAR_ACTIONS, type Clarify, type PlanItemOutcome, type PlanView } from "../plan-types";
 
 /**
@@ -388,7 +389,7 @@ export async function planTurn(input: {
 
   // "Undo that" / "put it back": reverse the newest change Whitespace made in this chat.
   if (interpreted.intents.some((i) => i.type === "undo")) {
-    const undone = await undoNewest(input.userId, actions);
+    const undone = await undoNewest(input.userId, actions, now);
     if (undone) {
       touchedPlanIds.add(undone.planId);
       const fresh = await getItemStates(input.userId, actions.flatMap((a) => a.itemIds));
@@ -581,7 +582,7 @@ export async function planTurn(input: {
  * Undoes every applied item of the newest action in this conversation that still
  * has something applied, newest item first. Returns what was undone, or null.
  */
-async function undoNewest(userId: string, actions: ActionContext[]): Promise<{ planId: string; titles: string[] } | null> {
+async function undoNewest(userId: string, actions: ActionContext[], now: Date): Promise<{ planId: string; titles: string[] } | null> {
   const newest = [...actions].filter((a) => a.planId && a.itemIds.length).sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
   for (const a of newest) {
     const plan = await getPlan(userId, a.planId!).catch(() => null);
@@ -591,7 +592,7 @@ async function undoNewest(userId: string, actions: ActionContext[]): Promise<{ p
     const titles: string[] = [];
     for (const item of [...items].reverse()) {
       try {
-        await undoItem(userId, plan.id, item.id);
+        await undoItem(userId, plan.id, item.id, now);
         titles.push(item.title);
       } catch (error) {
         console.error("[plan] undo failed", describeError(error));
@@ -751,6 +752,22 @@ export async function approveItems(
       continue;
     }
 
+    // Google Calendar events change in Google first; the item is then recorded as applied
+    // with an undo that restores Google.
+    const google = googleTarget(item);
+    if (google) {
+      try {
+        const undo = await applyGoogle(userId, item, google, now);
+        ops.push({ item_id: item.id, op: "mark_applied", result_id: null, undo: { op: "none", google: undo } } as Op);
+      } catch (e) {
+        const message = e instanceof DataValidationError ? e.message : "Google Calendar didn't accept the change. Try again in a moment.";
+        if (!(e instanceof DataValidationError)) console.error("[plan] google write failed", e);
+        await updateOpenItem(userId, item, { error: message });
+        results.push({ itemId: item.id, outcome: "failed", message });
+      }
+      continue;
+    }
+
     const built = toOp(item);
     if (!built.ok) {
       await updateOpenItem(userId, item, { error: built.error });
@@ -775,6 +792,29 @@ export async function approveItems(
   }
   await linkNewTaskSessions(userId, plan).catch((e) => console.error("[plan] sessions not linked to their new task", e));
   return { plan, results };
+}
+
+/** Items that change a Google Calendar event carry `google: { scope }` in their payload. */
+function googleTarget(item: StoredItem): { commitmentId: string; scope: GoogleScope } | null {
+  if (item.action !== "remove_event" && item.action !== "update_event") return null;
+  const g = item.payload.google as { scope?: unknown } | undefined;
+  const id = item.payload.commitmentId;
+  if (!g || typeof id !== "string") return null;
+  return { commitmentId: id, scope: g.scope === "series" ? "series" : "one" };
+}
+
+async function applyGoogle(userId: string, item: StoredItem, g: { commitmentId: string; scope: GoogleScope }, now: Date): Promise<GoogleUndo> {
+  if (item.action === "remove_event") return removeGoogleEvent(userId, g.commitmentId, g.scope, now);
+  const patch = (item.payload.patch ?? {}) as { title?: string; starts_at?: string; ends_at?: string; location?: string | null; recurrence_rule?: unknown };
+  if (patch.recurrence_rule !== undefined) throw new DataValidationError(`To change how ${item.title} repeats, change it in Google Calendar.`);
+  const expect = (item.payload.expect ?? undefined) as { title?: string | null; starts_at?: string | null; ends_at?: string | null } | undefined;
+  return updateGoogleEvent(
+    userId,
+    g.commitmentId,
+    { title: patch.title, startsAt: patch.starts_at, endsAt: patch.ends_at, location: patch.location },
+    g.scope,
+    { now, expect },
+  );
 }
 
 /**
@@ -911,7 +951,7 @@ export async function findAlternatives(
   return { plan: await getPlan(userId, planId), results };
 }
 
-export async function undoItem(userId: string, planId: string, itemId: string): Promise<{ plan: StoredPlan; results: ItemResult[] }> {
+export async function undoItem(userId: string, planId: string, itemId: string, now = new Date()): Promise<{ plan: StoredPlan; results: ItemResult[] }> {
   const plan = await getPlan(userId, planId);
   const item = plan.items.find((i) => i.id === itemId);
   if (!item || item.status !== "applied" || !item.undo) throw new DataValidationError("There's nothing to undo.");
@@ -919,6 +959,8 @@ export async function undoItem(userId: string, planId: string, itemId: string): 
     const previous = (item.undo as { previous?: unknown }).previous;
     if (previous) await saveSchedulingPreferences(userId, previous);
   }
+  const google = (item.undo as { google?: GoogleUndo }).google;
+  if (google) await undoGoogleChange(userId, google, now);
   await undoPlanItem(item.id);
   return { plan: await getPlan(userId, planId), results: [] };
 }

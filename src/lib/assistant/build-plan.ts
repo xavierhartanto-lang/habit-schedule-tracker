@@ -1,4 +1,5 @@
 import type { PlanConflict, PlanItemAction, PlanKind, PlanTiming } from "@/features/assistant/plan-types";
+import { googleCan, googleRefusal, isGoogleEvent } from "@/lib/domain/google";
 import { cadenceLabel } from "@/lib/domain/habits";
 import type { Commitment, HabitCadence, Task } from "@/lib/domain/types";
 import { describeRecurrence, expandEvent, expandEvents, overlapping, parseRRule } from "@/lib/scheduling/recurrence";
@@ -550,16 +551,54 @@ export function buildPlan(input: BuildInput): BuiltPlan {
     const done: string[] = [];
     const named = !!spec.filter;
     const sessionsNamed = !!spec.filter && SESSION_WORDS.test(spec.filter);
-    const movedIds = new Set(occurrences.filter((o) => !o.event.externalSource && (!o.recurring || named)).map((o) => o.key));
+    const googleShared: string[] = [];
+    /** Google events a bulk change may touch: not shared with others, and the access it needs. */
+    const googleChanges = (o: (typeof occurrences)[number]): boolean => {
+      const e = o.event;
+      if (e.externalShared) return false;
+      if (spec.mode === "clear") return googleCan(e, "delete");
+      return googleCan(e, "edit") && (named || !e.externalSeriesId);
+    };
+    const movedIds = new Set(
+      occurrences.filter((o) => (isGoogleEvent(o.event) ? googleChanges(o) : !o.recurring || named)).map((o) => o.key),
+    );
     const staying = expandEvents(input.events, startOfDayInZone(spec.from, tz), new Date(rangeEnd.getTime() + 86_400_000), tz).filter((o) => !o.allDay && !movedIds.has(o.key));
     const clearedRange = { start: rangeStart.toISOString(), end: rangeEnd.toISOString() };
 
     for (const o of occurrences) {
       const e = o.event;
       const time = `${clockLabel(timeKeyInZone(o.start, tz))}-${clockLabel(timeKeyInZone(o.end, tz))}`;
-      if (e.externalSource) {
-        google.push(e.title);
-        continue;
+      if (isGoogleEvent(e)) {
+        if (e.externalShared) {
+          googleShared.push(e.title);
+          continue;
+        }
+        if (spec.mode === "clear") {
+          if (!googleCan(e, "delete")) {
+            google.push(e.title);
+            continue;
+          }
+          ctx.items.push({
+            action: "remove_event",
+            title: e.title,
+            targetId: e.id,
+            autoApply: commanded,
+            commanded,
+            payload: { commitmentId: e.id, google: { scope: "one" } },
+            display: { ...EMPTY_DISPLAY, detail: `${shortDate(o.date)}, ${time}${e.externalSeriesId ? " only" : ""}, in Google Calendar too`, reason: "You asked to clear it. Undo brings it back." },
+          });
+          done.push(`${e.title} (${shortDate(o.date)}${e.externalSeriesId ? " only" : ""}, removed from Google Calendar too)`);
+          continue;
+        }
+        if (e.externalSeriesId && !named) {
+          repeating.push(e.title);
+          continue;
+        }
+        if (!googleCan(e, "edit")) {
+          google.push(e.title);
+          continue;
+        }
+        // Falls through to the one-time move below, written to Google too.
       }
       const task = e.taskId ? tasksById.get(e.taskId) ?? null : null;
       if (spec.mode === "clear") {
@@ -689,12 +728,13 @@ export function buildPlan(input: BuildInput): BuiltPlan {
             startsAt: newStart.toISOString(),
             endsAt: newEnd.toISOString(),
             timezone: e.timezone ?? tz,
+            ...(isGoogleEvent(e) ? { google: { scope: "one" } } : {}),
           },
           display: {
             ...EMPTY_DISPLAY,
             timing: timingFor(newStart.toISOString(), newEnd.toISOString(), tz),
             previous: { start: e.startsAt!, end: e.endsAt! },
-            detail: `${whenLabel(e.startsAt!, tz)} → ${whenLabel(newStart.toISOString(), tz)}`,
+            detail: `${whenLabel(e.startsAt!, tz)} → ${whenLabel(newStart.toISOString(), tz)}${isGoogleEvent(e) ? ", in Google Calendar too" : ""}`,
             reason: "Moved as you asked. Undo puts it back.",
           },
         });
@@ -708,7 +748,14 @@ export function buildPlan(input: BuildInput): BuiltPlan {
     if (done.length) ctx.notes.push(`${verb} for ${period}${commanded ? " (already done, Undo on the card)" : " (on the card, waiting for Approve)"}: ${done.join("; ")}.`);
     const replanned = [...ctx.moves.values()].filter((m) => occurrences.some((o) => o.event.id === m.block.id)).length;
     if (replanned) ctx.notes.push(`${replanned} Whitespace session${replanned === 1 ? "" : "s"} ${spec.mode === "clear" ? "moved to other free times so the work still gets done" : "went to the nearest free time that day"}${commanded ? " (already done)" : ""}; the card shows when.`);
-    if (google.length) ctx.notes.push(`${[...new Set(google)].join(", ")} ${new Set(google).size === 1 ? "comes" : "come"} from Google Calendar, so Whitespace left ${new Set(google).size === 1 ? "it" : "them"} as ${new Set(google).size === 1 ? "it is" : "they are"}. Say so, and that ${new Set(google).size === 1 ? "it" : "they"} can be changed in Google Calendar.`);
+    if (google.length) {
+      const g = [...new Set(google)];
+      ctx.notes.push(`${g.join(", ")} ${g.length === 1 ? "is" : "are"} on a Google calendar Whitespace can't change (view-only, or someone else's invite), so ${g.length === 1 ? "it" : "they"} stayed. Say so in a few words.`);
+    }
+    if (googleShared.length) {
+      const g = [...new Set(googleShared)];
+      ctx.notes.push(`${g.join(", ")} ${g.length === 1 ? "has" : "have"} other people invited in Google Calendar, so a change to the whole ${spec.mode === "clear" ? "day" : "period"} left ${g.length === 1 ? "it" : "them"} alone. Mention it; Whitespace removes or moves ${g.length === 1 ? "it" : "them"} if the user names ${g.length === 1 ? "it" : "them"}.`);
+    }
     if (repeating.length) ctx.notes.push(`${[...new Set(repeating)].join(", ")} ${new Set(repeating).size === 1 ? "repeats" : "repeat"} every week, so ${new Set(repeating).size === 1 ? "it" : "they"} stayed. Mention it in a few words; the user can name ${new Set(repeating).size === 1 ? "it" : "them"} to move ${new Set(repeating).size === 1 ? "it" : "them"} too.`);
   }
 
@@ -772,8 +819,34 @@ export function buildPlan(input: BuildInput): BuiltPlan {
             if (overlapMin < 10 || skipped.has(other.key)) continue;
             // A test during School is part of the school day, not a clash with it.
             if (other.recurring && containsDay(other, mineOcc)) continue;
-            if (other.event.externalSource) {
-              ctx.notes.push(`${spec.title} overlaps ${other.event.title} (${whenLabel(other.start.toISOString(), tz)}), which comes from Google Calendar, so Whitespace leaves it as it is. Mention the overlap in one line; if ${other.event.title} isn't happening, the user can change it in Google Calendar.`);
+            if (isGoogleEvent(other.event)) {
+              // That day's occurrence of a repeating Google event gives way: done now when the
+              // user said "make room", otherwise Whitespace's own idea, waiting for Approve.
+              const g = other.event;
+              if (!g.externalShared && googleCan(g, "delete") && !spec.rrule && g.externalSeriesId) {
+                const now_ = !!spec.makeRoom && commanded;
+                skipped.add(other.key);
+                ctx.items.push({
+                  action: "remove_event",
+                  title: g.title,
+                  targetId: g.id,
+                  autoApply: now_,
+                  commanded: now_,
+                  payload: { commitmentId: g.id, google: { scope: "one" } },
+                  display: {
+                    ...EMPTY_DISPLAY,
+                    detail: `${shortDate(other.date)} only, in Google Calendar too. The rest of the series stays.`,
+                    reason: now_ ? `Making room for ${spec.title}.` : `Overlaps ${spec.title}.`,
+                  },
+                });
+                ctx.notes.push(
+                  now_
+                    ? `${g.title} on ${shortDate(other.date)} was in the way, so that day's ${g.title} was removed from Google Calendar (already done, Undo on the card; the rest of the series stays).`
+                    : `${spec.title} overlaps ${g.title} on ${shortDate(other.date)} (from Google Calendar). Whitespace proposes removing just that day's ${g.title} (on the card, waits for Approve). Say so in one line.`,
+                );
+              } else {
+                ctx.notes.push(`${spec.title} overlaps ${g.title} (${whenLabel(other.start.toISOString(), tz)}, from Google Calendar). Mention the overlap in one line and recommend a fix; Whitespace changes ${g.title} in Google Calendar if the user says so.`);
+              }
               continue;
             }
             if (spec.makeRoom && commanded && other.recurring && !spec.rrule) {
@@ -861,8 +934,19 @@ export function buildPlan(input: BuildInput): BuiltPlan {
       }
       case "event_update": {
         const e = spec.event;
-        if (e.externalSource) {
-          ctx.notes.push(`${e.title} comes from Google Calendar, so Whitespace can't change it. Tell the user to change it in Google Calendar; Whitespace picks it up on the next sync.`);
+        const fromGoogle = isGoogleEvent(e);
+        if (fromGoogle && !googleCan(e, "edit")) {
+          ctx.notes.push(`${googleRefusal(e, "edit")} Nothing was changed.`);
+          break;
+        }
+        if (fromGoogle && spec.change.rrule !== undefined) {
+          ctx.notes.push(`${e.title} comes from Google Calendar: how it repeats can only be changed there. Nothing was changed; say so in one line.`);
+          break;
+        }
+        // A repeating Google event: "every week" changes the series, otherwise just this one.
+        const googleScope = fromGoogle ? (spec.scope === "all" && e.externalSeriesId ? "series" : "one") : null;
+        if (googleScope === "series" && spec.change.date) {
+          ctx.notes.push(`Every ${e.title} can get a new time on the same day, but the day it repeats on can only be changed in Google Calendar. Nothing was changed; offer to move just this one.`);
           break;
         }
         const etz = e.timezone ?? tz;
@@ -885,7 +969,7 @@ export function buildPlan(input: BuildInput): BuiltPlan {
           c.location ? `At ${c.location}` : null,
         ].filter(Boolean);
 
-        if (spec.scope === "one" && e.recurrenceRule && spec.occurrenceDate) {
+        if (!fromGoogle && spec.scope === "one" && e.recurrenceRule && spec.occurrenceDate) {
           // One day of a repeating event: skip that day, add a one-time event with the change.
           ctx.items.push({
             action: "skip_occurrence",
@@ -964,13 +1048,22 @@ export function buildPlan(input: BuildInput): BuiltPlan {
             startsAt: String(patch.starts_at ?? e.startsAt),
             endsAt: String(patch.ends_at ?? e.endsAt),
             timezone: etz,
+            ...(googleScope ? { google: { scope: googleScope } } : {}),
           },
           display: {
             ...EMPTY_DISPLAY,
             timing: timingFor(String(patch.starts_at ?? e.startsAt), String(patch.ends_at ?? e.endsAt), etz, { recurrence }),
             previous: "starts_at" in patch ? { start: e.startsAt!, end: e.endsAt! } : null,
-            detail: what.join(" · ") || null,
-            reason: "Only what you asked changes. Undo puts it back.",
+            detail:
+              [...what, googleScope === "series" ? "every week, in Google Calendar too" : googleScope ? `${e.externalSeriesId ? "this one only, " : ""}in Google Calendar too` : null]
+                .filter(Boolean)
+                .join(" · ") || null,
+            reason:
+              googleScope === "series"
+                ? `Every ${e.title} in Google Calendar changes. Undo puts it back.`
+                : googleScope
+                  ? "Changed in Google Calendar too. Undo puts it back."
+                  : "Only what you asked changes. Undo puts it back.",
             conflicts,
             tradeoffs: conflicts.map((x) => `Overlaps ${x.title} (${whenLabel(x.start, tz)}).`),
           },
@@ -1266,11 +1359,34 @@ export function buildPlan(input: BuildInput): BuiltPlan {
           ctx.notes.push(`Nothing called "${spec.title}" is on the calendar, so nothing was removed.`);
           break;
         }
-        const fromGoogle = spec.events.filter((e) => e.externalSource);
-        if (fromGoogle.length) {
-          ctx.notes.push(`${fromGoogle.map((e) => e.title).join(", ")} ${fromGoogle.length === 1 ? "comes" : "come"} from Google Calendar, so Whitespace can't remove ${fromGoogle.length === 1 ? "it" : "them"}. Tell the user to delete or decline it in Google Calendar; Whitespace picks it up on the next sync.`);
+        // Google events: removed in Google too. Occurrences of one repeating Google
+        // event go as the whole series, like a repeating Whitespace event does.
+        const seenSeries = new Set<string>();
+        for (const event of spec.events.filter(isGoogleEvent)) {
+          if (!googleCan(event, "delete")) {
+            ctx.notes.push(`${googleRefusal(event, "delete")} Nothing was removed for it.`);
+            continue;
+          }
+          const series = event.externalSeriesId && !spec.oneOccurrence ? event.externalSeriesId : null;
+          if (series && seenSeries.has(series)) continue;
+          if (series) seenSeries.add(series);
+          const etz = event.timezone ?? input.world.timeZone;
+          const when = event.startsAt ? `${shortDate(dateKeyInZone(new Date(event.startsAt), etz))}, ${clockLabel(timeKeyInZone(new Date(event.startsAt), etz))}` : null;
+          ctx.items.push({
+            action: "remove_event",
+            title: event.title,
+            targetId: event.id,
+            autoApply: explicit && fromUser,
+            commanded: explicit && fromUser,
+            payload: { commitmentId: event.id, google: { scope: series ? "series" : "one" } },
+            display: {
+              ...EMPTY_DISPLAY,
+              detail: series ? "Every time it repeats, in Google Calendar too" : when ? `${when}, in Google Calendar too` : "In Google Calendar too",
+              reason: series ? "You asked to remove it. Every repeat goes; Undo brings it back in Google too." : "You asked to remove it. Undo brings it back in Google too.",
+            },
+          });
         }
-        for (const event of spec.events.filter((e) => !e.externalSource)) {
+        for (const event of spec.events.filter((e) => !isGoogleEvent(e))) {
           const rule = parseRRule(event.recurrenceRule);
           const tz = event.timezone ?? input.world.timeZone;
           const time = event.startsAt && event.endsAt
@@ -1297,8 +1413,29 @@ export function buildPlan(input: BuildInput): BuiltPlan {
       }
       case "cant_make": {
         ctx.adaptive = true;
-        if (spec.event?.externalSource) {
-          ctx.notes.push(`${spec.event.title} comes from Google Calendar, so Whitespace can't skip or remove it. Tell the user to decline or delete it in Google Calendar; Whitespace picks it up on the next sync.`);
+        if (spec.event && isGoogleEvent(spec.event)) {
+          // That day only: one occurrence goes from Google Calendar.
+          const g = spec.event;
+          if (!googleCan(g, "delete")) {
+            ctx.notes.push(`${googleRefusal(g, "delete")} Nothing was removed for it.`);
+          } else {
+            ctx.items.push({
+              action: "remove_event",
+              title: g.title,
+              targetId: g.id,
+              autoApply: commanded,
+              commanded,
+              payload: { commitmentId: g.id, google: { scope: "one" } },
+              display: {
+                ...EMPTY_DISPLAY,
+                detail: g.startsAt
+                  ? `${shortDate(dateKeyInZone(new Date(g.startsAt), tz))}, ${clockLabel(timeKeyInZone(new Date(g.startsAt), tz))} only, in Google Calendar too`
+                  : null,
+                reason: g.externalSeriesId ? "You said you can't make it. The rest of the series stays; Undo brings it back." : "You said you can't make it. Undo brings it back.",
+              },
+            });
+            if (!commanded) ctx.notes.push(`Whitespace proposes removing ${g.title} that day from Google Calendar (on the card).`);
+          }
         } else if (spec.event && spec.event.kind === "fixed") {
           if (spec.event.recurrenceRule && spec.date) {
             ctx.items.push({

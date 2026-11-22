@@ -21,8 +21,16 @@ export type GoogleEvent = {
   eventType?: string;
   start?: GoogleDateTime;
   end?: GoogleDateTime;
-  attendees?: { self?: boolean; responseStatus?: string }[];
+  attendees?: { self?: boolean; responseStatus?: string; resource?: boolean }[];
+  /** Set on each occurrence of a repeating event: the series' id. */
+  recurringEventId?: string;
+  organizer?: { self?: boolean };
+  guestsCanModify?: boolean;
+  /** Set on a repeating event's master. */
+  recurrence?: string[];
 };
+
+export type GoogleAccess = "read" | "delete" | "edit";
 
 export type ImportedEvent = {
   externalId: string;
@@ -34,7 +42,26 @@ export type ImportedEvent = {
   allDay: boolean;
   timezone: string;
   externalUrl: string | null;
+  seriesId: string | null;
+  access: GoogleAccess;
+  shared: boolean;
 };
+
+/**
+ * What Whitespace may do to an event: nothing without write access to the
+ * calendar; remove it from the calendar with it; move or rename it only when
+ * the user organizes it (or the organizer lets guests edit).
+ */
+export function accessFor(event: GoogleEvent, calendarWritable: boolean): GoogleAccess {
+  if (!calendarWritable) return "read";
+  const organizes = !event.organizer || event.organizer.self === true;
+  return organizes || event.guestsCanModify ? "edit" : "delete";
+}
+
+/** Someone other than the user (and rooms) is invited. */
+export function isShared(event: GoogleEvent): boolean {
+  return (event.attendees ?? []).some((a) => !a.self && !a.resource);
+}
 
 /** Event types that are not plans: working location chips and birthdays. */
 const SKIPPED_TYPES = new Set(["workingLocation", "birthday"]);
@@ -75,7 +102,7 @@ export function htmlToText(html: string): string {
  */
 export function mapGoogleEvent(
   event: GoogleEvent,
-  ctx: { userTimeZone: string; calendarTimeZone?: string | null },
+  ctx: { userTimeZone: string; calendarTimeZone?: string | null; calendarWritable?: boolean },
 ): ImportedEvent | null {
   if (!event.id || event.status === "cancelled") return null;
   if (event.eventType && SKIPPED_TYPES.has(event.eventType)) return null;
@@ -119,6 +146,9 @@ export function mapGoogleEvent(
     allDay,
     timezone,
     externalUrl: event.htmlLink && /^https:\/\//.test(event.htmlLink) && event.htmlLink.length <= 2048 ? event.htmlLink : null,
+    seriesId: event.recurringEventId && event.recurringEventId.length <= 1024 ? event.recurringEventId : null,
+    access: accessFor(event, ctx.calendarWritable ?? false),
+    shared: isShared(event),
   };
 }
 

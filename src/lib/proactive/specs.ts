@@ -1,4 +1,5 @@
 import type { RecommendationAction } from "@/features/proactive/types";
+import { googleCan } from "@/lib/domain/google";
 import type { ActionSpec } from "@/lib/assistant/assess";
 import type { Commitment, Task } from "@/lib/domain/types";
 import { addDaysToKey, dateKeyInZone, isDateKey, timeKeyInZone } from "@/lib/scheduling/zoned";
@@ -159,7 +160,11 @@ export function specsForAction(action: RecommendationAction, ctx: SpecContext): 
       const drop = ctx.events.get(str(p.dropId) ?? "");
       const date = str(p.date);
       if (!drop || drop.kind !== "fixed" || drop.planItemId) return { ok: false, error: "That event has already changed. Refresh to see the latest." };
-      if (drop.externalSource) return { ok: false, error: `${drop.title} comes from Google Calendar. Remove or decline it there and Whitespace updates on its own.` };
+      if (drop.externalSource && !googleCan(drop, "delete")) {
+        return { ok: false, error: `${drop.title} is on a Google calendar Whitespace can't change. Remove or decline it there and Whitespace updates on its own.` };
+      }
+      // A Google occurrence goes from Google too (that day only), through the same approval card.
+      if (drop.externalSource) return { ok: true, prompt: null, specs: [{ kind: "remove_event", events: [drop], title: drop.title, oneOccurrence: true }] };
       if (drop.recurrenceRule) {
         if (!date || !isDateKey(date)) return { ok: false, error: "Unknown day." };
         return { ok: true, prompt: null, specs: [{ kind: "cant_make", date, blocks: [], event: drop, title: drop.title }] };

@@ -1,4 +1,5 @@
 import { looksLikeTaskTitle, normalizeText } from "@/lib/ai/extraction";
+import { isGoogleEvent } from "@/lib/domain/google";
 import type { Clarify, ClarifyField } from "@/features/assistant/plan-types";
 import type { Commitment, ContextAttributes, Goal, Habit, HabitCadence, LifeAreaRecord, Task, Weekday } from "@/lib/domain/types";
 import { WEEKDAYS } from "@/lib/domain/types";
@@ -178,7 +179,7 @@ export type ActionSpec =
     }
   | { kind: "cant_make"; date: string | null; blocks: Commitment[]; event: Commitment | null; title: string }
   /** Every matching event goes (a repeating event goes as a whole series). Empty when nothing matched. */
-  | { kind: "remove_event"; events: Commitment[]; title: string }
+  | { kind: "remove_event"; events: Commitment[]; title: string; /** Google: just this occurrence, not its series. */ oneOccurrence?: boolean }
   | { kind: "finished_early"; task: Task | null; title: string }
   | { kind: "not_enough_time"; window: PlanWindow }
   | { kind: "remove_duplicates"; window: PlanWindow | null };
@@ -292,6 +293,12 @@ function findTarget<T extends { id: string; title: string; startsAt?: string | n
         if (onDay.length === 1) return { ok: true, ref: onDay[0], item: map.get(onDay[0])! };
         if (onDay.length > 1) refs = onDay;
       }
+      // Occurrences of one repeating Google event are one thing: the next one stands for the series.
+      const series = sameGoogleSeries(refs.map((ref) => map.get(ref)!));
+      if (series) {
+        const ref = refs.find((x) => map.get(x) === series)!;
+        return { ok: true, ref, item: series };
+      }
       return ask(refs, words!);
     }
     return {
@@ -326,6 +333,22 @@ function findTarget<T extends { id: string; title: string; startsAt?: string | n
   const refs = [...guess, ...similar].slice(0, 4);
   if (!refs.length) return { ok: false, result: needs(intent, "target", noun, `Which ${noun} do you mean?`) };
   return ask(refs, noun[0].toUpperCase() + noun.slice(1));
+}
+
+/**
+ * Google sends a repeating event as one row per occurrence. When every
+ * candidate is an occurrence of the same series, returns the earliest.
+ */
+function sameGoogleSeries<T extends { startsAt?: string | null }>(items: T[]): T | null {
+  if (items.length < 2) return null;
+  const ids = new Set(
+    items.map((i) => {
+      const c = i as unknown as Commitment;
+      return isGoogleEvent(c) ? c.externalSeriesId ?? null : null;
+    }),
+  );
+  if (ids.size !== 1 || ids.has(null)) return null;
+  return [...items].sort((a, b) => Date.parse(a.startsAt ?? "") - Date.parse(b.startsAt ?? ""))[0];
 }
 
 /** Every specific word of the name appears in the text ("my chem hw" mentions "Chemistry Homework"). */
@@ -631,6 +654,16 @@ function assessEventUpdate(original: Intent, world: World): Assessment {
     } else if (day !== oldDate) {
       change.date = day;
     }
+  }
+
+  // A repeating Google event (one row per occurrence): a named day means that one;
+  // otherwise ask, the same way a repeating Whitespace event does.
+  if (isGoogleEvent(event) && event.externalSeriesId && !recurring) {
+    if (intent.scope) scope = intent.scope;
+    else if (day || change.date) scope = "one";
+    else if (change.startTime || change.title || change.location) {
+      return needs(intent, "scope", event.title, `Just this week, or every week?`, ["Just this week", "Every week"]);
+    } else scope = "one";
   }
 
   if (recurring && scope === "one" && !occurrenceDate) {
@@ -1022,6 +1055,14 @@ export function assessIntent(intent: Intent, world: World): Assessment {
         return found.result;
       }
       const event = found.item;
+      // A repeating Google event: a day (or "just this one") removes that occurrence only.
+      if (isGoogleEvent(event) && event.externalSeriesId && (day || intent.scope === "one")) {
+        if (day && !occursOn(event, day, world.timeZone)) {
+          return { status: "skip", intent, reason: "Not that day.", note: `${event.title} doesn't happen on ${shortDate(day)}, so nothing was changed.` };
+        }
+        const date = day ?? dateKeyInZone(new Date(event.startsAt!), event.timezone ?? world.timeZone);
+        return { status: "ready", intent, spec: { kind: "cant_make", date, blocks: [], event, title: event.title } };
+      }
       // "Cancel my practice tomorrow" on a repeating event: only that day.
       if (event.recurrenceRule && (day || intent.scope === "one")) {
         const date = day ?? nextOccurrence(event, world.todayKey, world.timeZone);
