@@ -155,7 +155,7 @@ export type ActionSpec =
   | { kind: "remove_event"; events: Commitment[]; title: string }
   | { kind: "finished_early"; task: Task | null; title: string }
   | { kind: "not_enough_time"; window: PlanWindow }
-  | { kind: "remove_duplicates"; window: PlanWindow };
+  | { kind: "remove_duplicates"; window: PlanWindow | null };
 
 export type Assessment =
   | { status: "ready"; spec: ActionSpec; intent: Intent }
@@ -952,7 +952,7 @@ export function assessIntent(intent: Intent, world: World): Assessment {
       return { status: "ready", intent, spec: { kind: "not_enough_time", window: intent.window ?? "this_week" } };
 
     case "remove_duplicates":
-      return { status: "ready", intent, spec: { kind: "remove_duplicates", window: intent.window ?? "this_week" } };
+      return { status: "ready", intent, spec: { kind: "remove_duplicates", window: intent.window ?? null } };
 
     case "cancel_draft":
       return { status: "skip", intent, reason: "Cancelled." };

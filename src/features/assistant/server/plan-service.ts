@@ -79,7 +79,8 @@ export type LoadedWorld = {
 };
 
 export async function loadWorld(userId: string, now: Date): Promise<LoadedWorld> {
-  const windowStart = new Date(now.getTime() - 86_400_000).toISOString();
+  // From a week back, so "clean up this week" also sees the days already gone by.
+  const windowStart = new Date(now.getTime() - 8 * 86_400_000).toISOString();
   const windowEnd = new Date(now.getTime() + 62 * 86_400_000).toISOString();
   const [base, prefs, areas] = await Promise.all([
     loadSchedulingBase(userId, { start: windowStart, end: windowEnd }),

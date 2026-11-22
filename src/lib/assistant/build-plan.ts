@@ -24,7 +24,7 @@ import { pickKeeper } from "@/lib/proactive/conflict-pick";
 import { realityCheck } from "@/lib/proactive/reality";
 import type { ActionSpec, World } from "./assess";
 import { clockLabel, shortDate } from "./dates";
-import { findDuplicates } from "./duplicates";
+import { planCleanup } from "./duplicates";
 
 /**
  * Turns ready action specs into a plan: a list of items with everything
@@ -1055,15 +1055,41 @@ export function buildPlan(input: BuildInput): BuiltPlan {
       }
       case "remove_duplicates": {
         // A direct command with a clear rule: done now, Undo on the card.
-        const win = spec.window === "next_week" || spec.window === "today" || spec.window === "tomorrow"
-          ? windowFor({ window: spec.window }, input, null)
-          : { start: now, end: new Date(now.getTime() + 7 * 86_400_000) };
-        const pairs = findDuplicates(input.events, win.start, win.end, tz);
-        if (!pairs.length) {
-          ctx.notes.push("Checked the calendar for duplicates in that period: none found. Nothing was removed.");
+        // "This week" is the whole week (past days included, they're what the user
+        // is looking at); no period means everything loaded, from the week's start.
+        const weekStart = startOfDayInZone(startOfWeekKey(input.world.todayKey, input.world.weekStartsOn), tz);
+        const win =
+          spec.window === "next_week" || spec.window === "today" || spec.window === "tomorrow"
+            ? windowFor({ window: spec.window }, input, null)
+            : spec.window === "this_week"
+              ? { start: weekStart, end: new Date(weekStart.getTime() + 7 * 86_400_000 + 3 * 3_600_000) }
+              : { start: weekStart, end: new Date(now.getTime() + MAX_WINDOW_DAYS * 86_400_000) };
+        const range = `${shortDate(dateKeyInZone(win.start, tz))} to ${shortDate(dateKeyInZone(new Date(win.end.getTime() - 1), tz))}`;
+        const cleanup = planCleanup(input.events, win.start, win.end, tz);
+        if (!cleanup.length) {
+          ctx.notes.push(`Checked every event from ${range} for duplicates (same slot as a Google Calendar event, or the same event twice): none found. Nothing was removed.`);
           break;
         }
-        for (const { keep, drop } of pairs) {
+        const lines: string[] = [];
+        for (const c of cleanup) {
+          if (c.kind === "series") {
+            ctx.items.push({
+              action: "remove_event",
+              title: c.event.title,
+              targetId: c.event.id,
+              autoApply: fromUser,
+              commanded: fromUser,
+              payload: { commitmentId: c.event.id },
+              display: {
+                ...EMPTY_DISPLAY,
+                detail: `Every repeat (${describeRecurrence(parseRRule(c.event.recurrenceRule)!)})`,
+                reason: `All ${c.count} times it's on the calendar, Google Calendar already has it (${c.keptTitles.slice(0, 2).join(", ")}).`,
+              },
+            });
+            lines.push(`${c.event.title}, the whole repeating series (Google has ${c.keptTitles[0]})`);
+            continue;
+          }
+          const { keep, drop } = c.pair;
           const time = `${clockLabel(timeKeyInZone(drop.start, tz))}-${clockLabel(timeKeyInZone(drop.end, tz))}`;
           const why = `Same time as ${keep.event.title}${keep.event.externalSource ? " from Google Calendar" : ""}, which stays.`;
           ctx.items.push(
@@ -1087,10 +1113,9 @@ export function buildPlan(input: BuildInput): BuiltPlan {
                   display: { ...EMPTY_DISPLAY, detail: `${shortDate(drop.date)}, ${time}`, reason: why },
                 },
           );
+          lines.push(`${drop.event.title} on ${shortDate(drop.date)} (kept ${keep.event.title})`);
         }
-        ctx.notes.push(
-          `Removed ${pairs.length} duplicate${pairs.length === 1 ? "" : "s"}, keeping the Google Calendar copy each time: ${pairs.map((p) => `${p.drop.event.title} (kept ${p.keep.event.title})`).join("; ")}. Undo is on the card.`,
-        );
+        ctx.notes.push(`Checked every event from ${range}. Removed ${lines.length} duplicate${lines.length === 1 ? "" : "s"}, keeping the Google Calendar copy each time: ${lines.join("; ")}. Undo is on the card.`);
         break;
       }
       case "not_enough_time": {

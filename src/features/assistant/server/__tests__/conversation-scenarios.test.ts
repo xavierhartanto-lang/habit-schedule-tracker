@@ -818,3 +818,68 @@ describe("Direct commands happen now; Whitespace's suggestions wait", () => {
     expect(db.events).toHaveLength(1);
   });
 });
+
+describe("Scenario L: xavi's calendar, Google copies with different names", () => {
+  function google(title: string, day: string, start: string, end: string): Commitment {
+    const ev = {
+      id: id(), title, area: null, kind: "fixed", startsAt: at(day, start), endsAt: at(day, end), timezone: TZ, recurrenceRule: null,
+      externalSource: "google", externalCalendarId: "primary", externalId: `g${seq}`,
+    } as Commitment;
+    db.events.push(ev);
+    return ev;
+  }
+
+  it("'remove every single duplicate on the calendar' matches by time slot, not by name", async () => {
+    // Debate repeats every Saturday in Whitespace, and Google has every one of them.
+    const debate = addEvent("Debate", "2026-10-03", "09:00", "11:00", "FREQ=WEEKLY;BYDAY=SA");
+    for (let d = Date.parse("2026-11-21T12:00:00Z"); d < Date.parse("2027-01-20T00:00:00Z"); d += 7 * 86_400_000) {
+      google("Athena Speech & Debate", new Date(d).toISOString().slice(0, 10), "09:00", "11:00");
+    }
+    // Pre-calculus repeats; Google only has this Saturday's class.
+    const precalc = addEvent("Pre-calculus", "2026-10-03", "14:10", "16:40", "FREQ=WEEKLY;BYDAY=SA");
+    google("Xavier: Precalc w/ Mr. Lee", "2026-11-21", "14:10", "16:40");
+    // One-time copy, Google's is shorter and more specific.
+    const tutoring = addEvent("Math Tutoring", "2026-11-21", "12:00", "14:00");
+    google("Christine Wu: Tutoring RSM Burlingame", "2026-11-21", "12:00", "13:00");
+    google("Offer letter call", "2026-11-21", "13:00", "14:00");
+    // Earlier this week (already past) and a later one.
+    const coding = addEvent("Coding Club", "2026-10-06", "17:00", "18:00", "FREQ=WEEKLY;BYDAY=TU");
+    google("Xavier: CS Club", "2026-11-17", "17:00", "18:00");
+    const piano = addEvent("Piano", "2026-10-06", "19:00", "20:00", "FREQ=WEEKLY;BYDAY=TU");
+    google("Piano Lesson", "2026-12-01", "19:00", "20:00");
+    // Not duplicates: different slot, or a short event inside a long one that starts hours apart.
+    const club = addEvent("Math Club Meeting", "2026-11-17", "12:00", "13:00");
+    google("BHS Robotics", "2026-11-18", "15:35", "20:00");
+    const check = addEvent("Check School Assignments", "2026-11-18", "18:30", "19:00");
+    const thursday = addEvent("Math Tutoring", "2026-11-19", "17:00", "18:00");
+    const session = addSession("Choose Topic and Gather Sources", "2026-11-21", "09:30", "10:30");
+    const googleIds = db.events.filter((e) => e.externalSource).map((e) => e.id);
+
+    const t = await say("can you remove every single duplicate on the calendar, and keep the one from google calendar", [
+      wire({ type: "remove_duplicates", evidence: "remove every single duplicate on the calendar", explicit: true }),
+    ]);
+    expect(t.clarify).toBeNull();
+    expect(t.plan?.items.every((i) => i.status === "applied")).toBe(true);
+    expect(t.plan?.items.map((i) => [i.action, i.title]).sort()).toEqual([
+      ["remove_event", "Debate"],
+      ["remove_event", "Math Tutoring"],
+      ["skip_occurrence", "Coding Club"],
+      ["skip_occurrence", "Piano"],
+      ["skip_occurrence", "Pre-calculus"],
+    ]);
+    const ids = db.events.map((e) => e.id);
+    for (const g of googleIds) expect(ids).toContain(g);
+    expect(ids).not.toContain(debate.id);
+    expect(ids).not.toContain(tutoring.id);
+    for (const kept of [precalc, coding, piano, club, check, thursday, session]) expect(ids).toContain(kept.id);
+    expect(db.events.find((e) => e.id === precalc.id)?.recurrenceExceptions).toEqual(["2026-11-21"]);
+    expect(db.events.find((e) => e.id === coding.id)?.recurrenceExceptions).toEqual(["2026-11-17"]);
+    expect(db.events.find((e) => e.id === piano.id)?.recurrenceExceptions).toEqual(["2026-12-01"]);
+    expect(t.actions).toContain("Checked every event from");
+
+    // Asking again re-checks the calendar instead of trusting the conversation.
+    const again = await say("remove every duplicate", [wire({ type: "remove_duplicates", evidence: "remove every duplicate", explicit: true })]);
+    expect(again.plan).toBeNull();
+    expect(again.actions).toContain("none found");
+  });
+});
