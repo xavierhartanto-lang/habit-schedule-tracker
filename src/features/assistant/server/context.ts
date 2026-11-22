@@ -114,7 +114,9 @@ export function toKnownFacts(ctx: UserContext): KnownFact[] {
 
 function taskLine(t: Task, timeZone: string): string {
   const due = dueParts(t.dueAt, timeZone);
-  return due ? `${t.title} (due ${due.date}${due.time ? ` ${due.time}` : ""})` : t.title;
+  // Priority first; a due date only when the task has one.
+  const parts = [`${t.priority} priority`, due ? `due ${due.date}${due.time ? ` ${due.time}` : ""}` : null].filter(Boolean);
+  return `${t.title} (${parts.join(", ")})`;
 }
 
 function todayIn(timeZone: string, now: Date): { date: string; weekday: string } {

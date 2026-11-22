@@ -31,7 +31,7 @@ export type PromptContext = {
   facts: KnownFact[];
   /** One-off calendar items coming up (events, work sessions). Not facts about the user. */
   upcoming?: string[];
-  /** The user's open to-dos (not on the calendar), e.g. "History essay (due 2026-11-20 15:59)". */
+  /** The user's open to-dos (not on the calendar), e.g. "History essay (high priority, due 2026-11-20 15:59)". */
   openTasks?: string[];
   personalizationEnabled: boolean;
   /** "YYYY-MM-DD" and weekday in the user's timezone. */

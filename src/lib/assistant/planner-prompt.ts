@@ -32,7 +32,7 @@ Rules
 
 Choosing a type
 - create_event: something at a set time (class, practice, game, exam, appointment, "school until 3 every weekday" = weekdays, start_time empty if unknown).
-- create_task: a to-do or assignment. plan_time: the user wants time found for work ("I need 3 hours to study this week", "practice piano twice"); amount_kind total/sessions/single. Do not invent session lengths: set session_minutes only if stated.
+- create_task: a to-do or assignment. Tasks are priority-first: always set priority. high = urgent or high-stakes (exams, applications, big graded work, "asap", "really important"); low = optional or "whenever" ("someday", "if I have time"); medium otherwise. A due date is optional: fill deadline only when the user stated one, and never ask for one. plan_time: the user wants time found for work ("I need 3 hours to study this week", "practice piano twice"); amount_kind total/sessions/single. Do not invent session lengths: set session_minutes only if stated.
 - One message can hold several intents: "chem exam next Friday, need 3 hours to study, piano twice" = create_event (exam, date fr/next, no time yet) + plan_time (study, amount_kind total 180, deadline fr/next) + plan_time (piano, sessions, session_count 2).
 - create_habit / update_habit: repeated personal practice the user wants to track ("start exercising twice a week" = create_habit weekly times_per_week 2). If they also want it on the calendar, add plan_time.
 - create_goal / update_goal (progress 0-100, target_date).
