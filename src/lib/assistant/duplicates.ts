@@ -1,7 +1,7 @@
 import type { Commitment } from "@/lib/domain/types";
 import { expandEvents, type Occurrence } from "@/lib/scheduling/recurrence";
 import { normalizeText } from "@/lib/ai/extraction";
-import { nameTokens } from "./resolve";
+import { isGenericToken, nameTokens } from "./resolve";
 
 /**
  * "Remove duplicates, keep the Google one": the same commitment entered twice,
@@ -10,10 +10,11 @@ import { nameTokens } from "./resolve";
  * user asked for and never a guess by the model.
  *
  * A Whitespace event and a Google event are the same commitment when they
- * take the same slot: most of the shorter one overlaps, and they start within
- * 30 minutes or share a word. Names often differ ("Pre-calculus" vs
- * "Xavier: Precalc w/ Mr. Lee"), so the name is never required.
- * Two Whitespace events need a shared word or the exact same times.
+ * take exactly the same slot (any names: "Debate" vs "Athena Speech Club"),
+ * or most of the shorter one overlaps and they either share a word, or start
+ * within 30 minutes with related names ("Pre-calculus" vs "Xavier: Precalc
+ * w/ Mr. Lee"). Unrelated names that only partly overlap are a conflict.
+ * Two Whitespace events need a shared word, or the exact same times and related names.
  *
  * The copy that goes is always a Whitespace one. Google events are read-only
  * here, so the Google copy is the one kept. Between two Whitespace copies the
@@ -37,6 +38,21 @@ function sharesWord(a: string, b: string): boolean {
   return nameTokens(b).some((t) => left.has(t));
 }
 
+/**
+ * Names that plausibly mean the same thing even without a shared word:
+ * "Precalc w/ Mr. Lee" and "Pre-calculus" (one word starts the other).
+ * "Robotics Meeting" and "Chemistry Lab Review" are not related: two different
+ * things booked at the same time are a conflict, never a duplicate.
+ */
+function relatedNames(a: string, b: string): boolean {
+  if (sharesWord(a, b)) return true;
+  const compact = (t: string) => normalizeText(t).replace(/[^a-z0-9]/g, "");
+  const words = (t: string) => normalizeText(t).split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !isGenericToken(w));
+  const ca = compact(a);
+  const cb = compact(b);
+  return words(a).some((w) => cb.includes(w)) || words(b).some((w) => ca.includes(w));
+}
+
 function isGoogle(o: Occurrence): boolean {
   return o.event.externalSource === "google";
 }
@@ -45,12 +61,15 @@ function sameCommitment(a: Occurrence, b: Occurrence): boolean {
   const overlap = overlapMs(a, b);
   if (!overlap) return false;
   if (isGoogle(a) !== isGoogle(b)) {
+    // Exactly the same slot: a copy, whatever the names. Real copies often look unrelated
+    // ("Debate" vs "Athena Speech Club"), and the cleanup only removes the Whitespace one, with Undo.
+    if (sameTimes(a, b)) return true;
     const shorter = Math.min(a.end.getTime() - a.start.getTime(), b.end.getTime() - b.start.getTime());
     const mostly = overlap >= shorter / 2;
     const closeStart = Math.abs(a.start.getTime() - b.start.getTime()) <= START_SLACK_MS;
-    return mostly && (closeStart || sharesWord(a.event.title, b.event.title));
+    return mostly && (sharesWord(a.event.title, b.event.title) || (closeStart && relatedNames(a.event.title, b.event.title)));
   }
-  return sameTimes(a, b) || sharesWord(a.event.title, b.event.title);
+  return sharesWord(a.event.title, b.event.title) || (sameTimes(a, b) && relatedNames(a.event.title, b.event.title));
 }
 
 /** Which of two copies stays: Google first, then the more specific name. */

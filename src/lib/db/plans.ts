@@ -133,6 +133,8 @@ function toPlan(row: PlanProposalRow, items: PlanItemRow[]): StoredPlan {
 
 const UNDOABLE: ReadonlySet<PlanItemAction> = new Set([
   "schedule_block",
+  "move_block",
+  "create_event",
   "create_task",
   "update_task",
   "complete_task",

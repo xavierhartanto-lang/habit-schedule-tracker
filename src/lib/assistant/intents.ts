@@ -43,6 +43,9 @@ export const INTENT_TYPES = [
   "cancel_draft", // "never mind" / "don't add it" about an open action (asking or on a card)
   "update_event", // change an existing event: rename, move, new time or length, repeat rule
   "confirm_action", // "yes", "looks good", "add it": approve an action waiting on a card
+  "move_events", // several at once: "push everything tomorrow back an hour", "move my essay sessions to Saturday"
+  "clear_events", // several at once: "clear tomorrow, I'm sick", "cancel all my study sessions this week"
+  "undo", // "undo that", "put it back": reverse the last change Whitespace made in this chat
 ] as const;
 export type IntentType = (typeof INTENT_TYPES)[number];
 
@@ -101,14 +104,16 @@ const WireIntent = z.object({
   amount_minutes: z.number().int().nullable().describe("plan_time: total minutes, or minutes of the single block."),
   session_count: z.number().int().nullable().describe("plan_time with sessions: how many times."),
   session_minutes: z.number().int().nullable().describe("plan_time with sessions: minutes each, only if stated."),
-  window: z.enum(WINDOWS).nullable().describe("plan_time / not_enough_time / remove_duplicates: which period."),
+  window: z.enum(WINDOWS).nullable().describe("plan_time / not_enough_time / remove_duplicates / move_events / clear_events: which period."),
   priority: z.enum(PRIORITIES).nullable(),
   cadence: z.enum(CADENCES).nullable().describe("Habits: how often."),
   times_per_week: z.number().int().nullable(),
   progress: z.number().int().nullable().describe("Goals: 0-100 if the user gave it."),
-  target_date: WireDate.nullable().describe("Goals: target date."),
+  target_date: WireDate.nullable().describe("Goals: target date. move_events: the day things move to."),
   location: z.string().nullable(),
   scope: z.enum(SCOPES).nullable().describe("Repeating events: one = only that day, all = every repeat."),
+  shift_minutes: z.number().int().nullable().optional().describe('Relative move: "an hour later" = 60, "30 minutes earlier" = -30.'),
+  make_room: z.boolean().optional().describe('The user asked to make room / clear what is in the way.'),
   fact_category: z.enum(FACT_CATEGORIES).nullable().describe("save_fact only."),
   details: z.string().nullable().describe("One short description sentence: specifics from the user or established context. Not the title."),
   pref_day_start: z.string().nullable().describe('update_preferences: earliest time for work "HH:MM".'),
@@ -174,14 +179,21 @@ const ApiIntent = z.object({
   amount_minutes: apiInt("plan_time: total minutes, or minutes of the single block."),
   session_count: apiInt("plan_time with sessions: how many times."),
   session_minutes: apiInt("plan_time with sessions: minutes each, only if stated."),
-  window: apiEnum(WINDOWS).describe("plan_time / not_enough_time / remove_duplicates: which period."),
+  window: apiEnum(WINDOWS).describe("plan_time / not_enough_time / remove_duplicates / move_events / clear_events: which period."),
   priority: apiEnum(PRIORITIES),
   cadence: apiEnum(CADENCES).describe("Habits: how often."),
   times_per_week: apiInt(),
   progress: apiInt("Goals: 0-100 if the user gave it."),
-  target_date: ApiDate.describe("Goals: target date."),
+  target_date: ApiDate.describe('Goals: target date. move_events: the new day ("move my essay sessions to Saturday").'),
   location: apiText(),
   scope: apiEnum(SCOPES).describe('Changes to a repeating event: "one" = only that day, "all" = every repeat. "none" if not said.'),
+  shift_minutes: z
+    .number()
+    .int()
+    .describe('update_event / move_events: a move relative to the current time. "an hour later" / "push back an hour" = 60, "30 minutes earlier" = -30. 0 if not stated.'),
+  make_room: z
+    .boolean()
+    .describe('True when the user asks Whitespace to make room or clear what is in the way ("make room", "clear whatever\'s in the way", "move stuff if you have to").'),
   fact_category: apiEnum(FACT_CATEGORIES).describe("save_fact only."),
   details: apiText("One short description sentence: specifics from the user's words or established context that do not belong in the title."),
   pref_day_start: apiText('update_preferences: earliest time for work "HH:MM".'),
@@ -198,7 +210,7 @@ export const PlannerApiSchema = z.object({
 export type PlannerApi = z.infer<typeof PlannerApiSchema>;
 
 /** Keys whose values are never "not stated" markers. */
-const KEEP_AS_IS = new Set(["type", "evidence", "explicit", "days"]);
+const KEEP_AS_IS = new Set(["type", "evidence", "explicit", "days", "make_room"]);
 const DATE_KEYS = new Set(["date", "deadline", "target_date"]);
 
 function unmark(value: unknown): unknown {
@@ -226,6 +238,8 @@ export function fromApiWire(payload: unknown): unknown {
           Object.entries(raw as Record<string, unknown>).map(([k, v]) => {
             if (KEEP_AS_IS.has(k)) return [k, v];
             if (DATE_KEYS.has(k)) return [k, unmarkDate(v)];
+            // A shift can be negative ("30 minutes earlier"); 0 means not stated.
+            if (k === "shift_minutes") return [k, v === 0 ? null : v];
             return [k, unmark(typeof v === "string" ? v.trim() : v)];
           }),
         );
@@ -273,6 +287,10 @@ export type Intent = {
   targetDate: DateRef | null;
   location: string | null;
   scope: Scope | null;
+  /** Relative move in minutes: +60 = an hour later, -30 = half an hour earlier. */
+  shiftMinutes: number | null;
+  /** "Make room": what's in the way moves (or skips) as part of the command. */
+  makeRoom: boolean;
   factCategory: Exclude<ContextCategory, never> | null;
   details: string | null;
   prefs: {
@@ -361,6 +379,8 @@ export function toIntent(raw: WireIntentT): Intent {
     targetDate: dateRef(raw.target_date),
     location: clean(raw.location, 200),
     scope: raw.scope ?? null,
+    shiftMinutes: raw.shift_minutes ? intIn(raw.shift_minutes, -24 * 60, 7 * 24 * 60) : null,
+    makeRoom: raw.make_room === true,
     factCategory: raw.fact_category ?? null,
     details: clean(raw.details, 500),
     prefs: {
@@ -432,6 +452,8 @@ export function mergeIntent(draft: Intent, next: Intent): Intent {
     targetDate: pick(draft.targetDate, next.targetDate),
     location: pick(draft.location, next.location),
     scope: pick(draft.scope, next.scope),
+    shiftMinutes: pick(draft.shiftMinutes, next.shiftMinutes),
+    makeRoom: draft.makeRoom || next.makeRoom,
     factCategory: pick(draft.factCategory, next.factCategory),
     details: pick(draft.details, next.details),
     prefs: {

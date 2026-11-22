@@ -24,6 +24,7 @@ import { pickKeeper } from "@/lib/proactive/conflict-pick";
 import { realityCheck } from "@/lib/proactive/reality";
 import type { ActionSpec, World } from "./assess";
 import { clockLabel, shortDate } from "./dates";
+import { isGenericToken, nameScore, nameTokens } from "./resolve";
 import { planCleanup } from "./duplicates";
 
 /**
@@ -171,6 +172,11 @@ function minutesLabel(minutes: number): string {
   const m = minutes % 60;
   if (!h) return `${m} min`;
   return m ? `${h} h ${m} min` : `${h} h`;
+}
+
+/** A long repeating block (School 8-3) that a new event sits entirely inside. */
+function containsDay(other: { start: Date; end: Date }, mine: { start: Date; end: Date }): boolean {
+  return other.start <= mine.start && other.end >= mine.end && other.end.getTime() - other.start.getTime() >= 3 * 3_600_000;
 }
 
 function isFlexibleBlock(c: Commitment & { planItemId?: string | null }): boolean {
@@ -337,8 +343,8 @@ function asCommitment(id: string, payload: ItemPayload): Commitment {
 type Ctx = {
   items: NewPlanItem[];
   requests: PlanRequest[];
-  /** request id -> how to turn its sessions into items */
-  moves: Map<string, { block: Commitment }>;
+  /** request id -> how to turn its sessions into items. `commanded`: part of the user's own command, applied now. */
+  moves: Map<string, { block: Commitment; commanded?: boolean; keepIfNoRoom?: boolean }>;
   notes: string[];
   unscheduled: BuiltPlan["unscheduled"];
   windows: { start: Date; end: Date }[];
@@ -348,26 +354,34 @@ type Ctx = {
   adaptive: boolean;
 };
 
-function moveRequest(block: Commitment, ctx: Ctx, input: BuildInput, avoidDay: string | null, task: Task | null): void {
+function moveRequest(
+  block: Commitment,
+  ctx: Ctx,
+  input: BuildInput,
+  avoidDay: string | null,
+  task: Task | null,
+  options: { commanded?: boolean; within?: { start: Date; end: Date }; avoid?: { start: string; end: string }[]; keepIfNoRoom?: boolean } = {},
+): void {
   if (!block.startsAt || !block.endsAt) return;
   const minutes = Math.round((Date.parse(block.endsAt) - Date.parse(block.startsAt)) / 60_000);
   const tz = input.world.timeZone;
   const id = `m${ctx.requests.length}`;
   const originalDay = dateKeyInZone(new Date(block.startsAt), tz);
   const fallbackDeadline = startOfDayInZone(addDaysToKey(originalDay, 7), tz);
-  const deadline = task?.dueAt ? new Date(task.dueAt) : fallbackDeadline;
+  // "Move my essay sessions to Saturday": only that day. Otherwise before it's due, or within a week.
+  const deadline = options.within?.end ?? (task?.dueAt && Date.parse(task.dueAt) > Date.parse(input.now) ? new Date(task.dueAt) : fallbackDeadline);
   ctx.requests.push({
     id,
     title: block.title,
     amount: { type: "single", minutes },
     priority: task?.priority ?? "medium",
     deadline: deadline.toISOString(),
-    earliestStart: null,
+    earliestStart: options.within ? options.within.start.toISOString() : null,
     lifeAreaId: block.lifeAreaId ?? null,
     taskId: task?.id ?? null,
-    avoid: [{ start: block.startsAt, end: block.endsAt }],
+    avoid: [{ start: block.startsAt, end: block.endsAt }, ...(options.avoid ?? [])],
   });
-  ctx.moves.set(id, { block });
+  ctx.moves.set(id, { block, commanded: options.commanded, keepIfNoRoom: options.keepIfNoRoom });
   ctx.excludeEventIds.add(block.id);
   if (avoidDay) {
     ctx.extraBusy.push({
@@ -376,7 +390,25 @@ function moveRequest(block: Commitment, ctx: Ctx, input: BuildInput, avoidDay: s
       title: "Unavailable",
     });
   }
-  ctx.windows.push({ start: new Date(input.now), end: deadline });
+  ctx.windows.push({ start: options.within?.start ?? new Date(input.now), end: deadline });
+}
+
+const PRIORITY_RANK = { low: 0, medium: 1, high: 2 } as const;
+const SESSION_WORDS = /\b(?:sessions?|study time|work time|study blocks?|blocks?)\b/i;
+
+/** Does a bulk-change filter ("history essay sessions", "study sessions", "tutoring") pick this item? */
+function bulkMatches(filter: string | null, event: Commitment, isBlock: boolean): boolean {
+  if (!filter) return true;
+  const sessionsOnly = SESSION_WORDS.test(filter);
+  if (sessionsOnly && !isBlock) return false;
+  const specific = nameTokens(filter).filter((t) => !isGenericToken(t));
+  if (sessionsOnly && !specific.length) return true;
+  // "History essay sessions": every specific word must be in the name (College Essay Draft is not one).
+  if (specific.length) {
+    const title = nameTokens(event.title);
+    return specific.every((t) => title.includes(t));
+  }
+  return nameScore(filter, event.title) >= 0.15;
 }
 
 /** Tags the items and scheduling requests one spec produced with its conversation action. */
@@ -441,6 +473,8 @@ export function buildPlan(input: BuildInput): BuiltPlan {
   };
   /** Scheduling requests for tasks created on this same card: their sessions link to the task on approval. */
   const newTaskRequests = new Set<string>();
+  /** plan_time requests where the user said "make room": lower-priority sessions may move out of the way. */
+  const makeRoomFor = new Set<string>();
 
   // ---- 1. Records and new events ----
   // Which conversation action produced each item and each scheduling request.
@@ -455,26 +489,238 @@ export function buildPlan(input: BuildInput): BuiltPlan {
    * collides with are moved on the same card (with approval), so one change
    * never leaves a broken plan behind (7.5 grouped repair).
    */
-  function moveCollidingSessions(occ: { start: Date; end: Date }[]): void {
+  function moveCollidingSessions(occ: { start: Date; end: Date }[], commanded = false): void {
     let moved = 0;
     for (const block of futureBlocks) {
       if (ctx.excludeEventIds.has(block.id)) continue;
       const hit = occ.some((o) => o.start < new Date(block.endsAt!) && o.end > new Date(block.startsAt!));
       if (hit) {
         ctx.adaptive = true;
-        moveRequest(block, ctx, input, null, block.taskId ? tasksById.get(block.taskId) ?? null : null);
+        moveRequest(block, ctx, input, null, block.taskId ? tasksById.get(block.taskId) ?? null : null, {
+          commanded,
+          avoid: occ.map((o) => ({ start: o.start.toISOString(), end: o.end.toISOString() })),
+        });
         moved++;
       }
     }
-    if (moved) ctx.notes.push(`${moved} Whitespace session${moved === 1 ? "" : "s"} would collide with this change, so new times for ${moved === 1 ? "it are" : "them are"} on the same card.`);
+    if (moved) {
+      ctx.notes.push(
+        commanded
+          ? `${moved} Whitespace session${moved === 1 ? " was" : "s were"} in the way, so ${moved === 1 ? "it was" : "they were"} moved to a free time (already done, Undo on the card).`
+          : `${moved} Whitespace session${moved === 1 ? "" : "s"} would collide with this change, so new times for ${moved === 1 ? "it are" : "them are"} on the same card.`,
+      );
+    }
+  }
+
+  /**
+   * "Push everything tomorrow back an hour", "move my essay sessions to Saturday",
+   * "clear tomorrow", "cancel my study sessions this week". Picks every matching
+   * calendar item in the period from the full calendar, then:
+   * - Google Calendar events never change (explained);
+   * - repeating events: clearing skips that day; moving changes that day only
+   *   when the user named them, otherwise they stay (explained);
+   * - one-time events move or go;
+   * - Whitespace sessions move (by the shift, or to a free time on the new day);
+   *   clearing a day re-plans them on other days, unless the user named the sessions.
+   */
+  function bulkChange(spec: Extract<ActionSpec, { kind: "bulk_change" }>, commanded: boolean): void {
+    ctx.adaptive = true;
+    const rangeStart = new Date(
+      Math.max(
+        now.getTime(),
+        spec.fromTime ? zonedToUtc(spec.from, spec.fromTime, tz).getTime() : startOfDayInZone(spec.from, tz).getTime(),
+      ),
+    );
+    const rangeEnd = startOfDayInZone(spec.to, tz);
+    const period = spec.to === addDaysToKey(spec.from, 1) ? shortDate(spec.from) : `${shortDate(spec.from)} to ${shortDate(addDaysToKey(spec.to, -1))}`;
+    if (rangeEnd <= rangeStart) {
+      ctx.notes.push(`${period} is already over, so nothing was changed.`);
+      return;
+    }
+    const isBlock = (e: Commitment) => e.kind === "flexible" && !!(e as Commitment & { planItemId?: string | null }).planItemId;
+    const occurrences = expandEvents(input.events.filter((e) => e.startsAt && e.endsAt), rangeStart, rangeEnd, tz).filter(
+      (o) => !o.allDay && o.start >= rangeStart && bulkMatches(spec.filter, o.event, isBlock(o.event)),
+    );
+    if (!occurrences.length) {
+      ctx.notes.push(`Nothing on the calendar ${spec.filter ? `matches "${spec.filter}" ` : ""}for ${period}, so nothing was changed. Say so plainly.`);
+      return;
+    }
+    const google: string[] = [];
+    const repeating: string[] = [];
+    const done: string[] = [];
+    const named = !!spec.filter;
+    const sessionsNamed = !!spec.filter && SESSION_WORDS.test(spec.filter);
+    const movedIds = new Set(occurrences.filter((o) => !o.event.externalSource && (!o.recurring || named)).map((o) => o.key));
+    const staying = expandEvents(input.events, startOfDayInZone(spec.from, tz), new Date(rangeEnd.getTime() + 86_400_000), tz).filter((o) => !o.allDay && !movedIds.has(o.key));
+    const clearedRange = { start: rangeStart.toISOString(), end: rangeEnd.toISOString() };
+
+    for (const o of occurrences) {
+      const e = o.event;
+      const time = `${clockLabel(timeKeyInZone(o.start, tz))}-${clockLabel(timeKeyInZone(o.end, tz))}`;
+      if (e.externalSource) {
+        google.push(e.title);
+        continue;
+      }
+      const task = e.taskId ? tasksById.get(e.taskId) ?? null : null;
+      if (spec.mode === "clear") {
+        if (isBlock(e)) {
+          if (sessionsNamed || named) {
+            ctx.items.push({
+              action: "remove_block",
+              title: e.title,
+              targetId: e.id,
+              autoApply: commanded,
+              commanded,
+              payload: { commitmentId: e.id },
+              display: { ...EMPTY_DISPLAY, timing: timingFor(o.start.toISOString(), o.end.toISOString(), tz), detail: "Remove this session", reason: "You asked to cancel it. Undo brings it back." },
+            });
+            done.push(`${e.title} (${shortDate(o.date)})`);
+          } else {
+            // The work still needs doing: it goes to a free time outside the cleared period.
+            moveRequest(e, ctx, input, null, task, { commanded, avoid: [clearedRange] });
+          }
+        } else if (o.recurring) {
+          ctx.items.push({
+            action: "skip_occurrence",
+            title: e.title,
+            targetId: e.id,
+            autoApply: commanded,
+            commanded,
+            payload: { commitmentId: e.id, date: o.date },
+            display: { ...EMPTY_DISPLAY, detail: `Skip ${shortDate(o.date)}, ${time} only. The rest of the series stays.`, reason: "You asked to clear it." },
+          });
+          done.push(`${e.title} (${shortDate(o.date)} only)`);
+        } else {
+          ctx.items.push({
+            action: "remove_event",
+            title: e.title,
+            targetId: e.id,
+            autoApply: commanded,
+            commanded,
+            payload: { commitmentId: e.id },
+            display: { ...EMPTY_DISPLAY, detail: `${shortDate(o.date)}, ${time}`, reason: "You asked to clear it. Undo brings it back." },
+          });
+          done.push(`${e.title} (${shortDate(o.date)})`);
+        }
+        continue;
+      }
+
+      // Moving.
+      if (o.recurring && !named) {
+        repeating.push(e.title);
+        continue;
+      }
+      const length = o.end.getTime() - o.start.getTime();
+      const newStart = spec.shiftMinutes
+        ? new Date(o.start.getTime() + spec.shiftMinutes * 60_000)
+        : zonedToUtc(spec.targetDate!, timeKeyInZone(o.start, tz), tz);
+      const newEnd = new Date(newStart.getTime() + length);
+      if (isBlock(e)) {
+        const clash = overlapping(staying, newStart, newEnd).some((x) => x.event.id !== e.id);
+        if (spec.targetDate || clash) {
+          // A free time that day (the new day, or the same day when the shifted time is taken).
+          const day = spec.targetDate ?? dateKeyInZone(newStart, tz);
+          const start = new Date(Math.max(now.getTime(), startOfDayInZone(day, tz).getTime()));
+          moveRequest(e, ctx, input, null, task, { commanded, within: { start, end: startOfDayInZone(addDaysToKey(day, 1), tz) }, keepIfNoRoom: true });
+          continue;
+        }
+        ctx.items.push({
+          action: "move_block",
+          title: e.title,
+          targetId: e.id,
+          autoApply: commanded,
+          commanded,
+          payload: { commitmentId: e.id, startsAt: newStart.toISOString(), endsAt: newEnd.toISOString(), fromStart: e.startsAt, fromEnd: e.endsAt },
+          display: {
+            ...EMPTY_DISPLAY,
+            timing: timingFor(newStart.toISOString(), newEnd.toISOString(), tz),
+            previous: { start: e.startsAt!, end: e.endsAt! },
+            reason: `Moved from ${whenLabel(e.startsAt!, tz)}, as you asked.`,
+            editable: true,
+          },
+        });
+        ctx.excludeEventIds.add(e.id);
+        ctx.extraBusy.push({ start: newStart.toISOString(), end: newEnd.toISOString(), title: e.title });
+        done.push(`${e.title} to ${whenLabel(newStart.toISOString(), tz)}`);
+        continue;
+      }
+      const payload: ItemPayload = {
+        title: e.title,
+        lifeAreaId: e.lifeAreaId ?? null,
+        kind: "fixed",
+        startsAt: newStart.toISOString(),
+        endsAt: newEnd.toISOString(),
+        timezone: e.timezone ?? tz,
+        rrule: null,
+        location: e.location ?? null,
+        notes: e.notes ?? null,
+        sourceMessageId: input.sourceMessageId,
+      };
+      if (o.recurring) {
+        ctx.items.push({
+          action: "skip_occurrence",
+          title: e.title,
+          targetId: e.id,
+          autoApply: commanded,
+          commanded,
+          payload: { commitmentId: e.id, date: o.date },
+          display: { ...EMPTY_DISPLAY, detail: `Skip ${shortDate(o.date)} only. The rest of the series stays.`, reason: "Replaced by the new time below." },
+        });
+        ctx.items.push({
+          action: "create_event",
+          title: e.title,
+          targetId: null,
+          autoApply: commanded,
+          commanded,
+          payload,
+          display: { ...EMPTY_DISPLAY, timing: timingFor(payload.startsAt as string, payload.endsAt as string, tz), reason: `Just ${shortDate(o.date)}. Every other ${e.title} stays as it is.`, editable: true },
+        });
+      } else {
+        ctx.items.push({
+          action: "update_event",
+          title: e.title,
+          targetId: e.id,
+          autoApply: commanded,
+          commanded,
+          payload: {
+            commitmentId: e.id,
+            patch: { starts_at: newStart.toISOString(), ends_at: newEnd.toISOString() },
+            expect: { title: e.title, starts_at: e.startsAt, ends_at: e.endsAt, recurrence_rule: e.recurrenceRule ?? null },
+            startsAt: newStart.toISOString(),
+            endsAt: newEnd.toISOString(),
+            timezone: e.timezone ?? tz,
+          },
+          display: {
+            ...EMPTY_DISPLAY,
+            timing: timingFor(newStart.toISOString(), newEnd.toISOString(), tz),
+            previous: { start: e.startsAt!, end: e.endsAt! },
+            detail: `${whenLabel(e.startsAt!, tz)} → ${whenLabel(newStart.toISOString(), tz)}`,
+            reason: "Moved as you asked. Undo puts it back.",
+          },
+        });
+      }
+      ctx.excludeEventIds.add(e.id);
+      ctx.extraEvents.push(asCommitment(e.id, { ...payload }));
+      done.push(`${e.title} to ${whenLabel(newStart.toISOString(), tz)}`);
+    }
+
+    const verb = spec.mode === "clear" ? "Cleared" : "Moved";
+    if (done.length) ctx.notes.push(`${verb} for ${period}${commanded ? " (already done, Undo on the card)" : " (on the card, waiting for Approve)"}: ${done.join("; ")}.`);
+    const replanned = [...ctx.moves.values()].filter((m) => occurrences.some((o) => o.event.id === m.block.id)).length;
+    if (replanned) ctx.notes.push(`${replanned} Whitespace session${replanned === 1 ? "" : "s"} ${spec.mode === "clear" ? "moved to other free times so the work still gets done" : "went to the nearest free time that day"}${commanded ? " (already done)" : ""}; the card shows when.`);
+    if (google.length) ctx.notes.push(`${[...new Set(google)].join(", ")} ${new Set(google).size === 1 ? "comes" : "come"} from Google Calendar, so Whitespace left ${new Set(google).size === 1 ? "it" : "them"} as ${new Set(google).size === 1 ? "it is" : "they are"}. Say so, and that ${new Set(google).size === 1 ? "it" : "they"} can be changed in Google Calendar.`);
+    if (repeating.length) ctx.notes.push(`${[...new Set(repeating)].join(", ")} ${new Set(repeating).size === 1 ? "repeats" : "repeat"} every week, so ${new Set(repeating).size === 1 ? "it" : "they"} stayed. Mention it in a few words; the user can name ${new Set(repeating).size === 1 ? "it" : "them"} to move ${new Set(repeating).size === 1 ? "it" : "them"} too.`);
   }
 
   function buildRecord(spec: ActionSpec, explicit: boolean, fromUser: boolean): void {
     const auto = explicit && AUTO_APPLY.has(spec.kind);
+    /** The user directly told Whitespace to make exactly this calendar change: done now, with Undo. */
+    const commanded = explicit && fromUser;
     switch (spec.kind) {
       case "event": {
         const startsAt = zonedToUtc(spec.date, spec.startTime, tz).toISOString();
-        const endsAt = zonedToUtc(spec.date, spec.endTime, tz).toISOString();
+        // An end earlier than the start runs past midnight, into the next day.
+        const endsAt = zonedToUtc(spec.endTime > spec.startTime ? spec.date : addDaysToKey(spec.date, 1), spec.endTime, tz).toISOString();
         const payload: ItemPayload = {
           title: spec.title,
           lifeAreaId: spec.lifeAreaId,
@@ -494,7 +740,10 @@ export function buildPlan(input: BuildInput): BuiltPlan {
           action: "create_event",
           title: spec.title,
           targetId: null,
-          autoApply: false,
+          // "Add a study group Saturday 1-3": the user's own command is saved now, with Undo.
+          // "I have a test Friday" (a statement) is Whitespace's suggestion and waits.
+          autoApply: commanded,
+          commanded,
           payload,
           display: {
             ...EMPTY_DISPLAY,
@@ -521,6 +770,32 @@ export function buildPlan(input: BuildInput): BuiltPlan {
           for (const other of overlapping(fixedOthers, mineOcc.start, mineOcc.end)) {
             const overlapMin = (Math.min(mineOcc.end.getTime(), other.end.getTime()) - Math.max(mineOcc.start.getTime(), other.start.getTime())) / 60_000;
             if (overlapMin < 10 || skipped.has(other.key)) continue;
+            // A test during School is part of the school day, not a clash with it.
+            if (other.recurring && containsDay(other, mineOcc)) continue;
+            if (other.event.externalSource) {
+              ctx.notes.push(`${spec.title} overlaps ${other.event.title} (${whenLabel(other.start.toISOString(), tz)}), which comes from Google Calendar, so Whitespace leaves it as it is. Mention the overlap in one line; if ${other.event.title} isn't happening, the user can change it in Google Calendar.`);
+              continue;
+            }
+            if (spec.makeRoom && commanded && other.recurring && !spec.rrule) {
+              // "Make room": the repeating thing in the way skips that day, as part of the command.
+              skipped.add(other.key);
+              ctx.items.push({
+                action: "skip_occurrence",
+                title: other.event.title,
+                targetId: other.event.id,
+                autoApply: true,
+                commanded: true,
+                payload: { commitmentId: other.event.id, date: other.date },
+                display: { ...EMPTY_DISPLAY, detail: `Skip ${shortDate(other.date)} only. The rest of the series stays.`, reason: `Making room for ${spec.title}.` },
+              });
+              continue;
+            }
+            if (spec.makeRoom && !other.recurring) {
+              ctx.notes.push(
+                `${spec.title} overlaps ${other.event.title} (${whenLabel(other.start.toISOString(), tz)}), a one-time appointment. Whitespace doesn't move or cancel appointments on a guess: recommend a concrete fix (move ${other.event.title} to another time, or cancel it) and do it if the user says so.`,
+              );
+              continue;
+            }
             const pick = pickKeeper(
               { id: "new", title: spec.title, recurring: !!spec.rrule },
               { id: other.event.id, title: other.event.title, recurring: other.recurring },
@@ -581,7 +856,7 @@ export function buildPlan(input: BuildInput): BuiltPlan {
             ctx.notes.push(`${spec.title} is an exam with nothing planned to study for it, so ${prep.sessions} study session${prep.sessions === 1 ? "" : "s"} before it are proposed on the card. Mention it in one line; the user can reject them.`);
           }
         }
-        moveCollidingSessions(occ);
+        moveCollidingSessions(occ, commanded && !!spec.makeRoom);
         break;
       }
       case "event_update": {
@@ -616,7 +891,8 @@ export function buildPlan(input: BuildInput): BuiltPlan {
             action: "skip_occurrence",
             title: e.title,
             targetId: e.id,
-            autoApply: false,
+            autoApply: commanded,
+            commanded,
             payload: { commitmentId: e.id, date: spec.occurrenceDate },
             display: { ...EMPTY_DISPLAY, detail: `Skip ${shortDate(spec.occurrenceDate)} only. The rest of the series stays.`, reason: "Replaced by the changed time below." },
           });
@@ -639,7 +915,8 @@ export function buildPlan(input: BuildInput): BuiltPlan {
             action: "create_event",
             title,
             targetId: null,
-            autoApply: false,
+            autoApply: commanded,
+            commanded,
             payload,
             display: {
               ...EMPTY_DISPLAY,
@@ -677,7 +954,8 @@ export function buildPlan(input: BuildInput): BuiltPlan {
           action: "update_event",
           title: e.title,
           targetId: e.id,
-          autoApply: false,
+          autoApply: commanded,
+          commanded,
           payload: {
             commitmentId: e.id,
             patch,
@@ -789,6 +1067,25 @@ export function buildPlan(input: BuildInput): BuiltPlan {
           payload: { taskId: spec.task.id },
           display: { ...EMPTY_DISPLAY, detail: "Mark as done", reason: "You said it's finished." },
         });
+        // Work sessions still ahead for it are no longer needed: freeing them is
+        // Whitespace's suggestion (the user may still want the time), so it waits.
+        const ahead = futureBlocks.filter((b) => b.taskId === spec.task.id);
+        for (const b of ahead) {
+          ctx.items.push({
+            action: "remove_block",
+            title: b.title,
+            targetId: b.id,
+            autoApply: false,
+            payload: { commitmentId: b.id },
+            display: {
+              ...EMPTY_DISPLAY,
+              timing: timingFor(b.startsAt!, b.endsAt!, tz),
+              detail: "Free up this time",
+              reason: `Work session for ${spec.task.title}, which is done.`,
+            },
+          });
+        }
+        if (ahead.length) ctx.notes.push(`${spec.task.title} still had ${ahead.length} work session${ahead.length === 1 ? "" : "s"} ahead. Freeing ${ahead.length === 1 ? "it is" : "them is"} suggested on the card; mention it in a few words.`);
         break;
       }
       case "task_remove": {
@@ -803,12 +1100,14 @@ export function buildPlan(input: BuildInput): BuiltPlan {
           display: { ...EMPTY_DISPLAY, detail: "Delete this task", reason: "You asked to remove it. Undo brings it back." },
         });
         // Its work sessions go too, or they'd stay on the calendar with nothing to work on.
+        // Part of the same command, so they go now as well (Undo brings them back).
         for (const b of futureBlocks.filter((b) => b.taskId === spec.task.id)) {
           ctx.items.push({
             action: "remove_block",
             title: b.title,
             targetId: b.id,
-            autoApply: false,
+            autoApply: commanded,
+            commanded,
             payload: { commitmentId: b.id },
             display: {
               ...EMPTY_DISPLAY,
@@ -938,10 +1237,13 @@ export function buildPlan(input: BuildInput): BuiltPlan {
           }
           amount = { type: "total", minutes: left };
         }
-        const win = windowFor(spec, input, deadline);
+        const win = spec.onDate
+          ? { start: new Date(Math.max(now.getTime(), startOfDayInZone(spec.onDate, tz).getTime())), end: startOfDayInZone(addDaysToKey(spec.onDate, 1), tz) }
+          : windowFor(spec, input, deadline);
         ctx.windows.push(win);
+        const requestId = `r${ctx.requests.length}`;
         ctx.requests.push({
-          id: `r${ctx.requests.length}`,
+          id: requestId,
           title: spec.title,
           amount,
           priority: spec.priority,
@@ -951,6 +1253,11 @@ export function buildPlan(input: BuildInput): BuiltPlan {
           lifeAreaId: spec.lifeAreaId,
           taskId: spec.taskId,
         });
+        if (spec.makeRoom) makeRoomFor.add(requestId);
+        break;
+      }
+      case "bulk_change": {
+        bulkChange(spec, commanded);
         break;
       }
       case "remove_event": {
@@ -990,13 +1297,17 @@ export function buildPlan(input: BuildInput): BuiltPlan {
       }
       case "cant_make": {
         ctx.adaptive = true;
-        if (spec.event && spec.event.kind === "fixed") {
+        if (spec.event?.externalSource) {
+          ctx.notes.push(`${spec.event.title} comes from Google Calendar, so Whitespace can't skip or remove it. Tell the user to decline or delete it in Google Calendar; Whitespace picks it up on the next sync.`);
+        } else if (spec.event && spec.event.kind === "fixed") {
           if (spec.event.recurrenceRule && spec.date) {
             ctx.items.push({
               action: "skip_occurrence",
               title: spec.event.title,
               targetId: spec.event.id,
-              autoApply: false,
+              // "Cancel basketball tomorrow" / "skip piano today": the user's command, done now.
+              autoApply: commanded,
+              commanded,
               payload: { commitmentId: spec.event.id, date: spec.date },
               display: {
                 ...EMPTY_DISPLAY,
@@ -1005,7 +1316,21 @@ export function buildPlan(input: BuildInput): BuiltPlan {
               },
             });
           } else {
-            ctx.notes.push(`${spec.event.title} is a fixed event. Whitespace leaves it unchanged; the user can edit it on the calendar.`);
+            // A one-time event they can't make: cancelling it is the obvious fix, proposed (or done when commanded).
+            ctx.items.push({
+              action: "remove_event",
+              title: spec.event.title,
+              targetId: spec.event.id,
+              autoApply: commanded,
+              commanded,
+              payload: { commitmentId: spec.event.id },
+              display: {
+                ...EMPTY_DISPLAY,
+                detail: spec.event.startsAt ? `${shortDate(dateKeyInZone(new Date(spec.event.startsAt), tz))}, ${clockLabel(timeKeyInZone(new Date(spec.event.startsAt), tz))}` : null,
+                reason: "You said you can't make it. Undo brings it back.",
+              },
+            });
+            if (!commanded) ctx.notes.push(`Whitespace proposes cancelling ${spec.event.title} (on the card). If they'd rather move it, they can say when.`);
           }
         }
         const blocks = spec.blocks.filter((b) => b.startsAt && Date.parse(b.startsAt) > now.getTime());
@@ -1182,15 +1507,80 @@ export function buildPlan(input: BuildInput): BuiltPlan {
     if (end <= start) end = new Date(start.getTime() + 86_400_000);
     window = { start: start.toISOString(), end: end.toISOString() };
 
-    const result = planSchedule({
-      now: input.now,
-      timeZone: tz,
-      window,
-      events: [...input.events.filter((e) => !ctx.excludeEventIds.has(e.id)), ...ctx.extraEvents],
-      busy: [...input.busy, ...ctx.extraBusy],
-      preferences: input.preferences,
-      requests: ctx.requests,
-    });
+    const run = (preferences: SchedulingPreferences = input.preferences) =>
+      planSchedule({
+        now: input.now,
+        timeZone: tz,
+        window: window!,
+        events: [...input.events.filter((e) => !ctx.excludeEventIds.has(e.id)), ...ctx.extraEvents],
+        busy: [...input.busy, ...ctx.extraBusy],
+        preferences,
+        requests: ctx.requests,
+      });
+    let result = run();
+    const isShort = (x: typeof result) => ctx.requests.some((r) => makeRoomFor.has(r.id) && x.outcomes.some((o) => o.requestId === r.id && o.status !== "scheduled"));
+    // "Make room" overrides the usual daily limit on new work: the user asked for this time.
+    const relaxed: SchedulingPreferences = { ...input.preferences, dailyCapMinutes: 720, keepFreePercent: 0 };
+    if (isShort(result)) {
+      const again = run(relaxed);
+      if (!isShort(again)) {
+        result = again;
+        ctx.notes.push("This goes past the usual daily limit on new work, because the user asked to make room. Mention it'll be a full day.");
+      }
+    }
+
+    // "Make room": when the time doesn't fit, lower-priority sessions in that period
+    // move out of the way (on the same card), and the engine places everything again.
+    // Equal or more important work is never pushed aside.
+    const short = ctx.requests.filter((r) => makeRoomFor.has(r.id) && result.outcomes.some((o) => o.requestId === r.id && o.status !== "scheduled"));
+    if (short.length) {
+      const victims: string[] = [];
+      const blockers: string[] = [];
+      for (const r of short) {
+        const from = Date.parse(r.earliestStart ?? input.now);
+        const to = Date.parse(r.deadline ?? window.end);
+        for (const b of futureBlocks) {
+          if (ctx.excludeEventIds.has(b.id)) continue;
+          if (Date.parse(b.endsAt!) <= from || Date.parse(b.startsAt!) >= to) continue;
+          const task = b.taskId ? tasksById.get(b.taskId) ?? null : null;
+          const rank = PRIORITY_RANK[task?.priority ?? "medium"];
+          if (rank >= PRIORITY_RANK[r.priority ?? "medium"]) {
+            blockers.push(b.title);
+            continue;
+          }
+          moveRequest(b, ctx, input, null, task, { avoid: [{ start: new Date(from).toISOString(), end: new Date(to).toISOString() }] });
+          victims.push(b.title);
+        }
+      }
+      if (victims.length) {
+        const before = { result, window, requests: ctx.requests.length };
+        const end2 = new Date(Math.min(Math.max(...ctx.windows.map((w) => w.end.getTime())), now.getTime() + MAX_WINDOW_DAYS * 86_400_000));
+        if (end2.getTime() > Date.parse(window.end)) window = { start: window.start, end: end2.toISOString() };
+        result = run(relaxed);
+        const helped = short.some((r) => {
+          const placed = (x: typeof result) => x.sessions.filter((v) => v.requestId === r.id).length;
+          return placed(result) > placed(before.result);
+        });
+        if (helped) {
+          ctx.notes.push(`To make room, lower-priority ${victims.length === 1 ? "session" : "sessions"} (${[...new Set(victims)].join(", ")}) ${victims.length === 1 ? "moves" : "move"} to another time on the same card. Say so in one line.`);
+        } else {
+          // Moving them wouldn't have made it fit: leave them where they are.
+          for (const r of ctx.requests.splice(before.requests)) {
+            const m = ctx.moves.get(r.id);
+            if (m) ctx.excludeEventIds.delete(m.block.id);
+            ctx.moves.delete(r.id);
+          }
+          result = before.result;
+          window = before.window;
+          victims.length = 0;
+        }
+      }
+      if (blockers.length) {
+        const stillShort = short.some((r) => result.outcomes.some((o) => o.requestId === r.id && o.status !== "scheduled"));
+        if (stillShort) ctx.notes.push(`Only equally or more important work is in the way (${[...new Set(blockers)].join(", ")}), so Whitespace didn't move it. Say what didn't fit and recommend one concrete trade-off for the user to choose.`);
+      }
+      if (!victims.length && !blockers.length) ctx.notes.push("Nothing Whitespace scheduled is in the way: the time is taken by fixed events. Say what didn't fit.");
+    }
     summary = result.summary;
     const byId = new Map(ctx.requests.map((r) => [r.id, r]));
     const numbers = sessionNumbers(result.sessions);
@@ -1203,7 +1593,8 @@ export function buildPlan(input: BuildInput): BuiltPlan {
           action: "move_block",
           title: move.block.title,
           targetId: move.block.id,
-          autoApply: false,
+          autoApply: !!move.commanded,
+          commanded: !!move.commanded,
           payload: {
             commitmentId: move.block.id,
             startsAt: s.start,
@@ -1234,18 +1625,24 @@ export function buildPlan(input: BuildInput): BuiltPlan {
     for (const outcome of result.outcomes) {
       if (outcome.status === "scheduled") continue;
       const move = ctx.moves.get(outcome.requestId);
+      if (move?.keepIfNoRoom) {
+        // A move the user asked for that has no free time there: the session stays where it is.
+        ctx.notes.push(`${move.block.title} (${whenLabel(move.block.startsAt!, tz)}) has no free time on the new day, so it stayed where it is. Say so and offer another day.`);
+        continue;
+      }
       if (move && outcome.status === "unscheduled") {
         ctx.items.push({
           action: "remove_block",
           title: move.block.title,
           targetId: move.block.id,
-          autoApply: false,
+          autoApply: !!move.commanded,
+          commanded: !!move.commanded,
           payload: { commitmentId: move.block.id },
           display: {
             ...EMPTY_DISPLAY,
             timing: timingFor(move.block.startsAt!, move.block.endsAt!, tz),
             detail: "Remove this session",
-            reason: "You can't make it, and no other time fits before it's due.",
+            reason: move.commanded ? "No other free time fits before it's due, so it was taken off." : "You can't make it, and no other time fits before it's due.",
             tradeoffs: [outcome.issue?.message ?? "No free time left."],
           },
         });

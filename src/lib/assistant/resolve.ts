@@ -77,6 +77,9 @@ export function nameScore(query: string | null | undefined, title: string): numb
   if (!q.length || !t.length) return 0;
   const shared = q.filter((w) => t.includes(w));
   if (!shared.length) return 0;
+  // "Guitar lesson" is not "Piano Lesson": when the user named something specific,
+  // sharing only the kind of activity is no match at all.
+  if (shared.every(isGenericToken) && q.some((w) => !isGenericToken(w))) return 0;
   if (shared.length === q.length && shared.length === t.length) return 1;
   const score = 0.6 * (shared.length / q.length) + 0.4 * (shared.length / t.length);
   return shared.every(isGenericToken) ? score * 0.4 : score;
@@ -106,7 +109,15 @@ export function resolveEntity<T extends { title: string }>(
   const entries = [...map.entries()].filter(([r]) => !options.pool || options.pool.includes(r));
   if (ref && map.has(ref)) {
     const item = map.get(ref)!;
-    if (!words || nameScore(words, item.title) >= STRONG) return { kind: "one", ref, item, via: "ref" };
+    if (!words) return { kind: "one", ref, item, via: "ref" };
+    const score = nameScore(words, item.title);
+    // The model's pick only counts when the words point at it more than at anything else:
+    // with two History Essay sessions, or "the chemistry one" for two chemistry events,
+    // its choice is a guess, so the user is asked (or the day they named decides).
+    const rival = entries.some(([r, other]) => r !== ref && nameScore(words, other.title) >= score - 0.1);
+    if (score >= STRONG && !rival) {
+      return { kind: "one", ref, item, via: "ref" };
+    }
   }
   if (!words) return { kind: "none" };
 
@@ -115,6 +126,12 @@ export function resolveEntity<T extends { title: string }>(
     .filter((s) => s.score >= WEAK)
     .sort((a, b) => b.score - a.score);
   if (!scored.length) return { kind: "none" };
+  // Only one thing fits, and every word the user said is in its name ("tutoring" -> Math Tutoring):
+  // that's it, even if the words are generic. Asking "Which event: Math Tutoring?" helps nobody.
+  if (scored.length === 1) {
+    const title = nameTokens(scored[0].item.title);
+    if (nameTokens(words).every((w) => title.includes(w))) return { kind: "one", ref: scored[0].ref, item: scored[0].item, via: "name" };
+  }
 
   // Several records with the same name (one event per week, say) are one thing to the user.
   const top = scored[0];

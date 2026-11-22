@@ -61,6 +61,7 @@ describe("fromApiWire", () => {
     amount_minutes: -1, session_count: -1, session_minutes: -1, window: "none", priority: "none", cadence: "none",
     times_per_week: -1, progress: -1, target_date: none, location: "", scope: "none", fact_category: "none", details: "",
     pref_day_start: "", pref_day_end: "", pref_max_session_minutes: -1, pref_buffer_minutes: -1, pref_protected_label: "",
+    shift_minutes: 0, make_room: false,
     ...o,
   });
 
@@ -89,5 +90,16 @@ describe("fromApiWire", () => {
     const out = validatePlannerOutput(fromApiWire(raw), { userText: "essay", drafts: [] });
     expect(out.intents[0].progress).toBe(0);
     expect(out.intents[0].date?.dayOffset).toBe(0);
+  });
+
+  it("keeps a negative shift ('30 minutes earlier'), and 0 means none", () => {
+    const parse = (shift: number) =>
+      validatePlannerOutput(
+        fromApiWire(PlannerApiSchema.parse({ intents: [api({ type: "update_event", evidence: "tutoring", target_name: "tutoring", shift_minutes: shift, make_room: true })], question: "" })),
+        { userText: "move tutoring", drafts: [] },
+      ).intents[0];
+    expect(parse(-30).shiftMinutes).toBe(-30);
+    expect(parse(-30).makeRoom).toBe(true);
+    expect(parse(0).shiftMinutes).toBeNull();
   });
 });

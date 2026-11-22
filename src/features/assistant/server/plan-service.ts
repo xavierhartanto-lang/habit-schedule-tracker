@@ -384,6 +384,21 @@ export async function planTurn(input: {
   interpreted.confirmed = interpreted.confirmed.filter((id) => !retry.some((a) => a.id === id) && !(id === "latest" && retry.length));
 
   const notes: string[] = [];
+  const touchedPlanIds = new Set<string>();
+
+  // "Undo that" / "put it back": reverse the newest change Whitespace made in this chat.
+  if (interpreted.intents.some((i) => i.type === "undo")) {
+    const undone = await undoNewest(input.userId, actions);
+    if (undone) {
+      touchedPlanIds.add(undone.planId);
+      const fresh = await getItemStates(input.userId, actions.flatMap((a) => a.itemIds));
+      actions = syncActions(actions, fresh, now);
+      notes.push(`Undid the last change: ${undone.titles.join(", ")}. It is back the way it was (the database confirmed it). Say so in a few words.`);
+    } else {
+      notes.push("There's nothing to undo in this conversation: no change Whitespace made here is still in place. Nothing was changed. Say so plainly.");
+    }
+  }
+
   const assessments = separateSharedTargets(prepared.map((intent) => assessIntent(intent, world)), world).map((a) => {
     const intent = a.intent;
     if (a.status === "skip" && a.note) notes.push(a.note);
@@ -397,7 +412,6 @@ export async function planTurn(input: {
 
   // 4. Approvals and cancels said in words. The database decides what happened.
   const approvedHere: string[] = [];
-  const touchedPlanIds = new Set<string>();
   if (interpreted.confirmed.length) {
     const targets = interpreted.confirmed.flatMap((id) => {
       if (id !== "latest") return actions.filter((a) => a.id === id && a.status === "proposed");
@@ -563,6 +577,31 @@ export async function planTurn(input: {
   };
 }
 
+/**
+ * Undoes every applied item of the newest action in this conversation that still
+ * has something applied, newest item first. Returns what was undone, or null.
+ */
+async function undoNewest(userId: string, actions: ActionContext[]): Promise<{ planId: string; titles: string[] } | null> {
+  const newest = [...actions].filter((a) => a.planId && a.itemIds.length).sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+  for (const a of newest) {
+    const plan = await getPlan(userId, a.planId!).catch(() => null);
+    if (!plan) continue;
+    const items = plan.items.filter((i) => a.itemIds.includes(i.id) && i.status === "applied" && i.undo);
+    if (!items.length) continue;
+    const titles: string[] = [];
+    for (const item of [...items].reverse()) {
+      try {
+        await undoItem(userId, plan.id, item.id);
+        titles.push(item.title);
+      } catch (error) {
+        console.error("[plan] undo failed", describeError(error));
+      }
+    }
+    return titles.length ? { planId: plan.id, titles: [...new Set(titles)] } : null;
+  }
+  return null;
+}
+
 /** A correction ("actually it's at 7") replaces the earlier open suggestion for the same thing. */
 async function supersedeOlder(userId: string, conversationId: string, plan: StoredPlan): Promise<void> {
   const keys = new Set(plan.items.map((i) => `${i.action}:${normalizeText(i.title)}`));
@@ -625,16 +664,19 @@ async function recheck(
   const base = await loadSchedulingBase(userId, window);
   // An event being moved or changed never conflicts with its own old time.
   const moving = new Set(timed.filter((i) => i.action === "move_block" || i.action === "update_event").map((i) => String(i.payload.commitmentId)));
-  const check = checkPlacements(
-    {
-      now: now.toISOString(),
-      timeZone: base.timeZone,
-      window,
-      events: base.events.filter((e) => !moving.has(e.id)),
-      preferences: base.preferences,
-    },
-    timed.map((i) => ({ id: i.id, start: String(i.payload.startsAt), end: String(i.payload.endsAt), title: i.title })),
-  );
+  const events = base.events.filter((e) => !moving.has(e.id));
+  const placements = timed.map((i) => ({ id: i.id, start: String(i.payload.startsAt), end: String(i.payload.endsAt), title: i.title }));
+  const checkIn = (w: { start: string; end: string }, list: typeof placements) =>
+    checkPlacements({ now: now.toISOString(), timeZone: base.timeZone, window: w, events, preferences: base.preferences }, list).results;
+  // The engine checks at most 62 days at a time, and an event can be months away
+  // ("orientation on March 15"): then each item is checked in its own few days.
+  const results =
+    Date.parse(window.end) - Date.parse(window.start) <= 60 * 86_400_000
+      ? checkIn(window, placements)
+      : placements.flatMap((p) =>
+          checkIn({ start: new Date(Date.parse(p.start) - 86_400_000).toISOString(), end: new Date(Date.parse(p.end) + 86_400_000).toISOString() }, [p]),
+        );
+  const check = { results };
   for (const r of check.results) {
     out.set(r.id, {
       conflicts: r.conflicts.map((c) => ({
