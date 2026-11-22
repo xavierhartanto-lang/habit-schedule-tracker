@@ -166,6 +166,40 @@ describe("other intents", () => {
     if (a.status === "needs") expect(a.clarify.question).toBe("How long should each piano session be?");
   });
 
+  it("creates a repeating task and can turn the repeat on later", () => {
+    const created = assessIntent(
+      intent({ type: "create_task", title: "Check School Assignments", evidence: "check school assignments every weekday", recurrence: "weekdays", explicit: true }),
+      world(),
+    );
+    expect(created.status).toBe("ready");
+    if (created.status === "ready") expect(created.spec).toMatchObject({ kind: "task_create", repeat: "weekdays", dueDate: TODAY });
+
+    const existing = task({ title: "Check school assignments" });
+    const w = world();
+    w.refs.tasks.set("t1", existing);
+    const turnedOn = assessIntent(
+      intent({
+        type: "update_task",
+        evidence: "make check school assignments repeat every day",
+        target_ref: "t1",
+        target_name: "check school assignments",
+        recurrence: "daily",
+        explicit: true,
+      }),
+      w,
+    );
+    expect(turnedOn.status).toBe("ready");
+    if (turnedOn.status === "ready") expect(turnedOn.spec).toMatchObject({ kind: "task_update", patch: { repeat: "daily" } });
+
+    w.refs.tasks.set("t1", { ...existing, repeat: "daily" });
+    const stopped = assessIntent(
+      intent({ type: "update_task", evidence: "stop repeating check school assignments", target_ref: "t1", target_name: "check school assignments", recurrence: "once" }),
+      w,
+    );
+    expect(stopped.status).toBe("ready");
+    if (stopped.status === "ready") expect(stopped.spec).toMatchObject({ kind: "task_update", patch: { repeat: null } });
+  });
+
   it("habits: 'exercise twice a week'", () => {
     const a = assessIntent(intent({ type: "create_habit", title: "Exercise", evidence: "exercising twice a week", cadence: "weekly", times_per_week: 2 }), world());
     expect(a.status).toBe("ready");

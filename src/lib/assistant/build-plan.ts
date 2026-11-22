@@ -1,6 +1,7 @@
 import type { PlanConflict, PlanItemAction, PlanKind, PlanTiming } from "@/features/assistant/plan-types";
 import { googleCan, googleRefusal, isGoogleEvent } from "@/lib/domain/google";
 import { cadenceLabel } from "@/lib/domain/habits";
+import { nextRepeatDue, repeatLabel } from "@/lib/domain/tasks";
 import type { Commitment, HabitCadence, Task } from "@/lib/domain/types";
 import { describeRecurrence, expandEvent, expandEvents, overlapping, parseRRule } from "@/lib/scheduling/recurrence";
 import {
@@ -1078,7 +1079,12 @@ export function buildPlan(input: BuildInput): BuiltPlan {
       case "task_create": {
         const dueAt = spec.dueDate ? zonedToUtc(spec.dueDate, spec.dueTime ?? "23:59", tz).toISOString() : null;
         // Priority leads: every task has one. A due date only shows when the user gave one.
-        const detail = [`${spec.priority[0].toUpperCase()}${spec.priority.slice(1)} priority`, dueLabel(dueAt, tz), spec.estimatedMinutes ? minutesLabel(spec.estimatedMinutes) : null]
+        const detail = [
+          `${spec.priority[0].toUpperCase()}${spec.priority.slice(1)} priority`,
+          dueLabel(dueAt, tz),
+          spec.estimatedMinutes ? minutesLabel(spec.estimatedMinutes) : null,
+          repeatLabel(spec.repeat),
+        ]
           .filter(Boolean)
           .join(" · ");
         // Reality check (7.3): does it fit before it's due? Then propose its sessions on the same card.
@@ -1115,6 +1121,7 @@ export function buildPlan(input: BuildInput): BuiltPlan {
             dueAt,
             estimatedMinutes: spec.estimatedMinutes,
             priority: spec.priority,
+            repeat: spec.repeat,
           },
           display: { ...EMPTY_DISPLAY, detail: detail || null, reason: "New task.", warnings: check?.warning ? [check.warning] : [] },
         });
@@ -1139,6 +1146,10 @@ export function buildPlan(input: BuildInput): BuiltPlan {
           patch.estimated_minutes = spec.patch.estimatedMinutes;
           parts.push(`about ${minutesLabel(spec.patch.estimatedMinutes)}`);
         }
+        if (spec.patch.repeat !== undefined) {
+          patch.repeat = spec.patch.repeat;
+          parts.push(spec.patch.repeat ? repeatLabel(spec.patch.repeat)! : "Stops repeating");
+        }
         ctx.items.push({
           action: "update_task",
           title: spec.task.title,
@@ -1150,6 +1161,8 @@ export function buildPlan(input: BuildInput): BuiltPlan {
         break;
       }
       case "task_complete": {
+        // A repeating task stays open. Checking it off moves the due date to the next occurrence.
+        const nextDue = spec.task.repeat ? nextRepeatDue(spec.task.repeat, dateKeyInZone(now, tz), spec.task.dueAt, tz) : null;
         ctx.items.push({
           action: "complete_task",
           title: spec.task.title,
@@ -1157,12 +1170,17 @@ export function buildPlan(input: BuildInput): BuiltPlan {
           // The user said it's done: check it off now, Undo on the card.
           // A proactive "did you finish this?" still waits for a tap.
           autoApply: fromUser,
-          payload: { taskId: spec.task.id },
-          display: { ...EMPTY_DISPLAY, detail: "Mark as done", reason: "You said it's finished." },
+          payload: { taskId: spec.task.id, ...(nextDue ? { nextDueAt: nextDue } : {}) },
+          display: {
+            ...EMPTY_DISPLAY,
+            detail: nextDue ? `Done for now · ${dueLabel(nextDue, tz)}` : "Mark as done",
+            reason: nextDue ? `It repeats ${repeatLabel(spec.task.repeat)?.toLowerCase()}, so it comes back then.` : "You said it's finished.",
+          },
         });
         // Work sessions still ahead for it are no longer needed: freeing them is
         // Whitespace's suggestion (the user may still want the time), so it waits.
-        const ahead = futureBlocks.filter((b) => b.taskId === spec.task.id);
+        // A repeating task is not finished, so its later sessions stay.
+        const ahead = nextDue ? [] : futureBlocks.filter((b) => b.taskId === spec.task.id);
         for (const b of ahead) {
           ctx.items.push({
             action: "remove_block",

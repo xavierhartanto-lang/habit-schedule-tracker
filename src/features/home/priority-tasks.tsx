@@ -1,6 +1,6 @@
 import { LifeAreaDot } from "@/components/ui";
 import { findArea } from "@/lib/domain/life-areas";
-import { sortPriorityTasks } from "@/lib/domain/tasks";
+import { repeatLabel, sortPriorityTasks } from "@/lib/domain/tasks";
 import { formatDuration } from "@/lib/scheduling/time";
 import Link from "next/link";
 import { formatDue } from "@/features/tasks/format";
@@ -37,13 +37,17 @@ export async function PriorityTasks() {
             return (
               <li key={t.id} className="flex items-start gap-2.5 rounded-lg px-2 py-1.5 transition-colors hover:bg-surface-2">
                 <span className="pt-px">
-                  <TaskCheck id={t.id} title={t.title} inProgress={t.status === "in_progress"} />
+                  <TaskCheck id={t.id} title={t.title} inProgress={t.status === "in_progress"} repeats={!!t.repeat} />
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[13.5px] text-ink">{t.title}</p>
                   <p className="mt-0.5 flex items-center gap-1.5 truncate text-[12px] tabular-nums text-ink-3">
                     <LifeAreaDot area={findArea(ctx.areas, t.lifeAreaId)} />
-                    {[due && `Due ${/^(Today|Tomorrow|Yesterday)/.test(due) ? due.toLowerCase() : due}`, t.estimatedMinutes ? formatDuration(t.estimatedMinutes) : null]
+                    {[
+                      t.repeat ? repeatLabel(t.repeat) : null,
+                      due && `Due ${/^(Today|Tomorrow|Yesterday)/.test(due) ? due.toLowerCase() : due}`,
+                      t.estimatedMinutes ? formatDuration(t.estimatedMinutes) : null,
+                    ]
                       .filter(Boolean)
                       .join(" · ") || findArea(ctx.areas, t.lifeAreaId)?.name || "Task"}
                   </p>

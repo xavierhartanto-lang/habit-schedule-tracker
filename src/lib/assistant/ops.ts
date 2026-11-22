@@ -19,6 +19,7 @@ const zOptText = (max: number) => z.string().trim().max(max).nullish().transform
 const zAreaId = zUuid.nullish().transform((v) => v ?? null);
 const zDay = z.enum(WEEKDAYS as unknown as [Weekday, ...Weekday[]]);
 const zPriority = z.enum(["high", "medium", "low"]);
+const zRepeat = z.enum(["daily", "weekdays", "weekly", "monthly"]);
 const zCadence = z.discriminatedUnion("type", [
   z.object({ type: z.literal("daily") }),
   z.object({ type: z.literal("weekly"), timesPerWeek: z.number().int().min(1).max(7) }),
@@ -95,6 +96,7 @@ export const PAYLOAD_SCHEMAS = {
     dueAt: zIso.nullish(),
     estimatedMinutes: z.number().int().min(1).max(1440).nullish(),
     priority: zPriority,
+    repeat: zRepeat.nullish(),
   }),
   update_task: z.object({
     taskId: zUuid,
@@ -104,10 +106,11 @@ export const PAYLOAD_SCHEMAS = {
         priority: zPriority.optional(),
         due_at: zIso.optional(),
         estimated_minutes: z.number().int().min(1).max(1440).optional(),
+        repeat: zRepeat.nullable().optional(),
       })
       .strict(),
   }),
-  complete_task: z.object({ taskId: zUuid }),
+  complete_task: z.object({ taskId: zUuid, nextDueAt: zIso.nullish() }),
   remove_task: z.object({ taskId: zUuid }),
   create_habit: z.object({ title: zText(200), lifeAreaId: zAreaId, cadence: zCadence }),
   update_habit: z.object({ habitId: zUuid, cadence: zCadence }),
@@ -250,6 +253,7 @@ export function toOp(item: { id: string; action: PlanItemAction; payload: unknow
             priority: v.priority,
             due_at: v.dueAt ?? null,
             estimated_minutes: v.estimatedMinutes ?? null,
+            repeat: v.repeat ?? null,
           },
         },
       };
@@ -262,7 +266,9 @@ export function toOp(item: { id: string; action: PlanItemAction; payload: unknow
     case "complete_task": {
       const p = parsePayload("complete_task", item.payload);
       if (!p.ok) return p;
-      return { ok: true, op: { ...base, op: "update_task", id: p.value.taskId, patch: { status: "done" } } };
+      // nextDueAt means this occurrence is done and the same task comes back then.
+      const patch = p.value.nextDueAt ? { due_at: p.value.nextDueAt, occurrence_done: true } : { status: "done" as const };
+      return { ok: true, op: { ...base, op: "update_task", id: p.value.taskId, patch } };
     }
     case "remove_task": {
       const p = parsePayload("remove_task", item.payload);

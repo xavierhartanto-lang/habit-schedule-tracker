@@ -125,6 +125,8 @@ export type TaskRow = Timestamps & {
   last_postponed_at?: string | null;
   /** Phase 7.3 (optional until 20261129000000 has run). */
   parent_task_id?: string | null;
+  /** Optional until 20261203000000 has run. Null = one time. */
+  repeat?: "daily" | "weekdays" | "weekly" | "monthly" | null;
 };
 
 export type HabitRow = Timestamps & {

@@ -322,6 +322,26 @@ describe("adaptive rescheduling", () => {
     expect(plan.unscheduled.map((u) => u.title)).toContain("Science fair");
     expect(plan.items.some((x) => x.action === "schedule_block" && x.payload.taskId === small.id)).toBe(true);
   });
+
+  it("checking off a repeating task brings it back instead of finishing it", () => {
+    const assignments = task({
+      title: "Check school assignments",
+      repeat: "daily",
+      dueAt: zonedToUtc("2026-11-18", "23:59", TZ).toISOString(),
+    });
+    const w = world();
+    w.refs.tasks.set("t1", assignments);
+    const plan = buildPlan(
+      input({
+        world: w,
+        openTasks: [assignments],
+        specs: [specOf(intent({ type: "complete_task", title: "check school assignments", evidence: "I checked school assignments", target_ref: "t1", explicit: true }), w)],
+      }),
+    );
+    expect(plan.items.map((i) => i.action)).toEqual(["complete_task"]);
+    expect(plan.items[0].payload).toMatchObject({ taskId: assignments.id, nextDueAt: zonedToUtc("2026-11-19", "23:59", TZ).toISOString() });
+    expect(plan.items[0].display.detail).toMatch(/Done for now/);
+  });
 });
 
 describe("approval payloads", () => {
@@ -334,6 +354,10 @@ describe("approval payloads", () => {
     expect(ok.ok && ok.op).toMatchObject({ op: "insert_commitment", guard: true, row: { kind: "flexible" } });
     const done = toOp({ id: uuid(), action: "complete_task", payload: { taskId: uuid() } });
     expect(done.ok && done.op).toMatchObject({ op: "update_task", patch: { status: "done" } });
+    const rolled = toOp({ id: uuid(), action: "complete_task", payload: { taskId: uuid(), nextDueAt: "2026-11-20T07:59:00.000Z" } });
+    expect(rolled.ok && rolled.op).toMatchObject({ op: "update_task", patch: { due_at: "2026-11-20T07:59:00.000Z", occurrence_done: true } });
+    const repeated = toOp({ id: uuid(), action: "update_task", payload: { taskId: uuid(), patch: { repeat: "daily" } } });
+    expect(repeated.ok && repeated.op).toMatchObject({ op: "update_task", patch: { repeat: "daily" } });
     expect(toOp({ id: uuid(), action: "set_life_area", payload: { table: "profiles", id: uuid(), lifeAreaId: null } }).ok).toBe(false);
   });
 

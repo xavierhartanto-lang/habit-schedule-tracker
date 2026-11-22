@@ -104,6 +104,7 @@ describe("reality check on a new task", () => {
     estimatedMinutes: 120,
     priority: "medium",
     description: null,
+    repeat: null,
     ...over,
   });
 

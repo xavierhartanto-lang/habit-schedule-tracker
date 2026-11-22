@@ -1,5 +1,6 @@
 import { formatFacts, type ChatTurn, type KnownFact, type PromptContext } from "@/lib/ai/prompts";
 import type { Commitment, LifeAreaRecord } from "@/lib/domain/types";
+import { repeatLabel } from "@/lib/domain/tasks";
 import { parseRRule, describeRecurrence } from "@/lib/scheduling/recurrence";
 import { dateKeyInZone, timeKeyInZone } from "@/lib/scheduling/zoned";
 import type { PlanView } from "@/features/assistant/plan-types";
@@ -20,12 +21,12 @@ Rules
 - "evidence" is copied verbatim from <new_user_text>.
 - Dates: never compute a calendar date. Fill date.weekday ("fr"), date.week ("next" only if the user said "next Friday"/"next week"), or date.day_offset (0 today, 1 tomorrow). Use iso_date only when the user typed a calendar date like "Dec 3"; use <calendar> to write it as YYYY-MM-DD.
 - Times are 24h "HH:MM". Students mean afternoon/evening for "at 6" activities (18:00) and "at 3" after school (15:00) unless they say am.
-- Recurrence: "every Thursday" = weekly + days [th]; "every weekday" = weekdays; "every day" = daily; "this Thursday"/"next Thursday"/a calendar date = once. If the user only said "on Thursday" for an activity, leave recurrence "none".
+- Recurrence: "every Thursday" = weekly + days [th]; "every weekday" = weekdays; "every day" = daily; "every month" = monthly; "this Thursday"/"next Thursday"/a calendar date = once. If the user only said "on Thursday" for an activity, leave recurrence "none".
 - One action, many messages. <active_actions> lists what this conversation is working on: things still being asked about, things on an approval card (not saved), and things recently saved. When <new_user_text> adds to or corrects one of them, return that action's type with draft_id = its id and ONLY the new or changed fields. Never start a second action for the same thing.
   "It's math tutoring" -> same action, title "Math Tutoring". "Actually Saturday" / "No, I meant Friday" -> same action, new date. "It's at 6" -> start_time 18:00. "Make that an hour" -> duration_minutes 60. "Only this week" / "just this once" -> recurrence "once". "Every Friday" -> recurrence weekly, days [fr]. "Actually it's a game" -> new title. Keep everything you are not changing empty: the server keeps the rest.
   Answers to a question ("5pm", "Thursday", "about 2 hours", "the chemistry one") work the same way. When answering "which one?", set target_ref to the chosen record.
 - Approving and cancelling in words: "yes", "looks good", "add it", "do it", "approve" right after a card, or "try again" / "retry" after something failed to save -> confirm_action with draft_id of that action (evidence = their words). "Never mind", "don't add it", "cancel that" about an open action -> cancel_draft with its draft_id. Never confirm on your own: only when the user clearly says yes.
-- A change to something already SAVED (status saved in <active_actions>, or any record in <current_plan>) is update_event / update_task with target_ref, not a new create. "Move basketball to 6", "rename the tutor a kid event to math tutoring", "make that every Friday", "the tutoring is actually an hour" -> update_event. Fill title ONLY with a new name (renames); put the user's words for the existing item in target_name. scope "one" when they say this week / this time / just tomorrow, "all" when every week / from now on, else "none".
+- A change to something already SAVED (status saved in <active_actions>, or any record in <current_plan>) is update_event / update_task with target_ref, not a new create. "Move basketball to 6", "rename the tutor a kid event to math tutoring", "make that every Friday", "the tutoring is actually an hour" -> update_event. "Make check school assignments repeat every day", "turn on a repeat for that task" -> update_task with recurrence daily, weekdays, weekly or monthly. "Stop repeating it" / "just once" on a task -> update_task with recurrence once. Fill title ONLY with a new name (renames); put the user's words for the existing item in target_name. scope "one" when they say this week / this time / just tomorrow, "all" when every week / from now on, else "none".
   Relative moves: "push my chem session an hour later" -> update_event with shift_minutes 60; "move tutoring 30 minutes earlier" -> shift_minutes -30. Never compute the new clock time yourself. When the user names which day's one ("Friday's essay session"), fill date with that day.
 - Saying something again that is already saved or already on a card is not a new request: use the existing action's draft_id (or return nothing new).
 - Existing records: use their refs from <current_plan> in target_ref (t = task, e = event, b = session Whitespace scheduled, h = habit, g = goal), and copy the user's words for it into target_name ("training", "my chem hw"). The server checks the two agree. If nothing in <current_plan> matches what the user named, leave target_ref empty: never pick something merely similar. "It"/"that" means the item the recent conversation is about.
@@ -33,7 +34,7 @@ Rules
 
 Choosing a type
 - create_event: something at a set time (class, practice, game, exam, appointment, "school until 3 every weekday" = weekdays, start_time empty if unknown).
-- create_task: a to-do or assignment. Tasks are priority-first: always set priority. high = urgent or high-stakes (exams, applications, big graded work, "asap", "really important"); low = optional or "whenever" ("someday", "if I have time"); medium otherwise. A due date is optional: fill deadline only when the user stated one, and never ask for one. plan_time: the user wants time found for work ("I need 3 hours to study this week", "practice piano twice"); amount_kind total/sessions/single. Do not invent session lengths: set session_minutes only if stated.
+- create_task: a to-do or assignment. Tasks are priority-first: always set priority. high = urgent or high-stakes (exams, applications, big graded work, "asap", "really important"); low = optional or "whenever" ("someday", "if I have time"); medium otherwise. A due date is optional: fill deadline only when the user stated one, and never ask for one. A task can repeat and stay on the list: "add a task to check school assignments every day" = create_task with recurrence daily (weekdays, weekly or monthly the same way). Checking it off brings it back next time. That is a task, not a habit, when they want to check something off. plan_time: the user wants time found for work ("I need 3 hours to study this week", "practice piano twice"); amount_kind total/sessions/single. Do not invent session lengths: set session_minutes only if stated.
 - One message can hold several intents: "chem exam next Friday, need 3 hours to study, piano twice" = create_event (exam, date fr/next, no time yet) + plan_time (study, amount_kind total 180, deadline fr/next) + plan_time (piano, sessions, session_count 2).
 - create_habit / update_habit: repeated personal practice the user wants to track ("start exercising twice a week" = create_habit weekly times_per_week 2). If they also want it on the calendar, add plan_time.
 - create_goal / update_goal (progress 0-100, target_date).
@@ -98,6 +99,7 @@ export function formatRefs(refs: RefTable, timeZone: string): string {
       t.dueAt ? `due ${shortDate(dateKeyInZone(new Date(t.dueAt), timeZone))}` : null,
       t.estimatedMinutes ? `${t.estimatedMinutes} min` : null,
       t.priority !== "medium" ? t.priority : null,
+      repeatLabel(t.repeat),
     ].filter(Boolean);
     lines.push(`${ref} task: ${t.title}${bits.length ? ` (${bits.join(", ")})` : ""}`);
   }

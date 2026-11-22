@@ -50,7 +50,7 @@ export const INTENT_TYPES = [
 export type IntentType = (typeof INTENT_TYPES)[number];
 
 const PRIORITIES = ["high", "medium", "low"] as const;
-const RECURRENCES = ["once", "weekly", "weekdays", "daily"] as const;
+const RECURRENCES = ["once", "weekly", "weekdays", "daily", "monthly"] as const;
 const WINDOWS = ["today", "tomorrow", "this_week", "next_week", "until_deadline"] as const;
 const AMOUNT_KINDS = ["total", "sessions", "single"] as const;
 const CADENCES = ["daily", "weekly", "specific_days"] as const;
@@ -96,7 +96,7 @@ const WireIntent = z.object({
   start_in_minutes: z.number().int().nullable().describe('"in two hours" = 120. Only for "in N minutes/hours".'),
   end_time: z.string().nullable(),
   duration_minutes: z.number().int().nullable().describe("Only if stated (\"2 hours\" = 120)."),
-  recurrence: z.enum(RECURRENCES).nullable().describe("null if the user has not said whether it repeats."),
+  recurrence: z.enum(RECURRENCES).nullable().describe("null if the user has not said whether it repeats. monthly = every month (tasks, or a monthly event)."),
   days: z.array(zDay).describe("Days it repeats on. Empty if not stated."),
   deadline: WireDate.nullable().describe("Due date / deadline day, if stated."),
   deadline_time: z.string().nullable(),
@@ -420,7 +420,7 @@ export function mergeIntent(draft: Intent, next: Intent): Intent {
   const wasOneOff = !!draft.date && (draft.date.isoDate !== null || draft.date.dayOffset !== null || draft.date.week !== null);
   const recurrence = pick(draft.recurrence, next.recurrence) ?? (next.date && wasOneOff ? "once" : null);
   let days = next.days.length ? next.days : draft.days;
-  if (recurrence === "once" || recurrence === "daily" || recurrence === "weekdays") days = next.days;
+  if (recurrence === "once" || recurrence === "daily" || recurrence === "weekdays" || recurrence === "monthly") days = next.days;
   else if (!next.days.length && next.date?.weekday && recurrence === "weekly") days = [next.date.weekday];
   return {
     type: keepType ? draft.type : next.type,

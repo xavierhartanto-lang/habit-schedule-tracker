@@ -33,7 +33,7 @@ export async function saveTask(id: string | null, form: unknown): Promise<Action
 export async function setTaskDone(id: string, done: boolean): Promise<ActionResult> {
   const status: TaskStatus = done ? "done" : "todo";
   return runAction(PATHS, async (userId) => {
-    await setTaskStatus(userId, id, status);
+    await setTaskStatus(userId, id, status, await profileTimeZone(userId));
     // Plan vs reality: finishing the task means its past sessions happened. Never blocks the check-off.
     if (done) await markPastSessionsDone(userId, id).catch((e) => console.error("[tasks] session outcomes not recorded", e));
   });

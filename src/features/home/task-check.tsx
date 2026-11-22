@@ -5,8 +5,8 @@ import { Check } from "lucide-react";
 import { useState, useTransition } from "react";
 import { setTaskDone } from "@/features/tasks/actions";
 
-/** Check a task off from Home. */
-export function TaskCheck({ id, title, inProgress }: { id: string; title: string; inProgress: boolean }) {
+/** Check a task off from Home. A repeating task stays on the list and comes back next time. */
+export function TaskCheck({ id, title, inProgress, repeats }: { id: string; title: string; inProgress: boolean; repeats?: boolean }) {
   const [done, setDone] = useState(false);
   const [pending, start] = useTransition();
   return (
@@ -14,13 +14,13 @@ export function TaskCheck({ id, title, inProgress }: { id: string; title: string
       type="button"
       role="checkbox"
       aria-checked={done}
-      aria-label={`Mark "${title}" done`}
+      aria-label={repeats ? `Done for now, "${title}" comes back next time` : `Mark "${title}" done`}
       disabled={pending}
       onClick={() =>
         start(async () => {
           setDone(true);
           const r = await setTaskDone(id, true);
-          if (!r.ok) setDone(false);
+          if (!r.ok || repeats) setDone(false);
         })
       }
       className={cn(

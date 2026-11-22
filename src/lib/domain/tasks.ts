@@ -1,7 +1,7 @@
 import { z } from "zod";
-import { addDaysToKey, dateKeyInZone, timeKeyInZone, zonedToUtc } from "@/lib/scheduling/zoned";
+import { addDaysToKey, addMonthsToKey, dateKeyInZone, isoWeekdayOfKey, timeKeyInZone, zonedToUtc } from "@/lib/scheduling/zoned";
 import type { ValidationResult } from "./context-items";
-import type { Task, TaskPriority, TaskStatus } from "./types";
+import type { Task, TaskPriority, TaskRepeat, TaskStatus } from "./types";
 import { check, zDateKey, zOptionalAreaId, zOptionalText, zTime, zTimeZone, zTitle, zUuid } from "./validation";
 
 /**
@@ -27,6 +27,49 @@ export function sortPriorityTasks(tasks: Task[]): Task[] {
 /** A due date without a chosen time is stored as 11:59 PM local. */
 export const END_OF_DAY = "23:59";
 
+export const TASK_REPEATS = ["daily", "weekdays", "weekly", "monthly"] as const;
+
+export function isTaskRepeat(value: unknown): value is TaskRepeat {
+  return typeof value === "string" && (TASK_REPEATS as readonly string[]).includes(value);
+}
+
+/** "Every day", "Weekdays", "Every week", "Every month". */
+export function repeatLabel(repeat: TaskRepeat | null | undefined): string | null {
+  switch (repeat) {
+    case "daily":
+      return "Every day";
+    case "weekdays":
+      return "Weekdays";
+    case "weekly":
+      return "Every week";
+    case "monthly":
+      return "Every month";
+    default:
+      return null;
+  }
+}
+
+/**
+ * The next date strictly after `fromKey` (the day it was checked off).
+ * An overdue daily task comes back tomorrow, not on a date that is still overdue.
+ * Weekdays skip Saturday and Sunday. Monthly keeps the day of the month, clamped
+ * to the last day (Jan 31 → Feb 28).
+ */
+export function nextRepeatDate(repeat: TaskRepeat, fromKey: string): string {
+  if (repeat === "daily") return addDaysToKey(fromKey, 1);
+  if (repeat === "weekly") return addDaysToKey(fromKey, 7);
+  if (repeat === "monthly") return addMonthsToKey(fromKey, 1);
+  let day = addDaysToKey(fromKey, 1);
+  while (isoWeekdayOfKey(day) >= 6) day = addDaysToKey(day, 1);
+  return day;
+}
+
+/** Next due instant, keeping the previous time of day (or end of day when there was none). */
+export function nextRepeatDue(repeat: TaskRepeat, fromKey: string, dueAt: string | null, timeZone: string): string {
+  const time = dueAt ? (dueParts(dueAt, timeZone)?.time ?? END_OF_DAY) : END_OF_DAY;
+  return zonedToUtc(nextRepeatDate(repeat, fromKey), time, timeZone).toISOString();
+}
+
 export type TaskForm = {
   title: string;
   description?: string | null;
@@ -37,6 +80,8 @@ export type TaskForm = {
   dueDate?: string | null;
   dueTime?: string | null;
   estimatedMinutes?: number | null;
+  /** "" or null = does not repeat. */
+  repeat?: TaskRepeat | "" | null;
   timezone: string;
 };
 
@@ -49,6 +94,8 @@ export type TaskWrite = {
   status: TaskStatus;
   dueAt: string | null;
   estimatedMinutes: number | null;
+  /** Null when the task is marked done: finishing it for good stops the repeat. */
+  repeat: TaskRepeat | null;
 };
 
 export const TASK_TITLE_MAX = 300;
@@ -70,6 +117,10 @@ const schema = z.object({
     .max(TASK_MAX_MINUTES, "Estimated time must be under 24 hours.")
     .nullish()
     .transform((v) => v ?? null),
+  repeat: z
+    .union([z.enum(TASK_REPEATS, { error: "Unknown repeat." }), z.literal("")], { error: "Unknown repeat." })
+    .nullish()
+    .transform((v) => v || null),
   timezone: zTimeZone,
 });
 
@@ -90,6 +141,8 @@ export function validateTaskForm(raw: unknown): ValidationResult<TaskWrite> {
       status: f.status,
       dueAt,
       estimatedMinutes: f.estimatedMinutes,
+      // Marking it done finishes the series. Checking the box (setTaskStatus) is what brings it back.
+      repeat: f.status === "done" ? null : f.repeat,
     },
   };
 }

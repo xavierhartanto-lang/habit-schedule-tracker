@@ -401,7 +401,7 @@ export function fingerprint(spec: ActionSpec): string | null {
     case "event":
       return `event:${name(spec.title)}:${spec.date}:${spec.startTime}:${spec.rrule ?? "once"}`;
     case "task_create":
-      return `task:${name(spec.title)}:${spec.dueDate ?? ""}`;
+      return `task:${name(spec.title)}:${spec.dueDate ?? ""}${spec.repeat ? `:${spec.repeat}` : ""}`;
     case "habit_create":
       return `habit:${name(spec.title)}`;
     case "goal_create":

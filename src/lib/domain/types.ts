@@ -98,6 +98,9 @@ export type SessionOutcome = "done" | "partial" | "missed";
 export type TaskPriority = "high" | "medium" | "low";
 export type TaskStatus = "todo" | "in_progress" | "done";
 
+/** How a task comes back after you check it off. Null = one time. */
+export type TaskRepeat = "daily" | "weekdays" | "weekly" | "monthly";
+
 export type Task = {
   id: string;
   title: string;
@@ -110,6 +113,8 @@ export type Task = {
   dueAt: string | null;
   estimatedMinutes: number | null;
   completedAt?: string | null;
+  /** Set: checking it off schedules the next occurrence instead of finishing it. */
+  repeat?: TaskRepeat | null;
   createdAt?: string;
   updatedAt?: string;
   /** Times the due date (or a Whitespace session for it) was pushed later while open. */

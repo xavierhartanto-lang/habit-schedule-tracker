@@ -22,14 +22,16 @@ import {
   dueBucket,
   dueParts,
   filterTasks,
+  nextRepeatDue,
+  repeatLabel,
   sortTasks,
   type TaskFilter,
   type TaskSort,
 } from "@/lib/domain/tasks";
-import type { LifeAreaRecord, Task, TaskPriority, TaskStatus } from "@/lib/domain/types";
+import type { LifeAreaRecord, Task, TaskPriority, TaskRepeat, TaskStatus } from "@/lib/domain/types";
 import { formatDuration } from "@/lib/scheduling/time";
 import { cn } from "@/lib/utils/cn";
-import { CalendarPlus, Check, CircleCheck, Clock, Flag, ListTree, Plus, Target, Trash2, X } from "lucide-react";
+import { CalendarPlus, Check, CircleCheck, Clock, Flag, ListTree, Plus, Repeat, Target, Trash2, X } from "lucide-react";
 import { useMemo, useOptimistic, useState, useTransition } from "react";
 import { removeTask, saveTask, setTaskDone } from "./actions";
 import { formatDue } from "./format";
@@ -57,8 +59,12 @@ export function TaskBoard({
   const [filter, setFilter] = useState<TaskFilter>(DEFAULT_TASK_FILTER);
   const [sort, setSort] = useState<TaskSort>("priority");
   const [editing, setEditing] = useState<{ task: Task | null } | null>(null);
-  const [optimistic, setOptimistic] = useOptimistic(tasks, (state, change: { id: string; status: TaskStatus }) =>
-    state.map((t) => (t.id === change.id ? { ...t, status: change.status } : t)),
+  const [optimistic, setOptimistic] = useOptimistic(
+    tasks,
+    (state, change: { id: string; status: TaskStatus; dueAt?: string | null }) =>
+      state.map((t) =>
+        t.id === change.id ? { ...t, status: change.status, ...(change.dueAt !== undefined ? { dueAt: change.dueAt } : {}) } : t,
+      ),
   );
   const [, startToggle] = useTransition();
   const [toggleError, setToggleError] = useState<string | null>(null);
@@ -112,7 +118,9 @@ export function TaskBoard({
     startToggle(async () => {
       setToggleError(null);
       const done = t.status !== "done";
-      setOptimistic({ id: t.id, status: done ? "done" : "todo" });
+      // A repeating task stays open. The check moves it to the next day.
+      if (done && t.repeat) setOptimistic({ id: t.id, status: "todo", dueAt: nextRepeatDue(t.repeat, todayKey, t.dueAt, timeZone) });
+      else setOptimistic({ id: t.id, status: done ? "done" : "todo" });
       const r = await setTaskDone(t.id, done);
       if (!r.ok) setToggleError(r.error);
     });
@@ -123,7 +131,7 @@ export function TaskBoard({
 
   return (
     <div className="space-y-4">
-      <QuickAdd areas={areas} disabled={disabled} onMore={() => setEditing({ task: null })} />
+      <QuickAdd areas={areas} todayKey={todayKey} disabled={disabled} onMore={() => setEditing({ task: null })} />
 
       <Card>
         <div className="flex flex-col gap-3 border-b border-border px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
@@ -254,6 +262,18 @@ export function TaskBoard({
   );
 }
 
+function RepeatOptions() {
+  return (
+    <>
+      <option value="">Does not repeat</option>
+      <option value="daily">Every day</option>
+      <option value="weekdays">Weekdays</option>
+      <option value="weekly">Every week</option>
+      <option value="monthly">Every month</option>
+    </>
+  );
+}
+
 function FilterSelect({
   label,
   value,
@@ -312,7 +332,9 @@ function TaskRow({
         type="button"
         role="checkbox"
         aria-checked={done}
-        aria-label={done ? `Mark "${t.title}" not done` : `Mark "${t.title}" done`}
+        aria-label={
+          done ? `Mark "${t.title}" not done` : t.repeat ? `Done for now, "${t.title}" comes back next time` : `Mark "${t.title}" done`
+        }
         onClick={onToggle}
         disabled={disabled}
         className={cn(
@@ -327,6 +349,11 @@ function TaskRow({
         <span className={cn("block text-sm text-ink", done && "text-ink-3 line-through decoration-ink-3/40")}>{t.title}</span>
         <span className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5">
           <LifeAreaLabel area={area} />
+          {t.repeat && (
+            <span className="inline-flex items-center gap-1 text-[12px] text-ink-3">
+              <Repeat className="size-3" /> {repeatLabel(t.repeat)}
+            </span>
+          )}
           {due && (
             <span className={cn("inline-flex items-center gap-1 text-[12px]", overdue ? "font-medium text-danger" : "text-ink-3")}>
               <Flag className="size-3" /> {due}
@@ -357,10 +384,11 @@ function TaskRow({
 }
 
 /** One-line capture: type, pick a priority, press Enter. A due date is optional. */
-function QuickAdd({ areas, disabled, onMore }: { areas: LifeAreaRecord[]; disabled: boolean; onMore: () => void }) {
+function QuickAdd({ areas, todayKey, disabled, onMore }: { areas: LifeAreaRecord[]; todayKey: string; disabled: boolean; onMore: () => void }) {
   const [title, setTitle] = useState("");
   const [areaId, setAreaId] = useState("");
   const [priority, setPriority] = useState<TaskPriority>("medium");
+  const [repeat, setRepeat] = useState<TaskRepeat | "">("");
   const [showDue, setShowDue] = useState(false);
   const [dueDate, setDueDate] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -371,11 +399,18 @@ function QuickAdd({ areas, disabled, onMore }: { areas: LifeAreaRecord[]; disabl
     if (!title.trim()) return;
     start(async () => {
       setError(null);
-      const r = await saveTask(null, { title, lifeAreaId: areaId || null, priority, dueDate: showDue && dueDate ? dueDate : null });
+      const r = await saveTask(null, {
+        title,
+        lifeAreaId: areaId || null,
+        priority,
+        repeat: repeat || null,
+        dueDate: showDue && dueDate ? dueDate : repeat ? todayKey : null,
+      });
       if (r.ok) {
         setTitle("");
         setDueDate("");
         setShowDue(false);
+        setRepeat("");
       } else setError(r.error);
     });
   };
@@ -397,7 +432,7 @@ function QuickAdd({ areas, disabled, onMore }: { areas: LifeAreaRecord[]; disabl
         </div>
         <div className="flex flex-col gap-2 md:flex-row md:items-center">
           <PriorityPicker value={priority} onChange={setPriority} disabled={disabled} size="sm" className="md:w-64" />
-          <div className="flex min-w-0 flex-1 items-center gap-2">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
             <Select aria-label="Life area" value={areaId} onChange={(e) => setAreaId(e.target.value)} disabled={disabled} className="h-8 min-w-0 flex-1 text-[13px] md:w-36 md:flex-none">
               <LifeAreaOptions areas={areas} />
             </Select>
@@ -429,6 +464,15 @@ function QuickAdd({ areas, disabled, onMore }: { areas: LifeAreaRecord[]; disabl
                 <CalendarPlus className="size-3.5" /> Due date
               </Button>
             )}
+            <Select
+              aria-label="Repeat"
+              value={repeat}
+              onChange={(e) => setRepeat(e.target.value as TaskRepeat | "")}
+              disabled={disabled}
+              className="h-8 min-w-[8.5rem] flex-1 basis-32 text-[13px] md:w-36 md:flex-none"
+            >
+              <RepeatOptions />
+            </Select>
           </div>
           <div className="flex gap-2">
             <Button type="submit" size="sm" disabled={disabled || pending || !title.trim()} className="flex-1 md:flex-none">
@@ -479,6 +523,7 @@ function TaskEditor({
   const [dueDate, setDueDate] = useState(due?.date ?? "");
   const [dueTime, setDueTime] = useState(due?.time ?? "");
   const [minutes, setMinutes] = useState(task?.estimatedMinutes ? String(task.estimatedMinutes) : "");
+  const [repeat, setRepeat] = useState<TaskRepeat | "">(task?.repeat ?? "");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -499,9 +544,10 @@ function TaskEditor({
         goalId: goalId || null,
         priority,
         status,
-        dueDate: showDue && dueDate ? dueDate : null,
+        dueDate: showDue && dueDate ? dueDate : !task?.parentTaskId && repeat && status !== "done" ? todayKey : null,
         dueTime: showDue && dueDate && dueTime ? dueTime : null,
         estimatedMinutes: est,
+        repeat: task?.parentTaskId ? null : repeat || null,
       });
       if (r.ok) onDone();
       else setError(r.error);
@@ -585,6 +631,13 @@ function TaskEditor({
           <CalendarPlus className="size-3.5" /> Add a due date
           <span className="font-normal">(optional)</span>
         </button>
+      )}
+      {!task?.parentTaskId && (
+        <Field label="Repeat" hint="Checking it off brings this task back next time. Set the status to Done when you're finished with it.">
+          <Select value={repeat} onChange={(e) => setRepeat(e.target.value as TaskRepeat | "")}>
+            <RepeatOptions />
+          </Select>
+        </Field>
       )}
       {goals.length > 0 && (
         <Field label="Goal" hint="Optional: what this task moves forward.">

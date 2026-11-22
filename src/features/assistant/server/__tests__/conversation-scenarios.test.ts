@@ -105,6 +105,7 @@ function applyOp(op: Record<string, unknown>): string | null {
         status: "todo",
         dueAt: (row.due_at as string | null) ?? null,
         estimatedMinutes: (row.estimated_minutes as number | null) ?? null,
+        repeat: (row.repeat as Task["repeat"]) ?? null,
       };
       db.tasks.push(t);
       return t.id;
@@ -114,6 +115,9 @@ function applyOp(op: Record<string, unknown>): string | null {
       if (!t) throw new Error("Task not found");
       if (patch.status) t.status = patch.status as Task["status"];
       if (patch.title) t.title = String(patch.title);
+      if ("due_at" in patch) t.dueAt = (patch.due_at as string | null) ?? null;
+      if ("repeat" in patch) t.repeat = (patch.repeat as Task["repeat"]) ?? null;
+      if (patch.occurrence_done) t.status = "todo";
       return t.id;
     }
     default:

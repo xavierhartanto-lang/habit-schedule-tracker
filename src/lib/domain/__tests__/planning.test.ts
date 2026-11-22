@@ -3,8 +3,9 @@ import { validateEventForm, type EventForm } from "../events";
 import { validateGoalInput } from "../goals";
 import { cadenceLabel, completionRate, isScheduledOn, validateHabitForm, weekProgress } from "../habits";
 import { areaOf, validateLifeAreaInput } from "../life-areas";
-import { dueBucket, filterTasks, sortTasks, validateTaskForm, DEFAULT_TASK_FILTER } from "../tasks";
+import { dueBucket, filterTasks, nextRepeatDate, nextRepeatDue, sortTasks, validateTaskForm, DEFAULT_TASK_FILTER } from "../tasks";
 import type { LifeAreaRecord, Task } from "../types";
+import { zonedToUtc } from "@/lib/scheduling/zoned";
 
 const TZ = "America/Los_Angeles";
 const AREA = "11111111-1111-4111-8111-111111111111";
@@ -69,6 +70,26 @@ describe("tasks", () => {
     expect(validateTaskForm({ title: "x", estimatedMinutes: 0, timezone: TZ }).ok).toBe(false);
     expect(validateTaskForm({ title: "x", dueTime: "10:00", timezone: TZ }).ok).toBe(false);
     expect(validateTaskForm({ title: "x", priority: "urgent", timezone: TZ }).ok).toBe(false);
+    expect(validateTaskForm({ title: "x", repeat: "hourly", timezone: TZ }).ok).toBe(false);
+  });
+
+  it("repeats from the day you check it off, and finishing it for good stops the repeat", () => {
+    const open = validateTaskForm({ title: "Check school assignments", repeat: "daily", timezone: TZ });
+    expect(open.ok && open.value.repeat).toBe("daily");
+    const done = validateTaskForm({ title: "Check school assignments", repeat: "daily", status: "done", timezone: TZ });
+    expect(done.ok && done.value).toMatchObject({ status: "done", repeat: null });
+
+    // Wednesday the 18th.
+    expect(nextRepeatDate("daily", "2026-11-18")).toBe("2026-11-19");
+    expect(nextRepeatDate("weekly", "2026-11-18")).toBe("2026-11-25");
+    expect(nextRepeatDate("weekdays", "2026-11-18")).toBe("2026-11-19");
+    expect(nextRepeatDate("weekdays", "2026-11-20")).toBe("2026-11-23");
+    expect(nextRepeatDate("weekdays", "2026-11-21")).toBe("2026-11-23");
+    expect(nextRepeatDate("monthly", "2026-01-31")).toBe("2026-02-28");
+    expect(nextRepeatDue("daily", "2026-11-18", null, TZ)).toBe("2026-11-20T07:59:00.000Z");
+    expect(nextRepeatDue("weekly", "2026-11-18", zonedToUtc("2026-11-18", "15:00", TZ).toISOString(), TZ)).toBe(
+      zonedToUtc("2026-11-25", "15:00", TZ).toISOString(),
+    );
   });
 
   const t = (id: string, patch: Partial<Task>): Task => ({

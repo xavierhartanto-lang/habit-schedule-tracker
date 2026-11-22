@@ -1,10 +1,10 @@
 import { looksLikeTaskTitle, normalizeText } from "@/lib/ai/extraction";
 import { isGoogleEvent } from "@/lib/domain/google";
 import type { Clarify, ClarifyField } from "@/features/assistant/plan-types";
-import type { Commitment, ContextAttributes, Goal, Habit, HabitCadence, LifeAreaRecord, Task, Weekday } from "@/lib/domain/types";
+import type { Commitment, ContextAttributes, Goal, Habit, HabitCadence, LifeAreaRecord, Task, TaskRepeat, Weekday } from "@/lib/domain/types";
 import { WEEKDAYS } from "@/lib/domain/types";
 import { expandEvent } from "@/lib/scheduling/recurrence";
-import { addDaysToKey, dateKeyInZone, startOfDayInZone, startOfWeekKey, timeKeyInZone } from "@/lib/scheduling/zoned";
+import { addDaysToKey, addMonthsToKey, dateKeyInZone, startOfDayInZone, startOfWeekKey, timeKeyInZone } from "@/lib/scheduling/zoned";
 import { addMinutesToTime, clockLabel, firstMatchingDay, hasDateRef, minutesBetweenTimes, resolveDateRef, shortDate, weekdayName, weekdayOf } from "./dates";
 import type { Intent, PlanWindow } from "./intents";
 import { isGenericToken, nameScore, nameTokens, resolveEntity } from "./resolve";
@@ -95,6 +95,8 @@ export type ActionSpec =
       estimatedMinutes: number | null;
       priority: "high" | "medium" | "low";
       description: string | null;
+      /** Null = one time. Checking it off brings it back on this cadence. */
+      repeat: TaskRepeat | null;
     }
   | {
       kind: "task_update";
@@ -105,6 +107,8 @@ export type ActionSpec =
         dueDate?: string;
         dueTime?: string | null;
         estimatedMinutes?: number;
+        /** Null turns the repeat off. */
+        repeat?: TaskRepeat | null;
       };
     }
   | { kind: "task_complete"; task: Task }
@@ -444,12 +448,19 @@ function eventTimes(intent: Intent): { start: string; end: string } | { missing:
 
 const RRULE_DAY: Record<Weekday, string> = { mo: "MO", tu: "TU", we: "WE", th: "TH", fr: "FR", sa: "SA", su: "SU" };
 
+function taskRepeat(intent: Intent): TaskRepeat | null {
+  const r = intent.recurrence;
+  return r === "daily" || r === "weekdays" || r === "weekly" || r === "monthly" ? r : null;
+}
+
 function recurrenceFor(intent: Intent, firstDate: string): { rrule: string | null; text: string | null } {
   switch (intent.recurrence) {
     case "daily":
       return { rrule: "FREQ=DAILY", text: "Every day" };
     case "weekdays":
       return { rrule: "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR", text: "Every weekday" };
+    case "monthly":
+      return { rrule: "FREQ=MONTHLY", text: "Every month" };
     case "weekly": {
       const days = intent.days.length ? intent.days : [weekdayOf(firstDate)];
       return {
@@ -482,14 +493,17 @@ function assessEvent(raw: Intent, world: World): Assessment {
   const recurringDays = intent.recurrence === "weekly" ? intent.days : [];
   let date = resolveDateRef(intent.date, world.todayKey, world.weekStartsOn);
   if (!date && intent.recurrence === "weekdays") date = firstMatchingDay(world.todayKey, ["mo", "tu", "we", "th", "fr"]);
-  if (!date && intent.recurrence === "daily") date = world.todayKey;
+  if (!date && (intent.recurrence === "daily" || intent.recurrence === "monthly")) date = world.todayKey;
   if (!date && recurringDays.length) date = firstMatchingDay(world.todayKey, recurringDays);
   if (!date && !hasDateRef(intent.date) && intent.days.length) date = firstMatchingDay(world.todayKey, intent.days);
   if (!date) return needs(intent, "date", title, `What day is ${lower(title)}?`);
   // "Gym every weekday at 6am", said in the afternoon: the series starts with the next one, not this morning's.
   if (date === world.todayKey && intent.recurrence && intent.recurrence !== "once" && intent.startTime && world.nowTime && intent.startTime < world.nowTime && !intent.date) {
-    const days: Weekday[] = intent.recurrence === "daily" ? [...WEEKDAYS] : intent.recurrence === "weekdays" ? ["mo", "tu", "we", "th", "fr"] : recurringDays.length ? recurringDays : intent.days;
-    date = firstMatchingDay(addDaysToKey(world.todayKey, 1), days.length ? days : [weekdayOf(date)]) ?? date;
+    if (intent.recurrence === "monthly") date = addMonthsToKey(date, 1);
+    else {
+      const days: Weekday[] = intent.recurrence === "daily" ? [...WEEKDAYS] : intent.recurrence === "weekdays" ? ["mo", "tu", "we", "th", "fr"] : recurringDays.length ? recurringDays : intent.days;
+      date = firstMatchingDay(addDaysToKey(world.todayKey, 1), days.length ? days : [weekdayOf(date)]) ?? date;
+    }
   }
 
   // One time or repeating. Only ask when it reads like a routine (weekday given, no calendar date).
@@ -610,7 +624,7 @@ function assessEventUpdate(original: Intent, world: World): Assessment {
 
   const day = resolveDateRef(intent.date, world.todayKey, world.weekStartsOn);
   // Repeat rule changes: "make that every Friday", "it's only this week".
-  if (intent.recurrence === "weekly" || intent.recurrence === "weekdays" || intent.recurrence === "daily") {
+  if (intent.recurrence === "weekly" || intent.recurrence === "weekdays" || intent.recurrence === "daily" || intent.recurrence === "monthly") {
     const anchor = day ?? oldDate;
     const rec = recurrenceFor(intent, anchor);
     if (rec.rrule && rec.rrule !== event.recurrenceRule) {
@@ -834,7 +848,10 @@ export function assessIntent(intent: Intent, world: World): Assessment {
 
     case "create_task": {
       if (!intent.title) return needs(intent, "other", "Task", "What's the task?");
-      const dueDate = resolveDateRef(intent.deadline ?? intent.date, world.todayKey, world.weekStartsOn);
+      const repeat = taskRepeat(intent);
+      const statedDue = resolveDateRef(intent.deadline ?? intent.date, world.todayKey, world.weekStartsOn);
+      // A repeat with no due date starts today, so the first check-off is waiting now.
+      const dueDate = statedDue ?? (repeat ? world.todayKey : null);
       return {
         status: "ready",
         intent,
@@ -843,10 +860,11 @@ export function assessIntent(intent: Intent, world: World): Assessment {
           title: intent.title,
           lifeAreaId: lifeAreaId(world, intent.area),
           dueDate,
-          dueTime: dueDate ? intent.deadlineTime : null,
+          dueTime: statedDue ? intent.deadlineTime : null,
           estimatedMinutes: intent.amountMinutes ?? intent.durationMinutes,
           priority: intent.priority ?? "medium",
           description: intent.details,
+          repeat,
         },
       };
     }
@@ -883,6 +901,15 @@ export function assessIntent(intent: Intent, world: World): Assessment {
       if (intent.priority) patch.priority = intent.priority;
       const minutes = intent.amountMinutes ?? intent.durationMinutes;
       if (minutes) patch.estimatedMinutes = minutes;
+      const repeat = taskRepeat(intent);
+      if (repeat) {
+        if (task.parentTaskId) {
+          return { status: "skip", intent, reason: "Step.", note: `${task.title} is a step of a bigger task, so it can't repeat.` };
+        }
+        if (repeat !== task.repeat) patch.repeat = repeat;
+      } else if (intent.recurrence === "once" && task.repeat) {
+        patch.repeat = null;
+      }
       if (!Object.keys(patch).length) {
         return needs(intent, "other", task.title, `What should I change about ${lower(task.title)}?`);
       }
@@ -1007,6 +1034,7 @@ export function assessIntent(intent: Intent, world: World): Assessment {
             estimatedMinutes: null,
             priority: "medium",
             description: intent.details,
+            repeat: null,
           },
         };
       }

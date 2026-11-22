@@ -110,6 +110,7 @@ function applyOp(op: Record<string, unknown>, item: StoredItem): { resultId: str
         status: "todo",
         dueAt: (row.due_at as string | null) ?? null,
         estimatedMinutes: (row.estimated_minutes as number | null) ?? null,
+        repeat: (row.repeat as Task["repeat"]) ?? null,
       };
       db.tasks.push(t);
       return { resultId: t.id, undo: { op: "delete_task", id: t.id } };
@@ -123,6 +124,11 @@ function applyOp(op: Record<string, unknown>, item: StoredItem): { resultId: str
       if (patch.priority) t.priority = patch.priority as Task["priority"];
       if ("due_at" in patch) t.dueAt = (patch.due_at as string | null) ?? null;
       if (patch.estimated_minutes) t.estimatedMinutes = Number(patch.estimated_minutes);
+      if ("repeat" in patch) t.repeat = (patch.repeat as Task["repeat"]) ?? null;
+      if (patch.occurrence_done) {
+        t.status = "todo";
+        t.completedAt = new Date().toISOString();
+      }
       return { resultId: t.id, undo: { op: "restore_task", id: t.id, row: before } };
     }
     case "remove_task": {
