@@ -39,6 +39,7 @@ export const INTENT_TYPES = [
   "cant_make", // "I can't study Wednesday anymore"
   "finished_early", // "I finished my coding project early"
   "not_enough_time", // "I don't think I'll have enough time this week"
+  "remove_duplicates", // "clean up duplicates this week, keep the Google one"
   "cancel_draft", // "never mind" / "don't add it" about an open action (asking or on a card)
   "update_event", // change an existing event: rename, move, new time or length, repeat rule
   "confirm_action", // "yes", "looks good", "add it": approve an action waiting on a card
@@ -100,7 +101,7 @@ const WireIntent = z.object({
   amount_minutes: z.number().int().nullable().describe("plan_time: total minutes, or minutes of the single block."),
   session_count: z.number().int().nullable().describe("plan_time with sessions: how many times."),
   session_minutes: z.number().int().nullable().describe("plan_time with sessions: minutes each, only if stated."),
-  window: z.enum(WINDOWS).nullable().describe("plan_time / not_enough_time: which period."),
+  window: z.enum(WINDOWS).nullable().describe("plan_time / not_enough_time / remove_duplicates: which period."),
   priority: z.enum(PRIORITIES).nullable(),
   cadence: z.enum(CADENCES).nullable().describe("Habits: how often."),
   times_per_week: z.number().int().nullable(),
@@ -173,7 +174,7 @@ const ApiIntent = z.object({
   amount_minutes: apiInt("plan_time: total minutes, or minutes of the single block."),
   session_count: apiInt("plan_time with sessions: how many times."),
   session_minutes: apiInt("plan_time with sessions: minutes each, only if stated."),
-  window: apiEnum(WINDOWS).describe("plan_time / not_enough_time: which period."),
+  window: apiEnum(WINDOWS).describe("plan_time / not_enough_time / remove_duplicates: which period."),
   priority: apiEnum(PRIORITIES),
   cadence: apiEnum(CADENCES).describe("Habits: how often."),
   times_per_week: apiInt(),

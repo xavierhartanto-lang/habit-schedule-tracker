@@ -678,7 +678,7 @@ export function Chat({
               <p className={cn("mt-2 text-center text-[11px]", tooLong ? "text-danger" : "text-ink-3")}>
                 {tooLong
                   ? `That's ${draft.length.toLocaleString()} characters. Keep it under ${CHAT_MESSAGE_MAX.toLocaleString()}.`
-                  : "Calendar changes always wait for your approval."}
+                  : "What you ask for happens right away, with Undo. Whitespace's own suggestions wait for you."}
               </p>
             </>
           )}

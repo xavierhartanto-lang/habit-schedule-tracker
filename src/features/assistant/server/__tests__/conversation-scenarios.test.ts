@@ -747,3 +747,74 @@ describe("Scenario J: removing the Chemistry Test with study sessions around it"
     expect(db.events).toHaveLength(0);
   });
 });
+
+describe("Scenario K: 'remove duplicates, keep the Google one' just happens", () => {
+  function google(title: string, day: string, start: string, end: string): Commitment {
+    const ev: Commitment = {
+      id: id(), title, area: null, kind: "fixed", startsAt: at(day, start), endsAt: at(day, end), timezone: TZ, recurrenceRule: null,
+      externalSource: "google", externalCalendarId: "primary", externalId: `g${seq}`,
+    } as Commitment;
+    db.events.push(ev);
+    return ev;
+  }
+
+  it("removes the Whitespace copies, keeps every Google event, no confirm step", async () => {
+    const g1 = google("Devsmita Das: Tutoring RSM Burlingame", "2026-11-19", "09:30", "10:30");
+    const g2 = google("AoPS LA Assessment @11 AM - 12 PM", "2026-11-19", "10:30", "12:30");
+    const g3 = google("Lalitha Ramanathan: Tutoring RSM Burlingame", "2026-11-19", "13:00", "14:00");
+    const g4 = google("Volleyball", "2026-11-20", "16:00", "18:00");
+    const dupe1 = addEvent("Math Tutoring", "2026-11-19", "09:30", "10:30");
+    const dupe2 = addEvent("Language Assessment", "2026-11-19", "10:30", "12:30");
+    // Repeating every Thursday: only this week's copy goes.
+    const weekly = addEvent("Math Tutoring", "2026-11-05", "13:00", "14:00", "FREQ=WEEKLY;BYDAY=TH");
+    const keepMine = addEvent("Pre-calculus Class", "2026-11-21", "14:10", "15:30");
+    const session = addSession("Study for Chemistry Test", "2026-11-20", "16:00", "17:00");
+
+    const t = await say(
+      "can you check everything in my calendar this whole week and if you see duplicates choose the one from google calendar. most of them are duplicates so just keep the one from google calendar",
+      [wire({ type: "remove_duplicates", evidence: "if you see duplicates choose the one from google calendar", window: "this_week", explicit: true })],
+    );
+    expect(t.clarify).toBeNull();
+    expect(t.plan?.items.every((i) => i.status === "applied")).toBe(true);
+    expect(t.plan?.items.map((i) => [i.action, i.title])).toEqual([
+      ["remove_event", "Math Tutoring"],
+      ["remove_event", "Language Assessment"],
+      ["skip_occurrence", "Math Tutoring"],
+    ]);
+    const ids = db.events.map((e) => e.id);
+    for (const g of [g1, g2, g3, g4]) expect(ids).toContain(g.id);
+    expect(ids).not.toContain(dupe1.id);
+    expect(ids).not.toContain(dupe2.id);
+    expect(ids).toContain(keepMine.id);
+    expect(ids).toContain(session.id);
+    expect(db.events.find((e) => e.id === weekly.id)?.recurrenceExceptions).toEqual(["2026-11-19"]);
+    expect(t.actions).toContain("Undo is on the card");
+  });
+
+  it("nothing doubled: says so and removes nothing", async () => {
+    google("Volleyball", "2026-11-20", "16:00", "18:00");
+    addEvent("Pre-calculus Class", "2026-11-21", "14:10", "15:30");
+    const t = await say("remove duplicates this week", [wire({ type: "remove_duplicates", evidence: "remove duplicates this week", window: "this_week", explicit: true })]);
+    expect(t.plan).toBeNull();
+    expect(t.actions).toContain("none found");
+    expect(db.events).toHaveLength(2);
+  });
+});
+
+describe("Direct commands happen now; Whitespace's suggestions wait", () => {
+  it("'remove the dentist appointment' removes it right away", async () => {
+    const dentist = addEvent("Dentist", "2026-11-20", "10:00", "11:00");
+    const t = await say("remove the dentist appointment", [wire({ type: "remove_event", target_ref: "e1", target_name: "dentist appointment", evidence: "remove the dentist appointment", explicit: true })]);
+    expect(t.plan?.items[0]).toMatchObject({ action: "remove_event", status: "applied", targetId: dentist.id });
+    expect(db.events).toHaveLength(0);
+  });
+
+  it("a Google event is never removed, even when named", async () => {
+    const g = { id: id(), title: "Volleyball", area: null, kind: "fixed", startsAt: at("2026-11-20", "16:00"), endsAt: at("2026-11-20", "18:00"), timezone: TZ, recurrenceRule: null, externalSource: "google", externalCalendarId: "primary", externalId: "gv" } as Commitment;
+    db.events.push(g);
+    const t = await say("remove volleyball", [wire({ type: "remove_event", target_ref: "e1", target_name: "volleyball", evidence: "remove volleyball", explicit: true })]);
+    expect(t.plan).toBeNull();
+    expect(t.actions).toContain("Google Calendar");
+    expect(db.events).toHaveLength(1);
+  });
+});
