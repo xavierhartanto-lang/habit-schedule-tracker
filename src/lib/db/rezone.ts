@@ -17,11 +17,12 @@ export async function moveUtcTimesToZone(userId: string, timeZone: string): Prom
 
   const { data: commitments, error } = await supabase
     .from("commitments")
-    .select("id, starts_at, ends_at, due_at, timezone")
+    .select("*")
     .eq("user_id", userId)
     .or("timezone.is.null,timezone.eq.UTC,timezone.eq.Etc/UTC");
   if (error) throw dbError(error);
-  for (const c of commitments) {
+  // Imported events already hold Google's exact times.
+  for (const c of commitments.filter((row) => !row.external_source)) {
     const { error: e } = await supabase
       .from("commitments")
       .update({ starts_at: shift(c.starts_at), ends_at: shift(c.ends_at), due_at: shift(c.due_at), timezone: timeZone })

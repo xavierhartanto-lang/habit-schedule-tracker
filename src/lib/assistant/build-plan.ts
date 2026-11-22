@@ -579,6 +579,10 @@ export function buildPlan(input: BuildInput): BuiltPlan {
       }
       case "event_update": {
         const e = spec.event;
+        if (e.externalSource) {
+          ctx.notes.push(`${e.title} comes from Google Calendar, so Whitespace can't change it. Tell the user to change it in Google Calendar; Whitespace picks it up on the next sync.`);
+          break;
+        }
         const etz = e.timezone ?? tz;
         const oldStart = new Date(e.startsAt!);
         const oldEnd = new Date(e.endsAt!);
@@ -947,7 +951,11 @@ export function buildPlan(input: BuildInput): BuiltPlan {
           ctx.notes.push(`Nothing called "${spec.title}" is on the calendar, so nothing was removed.`);
           break;
         }
-        for (const event of spec.events) {
+        const fromGoogle = spec.events.filter((e) => e.externalSource);
+        if (fromGoogle.length) {
+          ctx.notes.push(`${fromGoogle.map((e) => e.title).join(", ")} ${fromGoogle.length === 1 ? "comes" : "come"} from Google Calendar, so Whitespace can't remove ${fromGoogle.length === 1 ? "it" : "them"}. Tell the user to delete or decline it in Google Calendar; Whitespace picks it up on the next sync.`);
+        }
+        for (const event of spec.events.filter((e) => !e.externalSource)) {
           const rule = parseRRule(event.recurrenceRule);
           const tz = event.timezone ?? input.world.timeZone;
           const time = event.startsAt && event.endsAt

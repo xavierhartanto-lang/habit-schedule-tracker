@@ -95,6 +95,11 @@ export type CommitmentRow = Timestamps & {
   outcome?: "done" | "partial" | "missed" | null;
   outcome_at?: string | null;
   outcome_source?: "user" | "task_done" | null;
+  /** Google Calendar import (20261201000000). Missing until that migration runs. */
+  external_source?: "google" | null;
+  external_calendar_id?: string | null;
+  external_id?: string | null;
+  external_url?: string | null;
 } & Provenance;
 
 export type TaskRow = Timestamps & {
@@ -252,6 +257,29 @@ export type WeeklyBriefingRow = Timestamps & {
   dismissed_at: string | null;
 };
 
+export type GoogleConnectionRow = Timestamps & {
+  user_id: string;
+  google_email: string | null;
+  /** Encrypted by lib/google/crypto. */
+  refresh_token: string;
+  access_token: string | null;
+  access_token_expires_at: string | null;
+  last_synced_at: string | null;
+  last_sync_error: string | null;
+  sync_started_at: string | null;
+};
+
+export type GoogleCalendarRow = Timestamps & {
+  id: string;
+  user_id: string;
+  google_calendar_id: string;
+  name: string;
+  color: string | null;
+  is_primary: boolean;
+  selected: boolean;
+  life_area_id: string | null;
+};
+
 export type PlanKindEnum = "actions" | "schedule" | "reschedule";
 export type PlanStatusEnum = "pending" | "partially_applied" | "applied" | "rejected" | "stale";
 export type PlanItemStatusEnum = "pending" | "applied" | "rejected" | "conflict" | "failed" | "undone";
@@ -319,6 +347,8 @@ export type Database = {
       recommendations: Table<RecommendationRow, "user_id" | "dedupe_key" | "kind" | "priority" | "title" | "reason" | "message">;
       school_schedules: Table<SchoolScheduleRow, "user_id" | "status">;
       weekly_briefings: Table<WeeklyBriefingRow, "user_id" | "week_start" | "facts_hash">;
+      google_connections: Table<GoogleConnectionRow, "user_id" | "refresh_token">;
+      google_calendars: Table<GoogleCalendarRow, "user_id" | "google_calendar_id" | "name">;
     };
     Views: Record<string, never>;
     Functions: {
