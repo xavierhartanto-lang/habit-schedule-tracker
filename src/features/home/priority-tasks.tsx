@@ -1,20 +1,13 @@
 import { LifeAreaDot } from "@/components/ui";
 import { findArea } from "@/lib/domain/life-areas";
 import { sortPriorityTasks } from "@/lib/domain/tasks";
-import type { TaskPriority } from "@/lib/domain/types";
 import { formatDuration } from "@/lib/scheduling/time";
-import { cn } from "@/lib/utils/cn";
 import Link from "next/link";
 import { formatDue } from "@/features/tasks/format";
+import { PriorityTag } from "@/features/tasks/priority";
 import { loadHomeData } from "./home-data";
 import { RailNote, RailSection } from "./rail-section";
 import { TaskCheck } from "./task-check";
-
-const PRIORITY_STYLE: Record<TaskPriority, string> = {
-  high: "text-danger",
-  medium: "text-ink-2",
-  low: "text-ink-3",
-};
 
 /** Open tasks, highest priority first. Render inside <Suspense>. */
 export async function PriorityTasks() {
@@ -52,12 +45,10 @@ export async function PriorityTasks() {
                     <LifeAreaDot area={findArea(ctx.areas, t.lifeAreaId)} />
                     {[due && `Due ${/^(Today|Tomorrow|Yesterday)/.test(due) ? due.toLowerCase() : due}`, t.estimatedMinutes ? formatDuration(t.estimatedMinutes) : null]
                       .filter(Boolean)
-                      .join(" · ") || "No due date"}
+                      .join(" · ") || findArea(ctx.areas, t.lifeAreaId)?.name || "Task"}
                   </p>
                 </div>
-                {t.priority === "high" && (
-                  <span className={cn("pt-0.5 text-[11px] font-medium", PRIORITY_STYLE[t.priority])}>High</span>
-                )}
+                <PriorityTag priority={t.priority} className="shrink-0 pt-0.5 text-[11px]" />
               </li>
             );
           })}

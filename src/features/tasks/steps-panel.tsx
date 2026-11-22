@@ -79,7 +79,7 @@ export function StepsPanel({
     <section aria-label="Steps" className="space-y-2 rounded-xl border border-border p-3">
       {!proposal ? (
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-[13px] text-ink-2">Big task? Whitespace can split it into steps with their own due dates.</p>
+          <p className="text-[13px] text-ink-2">Big task? Whitespace can split it into smaller steps.</p>
           <Button type="button" variant="secondary" size="sm" onClick={suggest} disabled={disabled || pending}>
             <Sparkles className="size-3.5" /> {pending ? "Thinking…" : "Suggest steps"}
           </Button>

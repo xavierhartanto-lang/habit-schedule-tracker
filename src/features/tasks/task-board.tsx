@@ -29,20 +29,15 @@ import {
 import type { LifeAreaRecord, Task, TaskPriority, TaskStatus } from "@/lib/domain/types";
 import { formatDuration } from "@/lib/scheduling/time";
 import { cn } from "@/lib/utils/cn";
-import { Check, CircleCheck, Clock, Flag, ListTree, Plus, Target, Trash2 } from "lucide-react";
+import { CalendarPlus, Check, CircleCheck, Clock, Flag, ListTree, Plus, Target, Trash2, X } from "lucide-react";
 import { useMemo, useOptimistic, useState, useTransition } from "react";
 import { removeTask, saveTask, setTaskDone } from "./actions";
 import { formatDue } from "./format";
+import { PRIORITY_LABEL, PriorityDot, PriorityPicker, PriorityTag } from "./priority";
 import { StepsPanel } from "./steps-panel";
 
 type GoalOption = { id: string; title: string };
 
-const PRIORITY_LABEL: Record<TaskPriority, string> = { high: "High", medium: "Medium", low: "Low" };
-const PRIORITY_STYLE: Record<TaskPriority, string> = {
-  high: "text-danger",
-  medium: "text-ink-2",
-  low: "text-ink-3",
-};
 
 export function TaskBoard({
   tasks,
@@ -60,7 +55,7 @@ export function TaskBoard({
   disabled: boolean;
 }) {
   const [filter, setFilter] = useState<TaskFilter>(DEFAULT_TASK_FILTER);
-  const [sort, setSort] = useState<TaskSort>("due");
+  const [sort, setSort] = useState<TaskSort>("priority");
   const [editing, setEditing] = useState<{ task: Task | null } | null>(null);
   const [optimistic, setOptimistic] = useOptimistic(tasks, (state, change: { id: string; status: TaskStatus }) =>
     state.map((t) => (t.id === change.id ? { ...t, status: change.status } : t)),
@@ -92,6 +87,21 @@ export function TaskBoard({
     }
     return out;
   }, [visible, stepsOf]);
+  // Priority view: the list is grouped High / Medium / Low. Steps stay with their task.
+  const grouped = sort === "priority" && filter.priority === "all";
+  const groups = useMemo(() => {
+    const out: { priority: TaskPriority; rows: typeof rows; count: number }[] = [];
+    for (const row of rows) {
+      const nested = row.step && rows.some((r) => r.task.id === row.task.parentTaskId);
+      const last = out[out.length - 1];
+      if (nested && last) last.rows.push(row);
+      else if (last && last.priority === row.task.priority) {
+        last.rows.push(row);
+        last.count++;
+      } else out.push({ priority: row.task.priority, rows: [row], count: 1 });
+    }
+    return out;
+  }, [rows]);
   const parentTitle = (t: Task) => (t.parentTaskId ? optimistic.find((p) => p.id === t.parentTaskId)?.title ?? null : null);
   const openCount = optimistic.filter((t) => t.status !== "done").length;
   const overdueCount = optimistic.filter(
@@ -154,16 +164,9 @@ export function TaskBoard({
               <option value="medium">Medium</option>
               <option value="low">Low</option>
             </FilterSelect>
-            <FilterSelect label="Due" value={filter.due} onChange={(v) => setF("due", v as TaskFilter["due"])}>
-              <option value="all">Any due date</option>
-              <option value="overdue">Overdue</option>
-              <option value="today">Due today</option>
-              <option value="week">Next 7 days</option>
-              <option value="none">No due date</option>
-            </FilterSelect>
             <FilterSelect label="Sort" value={sort} onChange={(v) => setSort(v as TaskSort)}>
-              <option value="due">Sort: due date</option>
               <option value="priority">Sort: priority</option>
+              <option value="due">Sort: due date</option>
               <option value="duration">Sort: shortest first</option>
               <option value="created">Sort: newest</option>
             </FilterSelect>
@@ -199,24 +202,36 @@ export function TaskBoard({
               />
             )
           ) : (
-            <ul>
-              {rows.map(({ task: t, step }) => (
-                <TaskRow
-                  key={t.id}
-                  task={t}
-                  step={step}
-                  steps={stepsOf.get(t.id) ?? []}
-                  parentTitle={step && !rows.some((r) => r.task.id === t.parentTaskId) ? parentTitle(t) : null}
-                  area={findArea(areas, t.lifeAreaId)}
-                  goal={goals.find((g) => g.id === t.goalId) ?? null}
-                  timeZone={timeZone}
-                  todayKey={todayKey}
-                  disabled={disabled}
-                  onToggle={() => toggle(t)}
-                  onOpen={() => setEditing({ task: t })}
-                />
-              ))}
-            </ul>
+            (grouped ? groups : [{ priority: null, rows, count: rows.length }]).map((g, i) => (
+              <section key={g.priority ?? "all"} className={cn(i > 0 && "mt-2 border-t border-border pt-2")}>
+                {g.priority && (
+                  <h3 className="flex items-center gap-2 px-2 pb-1 pt-1.5 text-[12px] font-semibold uppercase tracking-wide text-ink-3">
+                    <PriorityDot priority={g.priority} />
+                    {PRIORITY_LABEL[g.priority]} priority
+                    <span className="font-medium tabular-nums">{g.count}</span>
+                  </h3>
+                )}
+                <ul>
+                  {g.rows.map(({ task: t, step }) => (
+                    <TaskRow
+                      key={t.id}
+                      task={t}
+                      step={step}
+                      steps={stepsOf.get(t.id) ?? []}
+                      parentTitle={step && !rows.some((r) => r.task.id === t.parentTaskId) ? parentTitle(t) : null}
+                      area={findArea(areas, t.lifeAreaId)}
+                      goal={goals.find((x) => x.id === t.goalId) ?? null}
+                      timeZone={timeZone}
+                      todayKey={todayKey}
+                      disabled={disabled}
+                      showPriority={!grouped}
+                      onToggle={() => toggle(t)}
+                      onOpen={() => setEditing({ task: t })}
+                    />
+                  ))}
+                </ul>
+              </section>
+            ))
           )}
         </div>
       </Card>
@@ -267,6 +282,7 @@ function TaskRow({
   timeZone,
   todayKey,
   disabled,
+  showPriority,
   onToggle,
   onOpen,
 }: {
@@ -282,6 +298,8 @@ function TaskRow({
   timeZone: string;
   todayKey: string;
   disabled: boolean;
+  /** Off when the list is already grouped by priority. */
+  showPriority: boolean;
   onToggle: () => void;
   onOpen: () => void;
 }) {
@@ -333,18 +351,17 @@ function TaskRow({
           {t.status === "in_progress" && <Badge tone="accent">In progress</Badge>}
         </span>
       </button>
-      <span className={cn("mt-0.5 shrink-0 text-[11px] font-medium uppercase tracking-wide", PRIORITY_STYLE[t.priority])}>
-        {t.priority}
-      </span>
+      {showPriority && <PriorityTag priority={t.priority} className={cn("mt-0.5 shrink-0", done && "opacity-60")} />}
     </li>
   );
 }
 
-/** One-line capture: type, press Enter. Details can be added later. */
+/** One-line capture: type, pick a priority, press Enter. A due date is optional. */
 function QuickAdd({ areas, disabled, onMore }: { areas: LifeAreaRecord[]; disabled: boolean; onMore: () => void }) {
   const [title, setTitle] = useState("");
   const [areaId, setAreaId] = useState("");
   const [priority, setPriority] = useState<TaskPriority>("medium");
+  const [showDue, setShowDue] = useState(false);
   const [dueDate, setDueDate] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -354,18 +371,19 @@ function QuickAdd({ areas, disabled, onMore }: { areas: LifeAreaRecord[]; disabl
     if (!title.trim()) return;
     start(async () => {
       setError(null);
-      const r = await saveTask(null, { title, lifeAreaId: areaId || null, priority, dueDate: dueDate || null });
+      const r = await saveTask(null, { title, lifeAreaId: areaId || null, priority, dueDate: showDue && dueDate ? dueDate : null });
       if (r.ok) {
         setTitle("");
         setDueDate("");
+        setShowDue(false);
       } else setError(r.error);
     });
   };
 
   return (
     <Card className="p-3">
-      <form onSubmit={submit} className="flex flex-col gap-2 md:flex-row md:items-center">
-        <div className="flex min-w-0 flex-1 items-center gap-2">
+      <form onSubmit={submit} className="space-y-2.5">
+        <div className="flex min-w-0 items-center gap-2">
           <Plus className="ml-1 size-4 shrink-0 text-ink-3" />
           <Input
             aria-label="New task"
@@ -377,37 +395,49 @@ function QuickAdd({ areas, disabled, onMore }: { areas: LifeAreaRecord[]; disabl
             className="border-transparent bg-transparent px-1 hover:border-transparent focus:border-transparent focus:ring-0"
           />
         </div>
-        <div className="grid grid-cols-2 gap-2 md:flex md:items-center">
-          <Select aria-label="Life area" value={areaId} onChange={(e) => setAreaId(e.target.value)} disabled={disabled} className="col-span-2 h-8 text-[13px] md:w-36">
-            <LifeAreaOptions areas={areas} />
-          </Select>
-          <Select
-            aria-label="Priority"
-            value={priority}
-            onChange={(e) => setPriority(e.target.value as TaskPriority)}
-            disabled={disabled}
-            className="h-8 text-[13px] md:w-28"
-          >
-            <option value="high">High</option>
-            <option value="medium">Medium</option>
-            <option value="low">Low</option>
-          </Select>
-          <Input
-            aria-label="Due date"
-            type="date"
-            value={dueDate}
-            onChange={(e) => setDueDate(e.target.value)}
-            disabled={disabled}
-            className="h-8 text-[13px] md:w-36"
-          />
-        </div>
-        <div className="flex gap-2">
-          <Button type="submit" size="sm" disabled={disabled || pending || !title.trim()} className="flex-1 md:flex-none">
-            {pending ? "Adding…" : "Add"}
-          </Button>
-          <Button type="button" variant="ghost" size="sm" onClick={onMore} disabled={disabled}>
-            Details
-          </Button>
+        <div className="flex flex-col gap-2 md:flex-row md:items-center">
+          <PriorityPicker value={priority} onChange={setPriority} disabled={disabled} size="sm" className="md:w-64" />
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <Select aria-label="Life area" value={areaId} onChange={(e) => setAreaId(e.target.value)} disabled={disabled} className="h-8 min-w-0 flex-1 text-[13px] md:w-36 md:flex-none">
+              <LifeAreaOptions areas={areas} />
+            </Select>
+            {showDue ? (
+              <span className="flex items-center gap-1">
+                <Input
+                  aria-label="Due date"
+                  type="date"
+                  value={dueDate}
+                  onChange={(e) => setDueDate(e.target.value)}
+                  disabled={disabled}
+                  data-autofocus
+                  className="h-8 w-36 text-[13px]"
+                />
+                <button
+                  type="button"
+                  aria-label="Remove due date"
+                  onClick={() => {
+                    setShowDue(false);
+                    setDueDate("");
+                  }}
+                  className="hit-area grid size-7 place-items-center rounded-md text-ink-3 hover:bg-surface-2 hover:text-ink-2"
+                >
+                  <X className="size-3.5" />
+                </button>
+              </span>
+            ) : (
+              <Button type="button" variant="ghost" size="sm" onClick={() => setShowDue(true)} disabled={disabled} className="shrink-0 text-ink-3">
+                <CalendarPlus className="size-3.5" /> Due date
+              </Button>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <Button type="submit" size="sm" disabled={disabled || pending || !title.trim()} className="flex-1 md:flex-none">
+              {pending ? "Adding…" : "Add"}
+            </Button>
+            <Button type="button" variant="ghost" size="sm" onClick={onMore} disabled={disabled}>
+              Details
+            </Button>
+          </div>
         </div>
       </form>
       {error && (
@@ -445,6 +475,7 @@ function TaskEditor({
   const [goalId, setGoalId] = useState(task?.goalId ?? "");
   const [priority, setPriority] = useState<TaskPriority>(task?.priority ?? "medium");
   const [status, setStatus] = useState<TaskStatus>(task?.status ?? "todo");
+  const [showDue, setShowDue] = useState(!!due);
   const [dueDate, setDueDate] = useState(due?.date ?? "");
   const [dueTime, setDueTime] = useState(due?.time ?? "");
   const [minutes, setMinutes] = useState(task?.estimatedMinutes ? String(task.estimatedMinutes) : "");
@@ -468,8 +499,8 @@ function TaskEditor({
         goalId: goalId || null,
         priority,
         status,
-        dueDate: dueDate || null,
-        dueTime: dueDate && dueTime ? dueTime : null,
+        dueDate: showDue && dueDate ? dueDate : null,
+        dueTime: showDue && dueDate && dueTime ? dueTime : null,
         estimatedMinutes: est,
       });
       if (r.ok) onDone();
@@ -490,6 +521,10 @@ function TaskEditor({
       <Field label="Title">
         <Input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={TASK_TITLE_MAX} required data-autofocus />
       </Field>
+      <div>
+        <span className="mb-1.5 block text-[13px] font-medium text-ink">Priority</span>
+        <PriorityPicker value={priority} onChange={setPriority} />
+      </div>
       <Field label="Description">
         <TextArea value={description} onChange={(e) => setDescription(e.target.value)} maxLength={2000} placeholder="Optional" />
       </Field>
@@ -498,21 +533,6 @@ function TaskEditor({
           <Select value={areaId} onChange={(e) => setAreaId(e.target.value)}>
             <LifeAreaOptions areas={areas} />
           </Select>
-        </Field>
-        <Field label="Priority">
-          <Select value={priority} onChange={(e) => setPriority(e.target.value as TaskPriority)}>
-            {(["high", "medium", "low"] as const).map((p) => (
-              <option key={p} value={p}>
-                {PRIORITY_LABEL[p]}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Field label="Due date">
-          <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
-        </Field>
-        <Field label="Due time" hint="Optional">
-          <Input type="time" value={dueTime} onChange={(e) => setDueTime(e.target.value)} disabled={!dueDate} />
         </Field>
         <Field label="Estimated minutes">
           <Input
@@ -525,14 +545,47 @@ function TaskEditor({
             placeholder="e.g. 45"
           />
         </Field>
-        <Field label="Status">
-          <Select value={status} onChange={(e) => setStatus(e.target.value as TaskStatus)}>
-            <option value="todo">To do</option>
-            <option value="in_progress">In progress</option>
-            <option value="done">Done</option>
-          </Select>
-        </Field>
+        {task && (
+          <Field label="Status">
+            <Select value={status} onChange={(e) => setStatus(e.target.value as TaskStatus)}>
+              <option value="todo">To do</option>
+              <option value="in_progress">In progress</option>
+              <option value="done">Done</option>
+            </Select>
+          </Field>
+        )}
       </div>
+      {showDue ? (
+        <div className="rounded-xl border border-border bg-surface-2/50 p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-[13px] font-medium text-ink-2">Due date</span>
+            <button
+              type="button"
+              onClick={() => {
+                setShowDue(false);
+                setDueDate("");
+                setDueTime("");
+              }}
+              className="text-[12px] text-ink-3 hover:text-ink-2 hover:underline"
+            >
+              Remove
+            </button>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Input aria-label="Due date" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+            <Input aria-label="Due time (optional)" type="time" value={dueTime} onChange={(e) => setDueTime(e.target.value)} disabled={!dueDate} />
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setShowDue(true)}
+          className="inline-flex items-center gap-1.5 text-[13px] font-medium text-ink-3 hover:text-accent-ink"
+        >
+          <CalendarPlus className="size-3.5" /> Add a due date
+          <span className="font-normal">(optional)</span>
+        </button>
+      )}
       {goals.length > 0 && (
         <Field label="Goal" hint="Optional: what this task moves forward.">
           <Select value={goalId} onChange={(e) => setGoalId(e.target.value)}>

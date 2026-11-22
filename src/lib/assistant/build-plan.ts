@@ -695,7 +695,8 @@ export function buildPlan(input: BuildInput): BuiltPlan {
       }
       case "task_create": {
         const dueAt = spec.dueDate ? zonedToUtc(spec.dueDate, spec.dueTime ?? "23:59", tz).toISOString() : null;
-        const detail = [dueLabel(dueAt, tz), spec.priority !== "medium" ? `${spec.priority[0].toUpperCase()}${spec.priority.slice(1)} priority` : null, spec.estimatedMinutes ? minutesLabel(spec.estimatedMinutes) : null]
+        // Priority leads: every task has one. A due date only shows when the user gave one.
+        const detail = [`${spec.priority[0].toUpperCase()}${spec.priority.slice(1)} priority`, dueLabel(dueAt, tz), spec.estimatedMinutes ? minutesLabel(spec.estimatedMinutes) : null]
           .filter(Boolean)
           .join(" · ");
         // Reality check (7.3): does it fit before it's due? Then propose its sessions on the same card.
