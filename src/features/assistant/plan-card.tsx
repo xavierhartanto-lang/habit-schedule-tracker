@@ -80,6 +80,12 @@ const DONE_LABEL: Partial<Record<PlanItemAction, string>> = {
   save_fact: "Saved",
 };
 
+/** The finished card's badge: "Removed" for a removal, not a blanket "Added". */
+export function appliedBadge(items: { action: PlanItemAction; status: string }[]): string {
+  const labels = new Set(items.filter((i) => i.status === "applied").map((i) => DONE_LABEL[i.action] ?? "Done"));
+  return labels.size === 1 ? [...labels][0] : "Done";
+}
+
 const REMOVALS = new Set<PlanItemAction>(["remove_block", "remove_event", "skip_occurrence"]);
 
 const newRequestId = () =>
@@ -313,7 +319,7 @@ export function PlanCard({
               )}
               {plan.status === "applied" ? (
                 <span className={cn(PILL, TONE.ok)}>
-                  <Check aria-hidden className="size-3" /> Added
+                  <Check aria-hidden className="size-3" /> {appliedBadge(items)}
                 </span>
               ) : (
                 plan.unscheduled.length === 0 &&

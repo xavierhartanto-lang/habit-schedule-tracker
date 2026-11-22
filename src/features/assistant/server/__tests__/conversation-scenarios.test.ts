@@ -712,3 +712,38 @@ describe("Deleting a task takes its work sessions with it", () => {
     expect(db.events.map((e) => e.id)).toEqual([chem.id]);
   });
 });
+
+describe("Scenario J: removing the Chemistry Test with study sessions around it", () => {
+  function setup() {
+    const test = addEvent("Chemistry Test", "2026-11-27", "09:00", "10:00");
+    const mon1 = addSession("Study for Chemistry Test", "2026-11-23", "16:00", "17:00");
+    const mon2 = addSession("Study for Chemistry Test", "2026-11-23", "19:00", "20:00");
+    const wed = addSession("Study for Chemistry Test", "2026-11-25", "16:00", "17:00");
+    return { test, mon1, mon2, wed };
+  }
+
+  it("'remove the chemistry test' removes the test itself, no question", async () => {
+    const { test } = setup();
+    const t = await say("remove the chemistry test", [wire({ type: "remove_event", target_name: "chemistry test", evidence: "remove the chemistry test", explicit: true })]);
+    expect(t.clarify).toBeNull();
+    expect(t.plan?.items.map((i) => [i.action, i.targetId])).toEqual([["remove_event", test.id]]);
+  });
+
+  it("a vague 'remove chemistry' asks with distinct choices plus 'All of them', and that choice removes all four", async () => {
+    const { test } = setup();
+    const t = await say("remove chemistry", [wire({ type: "remove_event", target_name: "chemistry", evidence: "remove chemistry", explicit: true })]);
+    expect(t.clarify?.field).toBe("target");
+    const choices = t.clarify!.choices!;
+    expect(new Set(choices).size).toBe(choices.length);
+    expect(choices).toContain("Study for Chemistry Test (Mon, Nov 23, 4 PM)");
+    expect(choices).toContain("Study for Chemistry Test (Mon, Nov 23, 7 PM)");
+    expect(choices.at(-1)).toBe("All of them");
+
+    const all = await say("All of them", (a) => [wire({ type: "remove_event", draft_id: a[0].id, target_ref: "e1", target_name: "all of them", evidence: "All of them", explicit: true })]);
+    expect(all.clarify).toBeNull();
+    expect(all.plan?.items.map((i) => i.title).sort()).toEqual(["Chemistry Test", "Study for Chemistry Test", "Study for Chemistry Test", "Study for Chemistry Test"]);
+    await approveItems("u1", all.plan!.id, { requestId: id(), now: NOW });
+    expect(db.events.map((e) => e.id)).not.toContain(test.id);
+    expect(db.events).toHaveLength(0);
+  });
+});

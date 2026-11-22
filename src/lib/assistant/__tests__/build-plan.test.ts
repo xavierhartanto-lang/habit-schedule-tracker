@@ -310,7 +310,7 @@ describe("adaptive rescheduling", () => {
     w.refs.events.set("e2", event({ title: "Math club", date: "2026-11-19", start: "15:00", end: "16:00" }));
     const a = assessIntent(intent({ type: "remove_event", title: "math", evidence: "cancel math" }), w);
     expect(a.status).toBe("needs");
-    if (a.status === "needs") expect(a.clarify.choices).toEqual(["Math tutoring", "Math club"]);
+    if (a.status === "needs") expect(a.clarify.choices).toEqual(["Math tutoring", "Math club", "All of them"]);
   });
 
   it("\"not enough time this week\" re-plans open work and reports what doesn't fit", () => {
