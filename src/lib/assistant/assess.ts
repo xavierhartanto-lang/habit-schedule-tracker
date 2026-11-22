@@ -154,7 +154,8 @@ export type ActionSpec =
   /** Every matching event goes (a repeating event goes as a whole series). Empty when nothing matched. */
   | { kind: "remove_event"; events: Commitment[]; title: string }
   | { kind: "finished_early"; task: Task | null; title: string }
-  | { kind: "not_enough_time"; window: PlanWindow };
+  | { kind: "not_enough_time"; window: PlanWindow }
+  | { kind: "remove_duplicates"; window: PlanWindow };
 
 export type Assessment =
   | { status: "ready"; spec: ActionSpec; intent: Intent }
@@ -949,6 +950,9 @@ export function assessIntent(intent: Intent, world: World): Assessment {
 
     case "not_enough_time":
       return { status: "ready", intent, spec: { kind: "not_enough_time", window: intent.window ?? "this_week" } };
+
+    case "remove_duplicates":
+      return { status: "ready", intent, spec: { kind: "remove_duplicates", window: intent.window ?? "this_week" } };
 
     case "cancel_draft":
       return { status: "skip", intent, reason: "Cancelled." };

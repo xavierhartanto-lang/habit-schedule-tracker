@@ -467,9 +467,12 @@ export async function planTurn(input: {
           touchedPlanIds.add(a.planId!);
           await rejectItems(input.userId, a.planId!, a.itemIds).catch((error) => console.error("[plan] could not close failed card", error));
         }
-        // Command and concur: only records the user directly asked for apply
-        // right away. Calendar changes always wait for Approve, whatever the plan says.
-        const auto = plan.items.filter((i, idx) => built.items[idx]?.autoApply && !CALENDAR_ACTIONS.has(i.action)).map((i) => i.id);
+        // Command and concur: what the user directly asked for applies right away,
+        // with Undo. Calendar changes apply only when the user commanded exactly
+        // that change; anything Whitespace proposes waits for Approve.
+        const auto = plan.items
+          .filter((i, idx) => built.items[idx]?.autoApply && (!CALENDAR_ACTIONS.has(i.action) || built.items[idx]?.commanded === true))
+          .map((i) => i.id);
         if (auto.length) {
           const { results } = await approveItems(input.userId, plan.id, { itemIds: auto, requestId: randomUUID(), now });
           await markAutoApplied(

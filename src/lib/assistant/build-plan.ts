@@ -24,6 +24,7 @@ import { pickKeeper } from "@/lib/proactive/conflict-pick";
 import { realityCheck } from "@/lib/proactive/reality";
 import type { ActionSpec, World } from "./assess";
 import { clockLabel, shortDate } from "./dates";
+import { findDuplicates } from "./duplicates";
 
 /**
  * Turns ready action specs into a plan: a list of items with everything
@@ -67,8 +68,14 @@ export type NewPlanItem = {
   payload: ItemPayload;
   display: ItemDisplay;
   targetId: string | null;
-  /** Apply right away (explicit, simple, organizational). Never true for calendar items. */
+  /** Apply right away (explicit, simple, organizational). Calendar items only when `commanded`. */
   autoApply: boolean;
+  /**
+   * The user directly told Whitespace to do exactly this ("remove the dentist",
+   * "remove the duplicates, keep the Google one"): it happens now, with Undo.
+   * Never set on anything Whitespace proposes on its own.
+   */
+  commanded?: boolean;
   /** The conversation action this item belongs to (see action-state.ts). */
   actionId?: string | null;
 };
@@ -789,8 +796,9 @@ export function buildPlan(input: BuildInput): BuiltPlan {
           action: "remove_task",
           title: spec.task.title,
           targetId: spec.task.id,
-          // Deleting always waits for approval, even when asked directly.
-          autoApply: false,
+          // "Delete my essay task": done now, Undo brings it back.
+          autoApply: explicit && fromUser,
+          commanded: explicit && fromUser,
           payload: { taskId: spec.task.id },
           display: { ...EMPTY_DISPLAY, detail: "Delete this task", reason: "You asked to remove it. Undo brings it back." },
         });
@@ -966,8 +974,10 @@ export function buildPlan(input: BuildInput): BuiltPlan {
             action: "remove_event",
             title: event.title,
             targetId: event.id,
-            // Removing a commitment always waits for approval, even when asked directly.
-            autoApply: false,
+            // "Remove the dentist appointment": the user's own command happens now,
+            // with Undo. Anything Whitespace suggests on its own waits for Approve.
+            autoApply: explicit && fromUser,
+            commanded: explicit && fromUser,
             payload: { commitmentId: event.id },
             display: {
               ...EMPTY_DISPLAY,
@@ -1041,6 +1051,46 @@ export function buildPlan(input: BuildInput): BuiltPlan {
           });
         }
         if (!remaining.length) ctx.notes.push(`No upcoming sessions for "${spec.title}" to remove.`);
+        break;
+      }
+      case "remove_duplicates": {
+        // A direct command with a clear rule: done now, Undo on the card.
+        const win = spec.window === "next_week" || spec.window === "today" || spec.window === "tomorrow"
+          ? windowFor({ window: spec.window }, input, null)
+          : { start: now, end: new Date(now.getTime() + 7 * 86_400_000) };
+        const pairs = findDuplicates(input.events, win.start, win.end, tz);
+        if (!pairs.length) {
+          ctx.notes.push("Checked the calendar for duplicates in that period: none found. Nothing was removed.");
+          break;
+        }
+        for (const { keep, drop } of pairs) {
+          const time = `${clockLabel(timeKeyInZone(drop.start, tz))}-${clockLabel(timeKeyInZone(drop.end, tz))}`;
+          const why = `Same time as ${keep.event.title}${keep.event.externalSource ? " from Google Calendar" : ""}, which stays.`;
+          ctx.items.push(
+            drop.event.recurrenceRule
+              ? {
+                  action: "skip_occurrence",
+                  title: drop.event.title,
+                  targetId: drop.event.id,
+                  autoApply: fromUser,
+                  commanded: fromUser,
+                  payload: { commitmentId: drop.event.id, date: drop.date },
+                  display: { ...EMPTY_DISPLAY, detail: `${shortDate(drop.date)}, ${time} only. The rest of the series stays.`, reason: why },
+                }
+              : {
+                  action: "remove_event",
+                  title: drop.event.title,
+                  targetId: drop.event.id,
+                  autoApply: fromUser,
+                  commanded: fromUser,
+                  payload: { commitmentId: drop.event.id },
+                  display: { ...EMPTY_DISPLAY, detail: `${shortDate(drop.date)}, ${time}`, reason: why },
+                },
+          );
+        }
+        ctx.notes.push(
+          `Removed ${pairs.length} duplicate${pairs.length === 1 ? "" : "s"}, keeping the Google Calendar copy each time: ${pairs.map((p) => `${p.drop.event.title} (kept ${p.keep.event.title})`).join("; ")}. Undo is on the card.`,
+        );
         break;
       }
       case "not_enough_time": {

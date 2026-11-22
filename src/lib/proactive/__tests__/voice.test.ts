@@ -149,7 +149,7 @@ describe("AI reply prompt", () => {
     const [stable] = buildSystemPrompt("assistant", ctx, { actions: null });
     expect(stable).toContain(VOICE);
     expect(stable).toContain("Never claim something was saved, scheduled, moved or deleted unless it is listed as already done");
-    expect(stable).toContain("Calendar changes always wait for the user's approval");
+    expect(stable).toContain("Calendar changes Whitespace suggests wait for the user's approval");
     expect(stable).toContain("Never calculate free time or pick time slots yourself");
     expect(stable).toContain("say plainly that nothing changed");
   });

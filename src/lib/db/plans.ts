@@ -138,6 +138,7 @@ const UNDOABLE: ReadonlySet<PlanItemAction> = new Set([
   "complete_task",
   "remove_task",
   "remove_event",
+  "skip_occurrence",
   "remove_block",
   "update_event",
   "create_habit",
