@@ -741,11 +741,18 @@ describe("Conflicts and duplicates", () => {
     expect(pending().map((i) => i.action).sort()).toEqual(["create_event", "skip_occurrence"]);
   });
 
-  it("dup 1. 'remove duplicates, keep the Google one' removes a real copy and leaves a different event in the same slot alone", async () => {
+  it("dup 1. 'remove duplicates, keep the Google one' removes real copies, even with unrelated names, and leaves a partly overlapping event alone", async () => {
     const copy = addEvent({ title: "Debate", day: "2026-09-05", start: "10:00", end: "12:00", rrule: "FREQ=WEEKLY;BYDAY=SA" });
+    // xavi's real case: a Whitespace "Debate" and a Google event with a different name in the exact same slot.
+    addEvent({ title: "Athena Speech Club", day: "2026-09-02", start: "09:00", end: "11:00", rrule: "FREQ=WEEKLY;BYDAY=WE", google: true });
+    googleBefore = googleSnapshot(); // the new Google event must survive too
+    const debateWs = addEvent({ title: "Debate", day: "2026-09-02", start: "09:00", end: "11:00", rrule: "FREQ=WEEKLY;BYDAY=WE" });
+    // Overlaps the Lab Review but starts later with an unrelated name: a conflict, not a copy.
+    const yearbook = addEvent({ title: "Yearbook", day: "2026-11-19", start: "16:00", end: "17:00" });
     await say("remove duplicates, keep the Google one", () => [w("remove_duplicates", "remove duplicates, keep the Google one")]);
     expect(ev(copy)).toBeUndefined();
-    expect(ev(s.robotics)).toBeDefined();
+    expect(ev(debateWs)).toBeUndefined();
+    expect(ev(yearbook)).toBeDefined();
   });
 
   it("dup 2. 'add dentist friday at 4' when it's already there doesn't double it", async () => {

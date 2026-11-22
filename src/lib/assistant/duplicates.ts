@@ -10,10 +10,10 @@ import { isGenericToken, nameTokens } from "./resolve";
  * user asked for and never a guess by the model.
  *
  * A Whitespace event and a Google event are the same commitment when they
- * take the same slot (most of the shorter one overlaps) and either share a
- * word, or start within 30 minutes with related names ("Pre-calculus" vs
- * "Xavier: Precalc w/ Mr. Lee"). Two unrelated things at the same time
- * ("Robotics Meeting" and "Chemistry Lab Review") are a conflict, not a copy.
+ * take exactly the same slot (any names: "Debate" vs "Athena Speech Club"),
+ * or most of the shorter one overlaps and they either share a word, or start
+ * within 30 minutes with related names ("Pre-calculus" vs "Xavier: Precalc
+ * w/ Mr. Lee"). Unrelated names that only partly overlap are a conflict.
  * Two Whitespace events need a shared word, or the exact same times and related names.
  *
  * The copy that goes is always a Whitespace one. Google events are read-only
@@ -61,6 +61,9 @@ function sameCommitment(a: Occurrence, b: Occurrence): boolean {
   const overlap = overlapMs(a, b);
   if (!overlap) return false;
   if (isGoogle(a) !== isGoogle(b)) {
+    // Exactly the same slot: a copy, whatever the names. Real copies often look unrelated
+    // ("Debate" vs "Athena Speech Club"), and the cleanup only removes the Whitespace one, with Undo.
+    if (sameTimes(a, b)) return true;
     const shorter = Math.min(a.end.getTime() - a.start.getTime(), b.end.getTime() - b.start.getTime());
     const mostly = overlap >= shorter / 2;
     const closeStart = Math.abs(a.start.getTime() - b.start.getTime()) <= START_SLACK_MS;
