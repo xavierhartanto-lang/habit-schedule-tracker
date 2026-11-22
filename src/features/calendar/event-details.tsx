@@ -5,7 +5,8 @@ import { findArea } from "@/lib/domain/life-areas";
 import type { LifeAreaRecord } from "@/lib/domain/types";
 import { describeRecurrence, parseRRule, type Occurrence } from "@/lib/scheduling/recurrence";
 import { addDaysToKey, dateKeyInZone, formatDateKey, formatTimeInZone } from "@/lib/scheduling/zoned";
-import { Lock, MapPin, MoveVertical, PenLine, Repeat, Trash2, TriangleAlert } from "lucide-react";
+import { buttonClasses } from "@/components/ui";
+import { CalendarSync, ExternalLink, Lock, MapPin, MoveVertical, PenLine, Repeat, Trash2, TriangleAlert } from "lucide-react";
 import { useState, useTransition } from "react";
 import { removeEvent, type DeleteScope } from "./actions";
 
@@ -40,6 +41,7 @@ export function EventDetails({
   onDone: () => void;
 }) {
   const e = occ.event;
+  const imported = e.externalSource === "google";
   const rule = parseRRule(e.recurrenceRule);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -75,6 +77,11 @@ export function EventDetails({
               </>
             )}
           </Badge>
+          {imported && (
+            <Badge className="font-normal">
+              <CalendarSync className="size-3" /> Google Calendar
+            </Badge>
+          )}
         </div>
         {e.location && (
           <p className="flex items-center gap-1.5 text-[13px]">
@@ -96,7 +103,18 @@ export function EventDetails({
         </p>
       )}
 
-      {confirming ? (
+      {imported ? (
+        <div className="space-y-3 border-t border-border pt-4">
+          <p className="text-[13px] text-ink-3">From Google Calendar. Change it there and Whitespace updates on its own.</p>
+          {e.externalUrl && (
+            <div className="flex justify-end">
+              <a href={e.externalUrl} target="_blank" rel="noopener noreferrer" className={buttonClasses("secondary", "sm")}>
+                <ExternalLink className="size-3.5" /> Open in Google Calendar
+              </a>
+            </div>
+          )}
+        </div>
+      ) : confirming ? (
         <div className="space-y-2 border-t border-border pt-4">
           <p className="text-[13px] font-medium text-ink">{rule ? "Delete which events?" : "Delete this event?"}</p>
           <div className="flex flex-wrap justify-end gap-2">

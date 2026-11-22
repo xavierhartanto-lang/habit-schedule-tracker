@@ -51,8 +51,38 @@ The signup trigger creates a `profiles` row and a `user_preferences` row for eve
 | `NEXT_PUBLIC_SITE_URL` | recommended | yes | Base URL for email confirmation links |
 | `ANTHROPIC_API_KEY` | for AI | **no** | Server-side key for the assistant. Without it the app shows an "AI not configured" state. |
 | `WHITESPACE_AI_MODEL` | no | **no** | Model override. Defaults to `claude-opus-5-5`. |
+| `GOOGLE_CLIENT_ID` | for Google Calendar import | **no** | OAuth client ID (Web application). |
+| `GOOGLE_CLIENT_SECRET` | for Google Calendar import | **no** | OAuth client secret. Also derives the key that encrypts stored Google tokens. |
+| `GOOGLE_REDIRECT_URI` | no | **no** | Override for the OAuth redirect. Defaults to `<origin>/api/google/callback`. |
 
 The service-role / secret key is **not used** and must never be given a `NEXT_PUBLIC_` prefix.
+
+## Google Calendar import
+
+Settings → Google Calendar connects a Google account (read-only scope
+`calendar.readonly`), lets the user pick calendars and a life area for each,
+and imports events as fixed events. It is a one-way sync: Google is the
+source of truth. Every sync upserts events from two weeks back to six months
+ahead (keyed on the Google event id, so no duplicates), removes ones deleted
+or declined in Google, and runs on its own when the app is open (at most every
+15 minutes) or from "Sync now". Imported events are read-only in Whitespace,
+and the assistant won't edit or remove them.
+
+Setup:
+
+1. Google Cloud console → create a project → APIs & Services → Library →
+   enable **Google Calendar API**.
+2. Google Auth Platform → Get started: app name, support email, audience
+   **External**. Data Access → add scope `https://www.googleapis.com/auth/calendar.readonly`.
+   Audience → add yourself as a test user.
+3. Clients → Create client → **Web application** → Authorized redirect URI
+   `http://localhost:3000/api/google/callback`.
+4. Put the client ID and secret in `.env.local` as `GOOGLE_CLIENT_ID` and
+   `GOOGLE_CLIENT_SECRET`, run migration `20261201000000_google_calendar_import.sql`,
+   and restart `npm run dev`.
+
+While the Google app is in "Testing", Google expires the connection after 7
+days; reconnect from Settings, or publish the app (Audience → Publish app).
 
 ## Project structure
 

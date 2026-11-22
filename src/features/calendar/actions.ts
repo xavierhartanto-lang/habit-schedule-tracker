@@ -15,6 +15,14 @@ import { PLANNING_PATHS, runAction } from "@/features/shared/run-action";
  * button: the app never creates, moves or deletes events on its own.
  */
 
+const IMPORTED = "This event comes from Google Calendar. Change it there and Whitespace updates on its own.";
+
+/** Imported events are read-only here: the next sync would undo any change. */
+async function assertEditable(userId: string, id: string): Promise<void> {
+  const event = await getEvent(userId, id);
+  if (event.externalSource) throw new DataValidationError(IMPORTED);
+}
+
 export type EditScope = "single" | "series";
 export type DeleteScope = "single" | "following" | "all";
 
@@ -36,6 +44,7 @@ export async function saveEvent(args: {
 
     if (args.id === null) return createEvent(userId, write);
     if (!isUuid(args.id)) throw new NotFoundError("Event");
+    await assertEditable(userId, args.id);
 
     if (args.scope === "single") {
       const date = args.occurrenceDate;
@@ -62,6 +71,7 @@ export async function removeEvent(args: {
 }): Promise<ActionResult> {
   return runAction(PLANNING_PATHS, async (userId) => {
     if (!isUuid(args.id)) throw new NotFoundError("Event");
+    await assertEditable(userId, args.id);
     if (args.scope === "all") return deleteEvent(userId, args.id);
 
     const event = await getEvent(userId, args.id);

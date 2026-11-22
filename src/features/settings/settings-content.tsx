@@ -8,6 +8,11 @@ import { PreferencesForm, ProfileForm } from "./forms";
 import { AssistantForm } from "./assistant-form";
 import { getAssistantSettings } from "@/features/proactive/actions";
 import type { AssistantSettings } from "@/features/proactive/types";
+import { GoogleCalendarCard } from "@/features/google/google-calendar-card";
+import { getGoogleStatus } from "@/features/google/server/status";
+import type { GoogleStatus } from "@/features/google/types";
+import { listLifeAreas } from "@/lib/db/life-areas";
+import { getGoogleConfig } from "@/lib/google/api";
 
 const DEFAULT_ASSISTANT: AssistantSettings = { proactivity: "balanced", quietHoursStart: "22:00", quietHoursEnd: "07:00" };
 
@@ -23,13 +28,16 @@ function timezones(): string[] {
 export async function SettingsContent() {
   const configured = isSupabaseConfigured();
   const user = configured ? await getSessionUser() : null;
-  const [profile, prefs, assistant] = user
+  const [profile, prefs, assistant, google, areas] = user
     ? await Promise.all([
         getProfile(user.id),
         getPreferences(user.id),
         getAssistantSettings().catch(() => null),
+        getGoogleStatus(user.id),
+        listLifeAreas(user.id).catch(() => []),
       ])
-    : [null, null, null];
+    : [null, null, null, null, []];
+  const googleStatus: GoogleStatus = google ?? { state: getGoogleConfig() ? "disconnected" : "not_configured" };
 
   return (
     <div className="space-y-6">
@@ -79,6 +87,7 @@ export async function SettingsContent() {
         </span>
         <ChevronRight className="size-4 text-ink-3 transition-transform group-hover:translate-x-0.5" />
       </Link>
+      <GoogleCalendarCard status={googleStatus} areas={areas} disabled={!user} />
       <ProfileForm
         profile={profile ?? DEFAULT_PROFILE}
         email={user?.email ?? null}

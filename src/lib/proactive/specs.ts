@@ -159,6 +159,7 @@ export function specsForAction(action: RecommendationAction, ctx: SpecContext): 
       const drop = ctx.events.get(str(p.dropId) ?? "");
       const date = str(p.date);
       if (!drop || drop.kind !== "fixed" || drop.planItemId) return { ok: false, error: "That event has already changed. Refresh to see the latest." };
+      if (drop.externalSource) return { ok: false, error: `${drop.title} comes from Google Calendar. Remove or decline it there and Whitespace updates on its own.` };
       if (drop.recurrenceRule) {
         if (!date || !isDateKey(date)) return { ok: false, error: "Unknown day." };
         return { ok: true, prompt: null, specs: [{ kind: "cant_make", date, blocks: [], event: drop, title: drop.title }] };

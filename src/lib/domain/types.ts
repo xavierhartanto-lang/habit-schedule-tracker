@@ -73,6 +73,10 @@ export type Commitment = {
   taskId?: string | null;
   /** Set when the assistant created this row from an approved plan. */
   planItemId?: string | null;
+  /** Set for events imported from another calendar. Whitespace never edits them. */
+  externalSource?: "google" | null;
+  /** Link to open the event in its own calendar. */
+  externalUrl?: string | null;
   /** When the row was created (ISO). */
   createdAt?: string;
   /** Work sessions: what actually happened. Null = not recorded (assumed done once past). */

@@ -31,6 +31,8 @@ export function toCommitment(row: CommitmentRow): Commitment {
     source: row.source,
     taskId: row.task_id ?? null,
     planItemId: row.plan_item_id ?? null,
+    externalSource: row.external_source ?? null,
+    externalUrl: row.external_url ?? null,
     outcome: row.outcome ?? null,
     createdAt: row.created_at,
   };
