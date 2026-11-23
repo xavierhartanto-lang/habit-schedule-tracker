@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { isGrounded, normalizeText } from "@/lib/ai/extraction";
+import { cleanEmail } from "@/lib/domain/email";
 import type { ContextCategory, Weekday } from "@/lib/domain/types";
 import { WEEKDAYS } from "@/lib/domain/types";
 import type { DateRef } from "./dates";
@@ -46,6 +47,7 @@ export const INTENT_TYPES = [
   "move_events", // several at once: "push everything tomorrow back an hour", "move my essay sessions to Saturday"
   "clear_events", // several at once: "clear tomorrow, I'm sick", "cancel all my study sessions this week"
   "undo", // "undo that", "put it back": reverse the last change Whitespace made in this chat
+  "send_email", // draft a new email; the user reviews it on a card and presses Send
 ] as const;
 export type IntentType = (typeof INTENT_TYPES)[number];
 
@@ -121,6 +123,8 @@ const WireIntent = z.object({
   pref_max_session_minutes: z.number().int().nullable(),
   pref_buffer_minutes: z.number().int().nullable(),
   pref_protected_label: z.string().nullable().describe("update_preferences: protected time name, e.g. 'Family dinner'."),
+  email_to: z.string().nullish().describe("send_email: the one address the user stated. Null if they didn't."),
+  email_body: z.string().nullish().describe("send_email: the full plain-text email, using only facts the user stated or that are already known. Null if they didn't say what it should say."),
 });
 
 export const PlannerWireSchema = z.object({
@@ -201,6 +205,8 @@ const ApiIntent = z.object({
   pref_max_session_minutes: apiInt(),
   pref_buffer_minutes: apiInt(),
   pref_protected_label: apiText("update_preferences: protected time name, e.g. 'Family dinner'."),
+  email_to: apiText("send_email: the one email address the user stated."),
+  email_body: apiText("send_email: the full plain-text email. Only facts the user stated or that are already known. Empty if they did not say what it should say."),
 });
 
 export const PlannerApiSchema = z.object({
@@ -300,6 +306,10 @@ export type Intent = {
     bufferMinutes: number | null;
     protectedLabel: string | null;
   };
+  /** send_email: the address, already checked, or null. */
+  emailTo: string | null;
+  /** send_email: the draft body. */
+  emailBody: string | null;
 };
 
 /** Unfinished intent the assistant is still asking about. Stored on the conversation. */
@@ -316,6 +326,13 @@ export const MAX_DRAFTS = 5;
 const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const REF_RE = /^[tebhg]\d{1,3}$/;
+
+/** Email body keeps its paragraphs. Everything else is one line. */
+function emailText(value: string | null | undefined): string | null {
+  if (value == null) return null;
+  const t = value.replace(/\r\n/g, "\n").trim();
+  return t ? t.slice(0, 4000) : null;
+}
 
 function clean(value: string | null | undefined, max = 200): string | null {
   if (value == null) return null;
@@ -390,6 +407,8 @@ export function toIntent(raw: WireIntentT): Intent {
       bufferMinutes: intIn(raw.pref_buffer_minutes, 0, 60),
       protectedLabel: clean(raw.pref_protected_label, 60),
     },
+    emailTo: cleanEmail(raw.email_to),
+    emailBody: emailText(raw.email_body),
   };
 }
 
@@ -463,6 +482,8 @@ export function mergeIntent(draft: Intent, next: Intent): Intent {
       bufferMinutes: pick(draft.prefs.bufferMinutes, next.prefs.bufferMinutes),
       protectedLabel: pick(draft.prefs.protectedLabel, next.prefs.protectedLabel),
     },
+    emailTo: pick(draft.emailTo, next.emailTo),
+    emailBody: pick(draft.emailBody, next.emailBody),
   };
 }
 

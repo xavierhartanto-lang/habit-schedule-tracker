@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionUser } from "@/lib/auth/session";
 import { getGoogleConnection, saveGoogleConnection } from "@/lib/db/google";
-import { GoogleApiError, canWrite, emailFromIdToken, exchangeCode, getGoogleConfig } from "@/lib/google/api";
+import { GoogleApiError, canSend, canWrite, emailFromIdToken, exchangeCode, getGoogleConfig } from "@/lib/google/api";
 import { decryptToken, encryptToken } from "@/lib/google/crypto";
 import { GOOGLE_STATE_COOKIE } from "@/features/google/constants";
 import { syncGoogleCalendar } from "@/features/google/server/sync";
@@ -48,6 +48,7 @@ export async function GET(request: NextRequest) {
       accessToken: encryptToken(tokens.access_token, config.clientSecret),
       expiresAt: new Date(Date.now() + tokens.expires_in * 1000).toISOString(),
       canWrite: canWrite(tokens.scope),
+      canSend: canSend(tokens.scope),
     });
   } catch (e) {
     console.error("[google-callback]", e);

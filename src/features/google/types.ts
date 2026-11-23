@@ -14,6 +14,8 @@ export type GoogleStatus =
       email: string | null;
       /** Granted edit access (calendar.events). */
       canWrite: boolean;
+      /** Granted gmail.send. False until they reconnect and allow sending. */
+      canSend: boolean;
       lastSyncedAt: string | null;
       lastError: string | null;
       calendars: GoogleCalendarChoice[];

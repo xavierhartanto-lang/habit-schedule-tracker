@@ -200,6 +200,45 @@ describe("other intents", () => {
     if (stopped.status === "ready") expect(stopped.spec).toMatchObject({ kind: "task_update", patch: { repeat: null } });
   });
 
+  it("an email asks for the address, then for what it should say", () => {
+    const missingAddress = assessIntent(
+      intent({ type: "send_email", title: "Late to practice", evidence: "email my coach that I'll be late", email_body: "I'll be late to practice today." }),
+      world(),
+    );
+    expect(missingAddress.status).toBe("needs");
+    if (missingAddress.status === "needs") expect(missingAddress.clarify).toMatchObject({ field: "recipient", question: "What's their email address?" });
+
+    const missingBody = assessIntent(
+      intent({ type: "send_email", title: "Late to practice", evidence: "email coach@school.edu", email_to: "coach@school.edu" }),
+      world(),
+    );
+    expect(missingBody.status).toBe("needs");
+    if (missingBody.status === "needs") expect(missingBody.clarify.field).toBe("message");
+  });
+
+  it("a complete email is a draft, not a sent message", () => {
+    const a = assessIntent(
+      intent({
+        type: "send_email",
+        title: "Late to practice",
+        evidence: "email coach@school.edu that I'll be late to practice",
+        email_to: "Coach <coach@school.edu>",
+        email_body: "Hi,\n\nI'll be late to practice today.",
+        explicit: true,
+      }),
+      world(),
+    );
+    expect(a.status).toBe("ready");
+    if (a.status === "ready") {
+      expect(a.spec).toEqual({
+        kind: "send_email",
+        to: "coach@school.edu",
+        subject: "Late to practice",
+        body: "Hi,\n\nI'll be late to practice today.",
+      });
+    }
+  });
+
   it("habits: 'exercise twice a week'", () => {
     const a = assessIntent(intent({ type: "create_habit", title: "Exercise", evidence: "exercising twice a week", cadence: "weekly", times_per_week: 2 }), world());
     expect(a.status).toBe("ready");

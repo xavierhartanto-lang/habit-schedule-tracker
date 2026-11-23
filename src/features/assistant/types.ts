@@ -95,7 +95,7 @@ export type ChatProactive = { kind: "daily_plan" } | { kind: "catch_up" } | { ki
 
 export const OPENING_MAX = 300;
 
-const CLARIFY_FIELDS: readonly ClarifyField[] = ["date", "time", "duration", "recurrence", "days", "deadline", "amount", "target", "other"];
+const CLARIFY_FIELDS: readonly ClarifyField[] = ["date", "time", "duration", "recurrence", "days", "deadline", "amount", "target", "recipient", "message", "other"];
 
 /** Reads the follow-up question stored on an assistant message. */
 export function readClarify(metadata: MessageMetadata | unknown): Clarify | null {

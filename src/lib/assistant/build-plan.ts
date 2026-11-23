@@ -1279,6 +1279,24 @@ export function buildPlan(input: BuildInput): BuiltPlan {
         });
         break;
       }
+      case "send_email": {
+        ctx.notes.push(`${spec.subject} is on a card for ${spec.to}. It is not sent until they press Send. Say that, and don't claim it went out.`);
+        ctx.items.push({
+          action: "send_email",
+          title: spec.subject,
+          targetId: null,
+          // Sending mail is never automatic, even when they asked directly.
+          autoApply: false,
+          payload: { to: spec.to, subject: spec.subject, body: spec.body },
+          display: {
+            ...EMPTY_DISPLAY,
+            detail: `To ${spec.to}`,
+            reason: "Nothing is sent until you press Send. You can edit it first.",
+            editable: true,
+          },
+        });
+        break;
+      }
       case "prefs": {
         const parts = [
           spec.dayStart ? `Start work no earlier than ${clockLabel(spec.dayStart)}` : null,

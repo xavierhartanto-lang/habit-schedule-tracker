@@ -20,7 +20,7 @@ export function isMissingSchema(error: { code?: string; message?: string }): boo
     error.code === "42703" ||
     error.code === "PGRST204" ||
     error.code === "PGRST205" ||
-    /google_(connections|calendars)|external_(source|id|calendar_id|url|series_id|access|shared)|can_write|access_role/.test(error.message ?? "")
+    /google_(connections|calendars)|external_(source|id|calendar_id|url|series_id|access|shared)|can_write|can_send|access_role/.test(error.message ?? "")
   );
 }
 
@@ -39,24 +39,28 @@ export async function getGoogleConnection(userId: string): Promise<GoogleConnect
 
 export async function saveGoogleConnection(
   userId: string,
-  v: { email: string | null; refreshToken: string; accessToken: string; expiresAt: string; canWrite: boolean },
+  v: { email: string | null; refreshToken: string; accessToken: string; expiresAt: string; canWrite: boolean; canSend?: boolean },
 ): Promise<void> {
   const supabase = await requireDb();
-  const { error } = await supabase.from("google_connections").upsert(
-    {
-      user_id: userId,
-      google_email: v.email,
-      refresh_token: v.refreshToken,
-      access_token: v.accessToken,
-      access_token_expires_at: v.expiresAt,
-      can_write: v.canWrite,
-      // Access may have changed (e.g. edit permission granted): re-import now.
-      last_synced_at: null,
-      last_sync_error: null,
-      sync_started_at: null,
-    },
-    { onConflict: "user_id" },
-  );
+  const row = {
+    user_id: userId,
+    google_email: v.email,
+    refresh_token: v.refreshToken,
+    access_token: v.accessToken,
+    access_token_expires_at: v.expiresAt,
+    can_write: v.canWrite,
+    ...(v.canSend !== undefined ? { can_send: v.canSend } : {}),
+    // Access may have changed (e.g. edit permission granted): re-import now.
+    last_synced_at: null,
+    last_sync_error: null,
+    sync_started_at: null,
+  };
+  const { error } = await supabase.from("google_connections").upsert(row, { onConflict: "user_id" });
+  // Calendar still connects if the email column isn't there yet.
+  if (error && v.canSend !== undefined && (error.code === "42703" || error.code === "PGRST204") && (error.message ?? "").includes("can_send")) {
+    await saveGoogleConnection(userId, { ...v, canSend: undefined });
+    return;
+  }
   if (error) throw fail(error);
 }
 

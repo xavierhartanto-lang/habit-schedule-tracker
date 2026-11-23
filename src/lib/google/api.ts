@@ -1,5 +1,6 @@
 import "server-only";
 
+import { rawEmail, type OutgoingEmail } from "@/lib/domain/email";
 import type { GoogleEvent } from "./map";
 
 /**
@@ -11,11 +12,18 @@ import type { GoogleEvent } from "./map";
 
 export const READ_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
 export const WRITE_SCOPE = "https://www.googleapis.com/auth/calendar.events";
-export const GOOGLE_SCOPES = ["openid", "email", READ_SCOPE, WRITE_SCOPE];
+/** Send a message the user already approved. Does not read the inbox. */
+export const SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send";
+export const GOOGLE_SCOPES = ["openid", "email", READ_SCOPE, WRITE_SCOPE, SEND_SCOPE];
 
 /** True when a granted scope string allows event writes. */
 export function canWrite(scope: string | undefined): boolean {
   return (scope ?? "").split(/\s+/).some((s) => s === WRITE_SCOPE || s === "https://www.googleapis.com/auth/calendar");
+}
+
+/** True when a granted scope string allows sending mail. */
+export function canSend(scope: string | undefined): boolean {
+  return (scope ?? "").split(/\s+/).includes(SEND_SCOPE);
 }
 
 export type GoogleConfig = { clientId: string; clientSecret: string };
@@ -152,7 +160,7 @@ export class GoogleForbiddenError extends Error {
   }
 }
 
-async function call<T>(accessToken: string, url: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
+async function call<T>(accessToken: string, url: string, init: { method?: string; body?: unknown; source?: string } = {}): Promise<T> {
   const res = await fetch(url, {
     method: init.method ?? "GET",
     headers: {
@@ -171,7 +179,8 @@ async function call<T>(accessToken: string, url: string, init: { method?: string
       if (reasons.includes("insufficientPermissions") || /insufficient.*scope/i.test(json?.error?.message ?? "")) throw new GoogleForbiddenError(true);
       if (reasons.includes("forbidden") || reasons.includes("forbiddenForNonOrganizer")) throw new GoogleForbiddenError(false);
     }
-    throw new GoogleApiError(json?.error?.message ?? `Google Calendar request failed (${res.status}).`, res.status);
+    const source = init.source ?? "Google Calendar";
+    throw new GoogleApiError(json?.error?.message ?? `${source} request failed (${res.status}).`, res.status);
   }
   if (res.status === 204) return undefined as T;
   const text = await res.text();
@@ -179,6 +188,15 @@ async function call<T>(accessToken: string, url: string, init: { method?: string
 }
 
 const get = <T>(accessToken: string, url: string) => call<T>(accessToken, url);
+
+/** Sends one plain-text email from the connected account. The caller has already shown it to the user. */
+export function sendGmailMessage(accessToken: string, email: OutgoingEmail): Promise<{ id: string }> {
+  return call(accessToken, "https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+    method: "POST",
+    source: "Gmail",
+    body: { raw: rawEmail(email) },
+  });
+}
 
 const EVENT_FIELDS =
   "id,status,htmlLink,summary,description,location,eventType,start,end,attendees(self,responseStatus,resource),recurringEventId,organizer(self),guestsCanModify,recurrence";

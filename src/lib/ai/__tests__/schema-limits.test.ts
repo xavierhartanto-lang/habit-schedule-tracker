@@ -61,7 +61,7 @@ describe("fromApiWire", () => {
     amount_minutes: -1, session_count: -1, session_minutes: -1, window: "none", priority: "none", cadence: "none",
     times_per_week: -1, progress: -1, target_date: none, location: "", scope: "none", fact_category: "none", details: "",
     pref_day_start: "", pref_day_end: "", pref_max_session_minutes: -1, pref_buffer_minutes: -1, pref_protected_label: "",
-    shift_minutes: 0, make_room: false,
+    shift_minutes: 0, make_room: false, email_to: "", email_body: "",
     ...o,
   });
 

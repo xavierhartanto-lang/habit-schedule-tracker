@@ -5,7 +5,7 @@ import { expandEvents } from "@/lib/scheduling/recurrence";
 import { dateKeyInZone, timeKeyInZone, zonedToUtc } from "@/lib/scheduling/zoned";
 import { assessIntent, separateSharedTargets, type ActionSpec } from "../assess";
 import { buildPlan, type BuildInput } from "../build-plan";
-import { toOp } from "../ops";
+import { parsePayload, toOp } from "../ops";
 import { applyPreferenceChanges } from "../prefs";
 import { NOW, PREFS, TZ, date, event, intent, task, uuid, weekCalendar, world } from "./fixtures";
 
@@ -186,6 +186,29 @@ describe("auto-apply rules", () => {
       ["save_fact", false], // Phase 2 "Ask first": facts wait for Save.
     ]);
     expect(plan.kind).toBe("actions");
+  });
+
+  it("an email always waits on a card, even when they said to send it", () => {
+    const mail = intent({
+      type: "send_email",
+      title: "Late to practice",
+      evidence: "email my coach",
+      email_to: "coach@school.edu",
+      email_body: "I'll be late to practice today.",
+      explicit: true,
+    });
+    const plan = buildPlan(input({ specs: [specOf(mail)] }));
+    expect(plan.items).toHaveLength(1);
+    expect(plan.items[0]).toMatchObject({
+      action: "send_email",
+      autoApply: false,
+      title: "Late to practice",
+      payload: { to: "coach@school.edu", subject: "Late to practice", body: "I'll be late to practice today." },
+    });
+    expect(plan.items[0].display.detail).toBe("To coach@school.edu");
+    expect(toOp({ id: uuid(), action: "send_email", payload: plan.items[0].payload })).toEqual({ ok: false, error: "Email is sent by the app." });
+    expect(parsePayload("send_email", { to: "two@a.com and two@b.com", subject: "Hi", body: "Hello" }).ok).toBe(false);
+    expect(parsePayload("send_email", plan.items[0].payload).ok).toBe(true);
   });
 
   it("command and concur: explicit calendar requests still wait for approval", () => {

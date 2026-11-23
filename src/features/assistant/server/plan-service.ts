@@ -23,6 +23,7 @@ import { nameScore, nameTokens, isGenericToken } from "@/lib/assistant/resolve";
 import { parsePayload, toOp, type Op } from "@/lib/assistant/ops";
 import { buildPlannerUserPrompt, namingContext, plannerResultBlock, type PlannerKnowledge } from "@/lib/assistant/planner-prompt";
 import { applyPreferenceChanges } from "@/lib/assistant/prefs";
+import { sendApprovedEmail } from "@/features/google/server/mail";
 import { DataValidationError } from "@/lib/db/client";
 import { linkSessionsToTask, markPastSessionsDone } from "@/lib/db/events";
 import { listGoals } from "@/lib/db/goals";
@@ -695,7 +696,13 @@ async function recheck(
 export async function approveItems(
   userId: string,
   planId: string,
-  input: { itemIds?: string[] | null; edits?: Record<string, { start: string; end: string }> | null; requestId: string; now?: Date },
+  input: {
+    itemIds?: string[] | null;
+    edits?: Record<string, { start: string; end: string }> | null;
+    emailEdits?: Record<string, { to: string; subject: string; body: string }> | null;
+    requestId: string;
+    now?: Date;
+  },
 ): Promise<{ plan: StoredPlan; results: ItemResult[] }> {
   const now = input.now ?? new Date();
   let plan = await getPlan(userId, planId);
@@ -737,6 +744,34 @@ export async function approveItems(
         continue;
       }
       await updateOpenItem(userId, item, { display });
+    }
+
+    if (item.action === "send_email") {
+      const edited = input.emailEdits?.[item.id];
+      const payload = edited ? { ...item.payload, to: edited.to, subject: edited.subject, body: edited.body } : item.payload;
+      const parsed = parsePayload("send_email", payload);
+      if (!parsed.ok) {
+        await updateOpenItem(userId, item, { error: parsed.error });
+        results.push({ itemId: item.id, outcome: "failed", message: parsed.error });
+        continue;
+      }
+      try {
+        await sendApprovedEmail(userId, parsed.value);
+      } catch (e) {
+        const message = e instanceof DataValidationError ? e.message : "The email wasn't sent. Try again in a moment.";
+        if (!(e instanceof DataValidationError)) console.error("[plan] gmail send failed", e);
+        await updateOpenItem(userId, item, { payload: parsed.value, error: message });
+        results.push({ itemId: item.id, outcome: "failed", message });
+        continue;
+      }
+      if (edited) {
+        item.payload = parsed.value;
+        item.display = { ...item.display, detail: `To ${parsed.value.to}` };
+        item.title = parsed.value.subject;
+        await updateOpenItem(userId, item, { payload: parsed.value, display: item.display, title: parsed.value.subject });
+      }
+      ops.push({ item_id: item.id, op: "mark_applied", result_id: null, undo: { op: "none" } });
+      continue;
     }
 
     if (item.action === "update_preferences") {

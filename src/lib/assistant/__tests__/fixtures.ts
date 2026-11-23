@@ -104,6 +104,8 @@ export function wire(overrides: Partial<WireIntent> & Pick<WireIntent, "type" | 
     pref_max_session_minutes: null,
     pref_buffer_minutes: null,
     pref_protected_label: null,
+    email_to: null,
+    email_body: null,
     ...overrides,
   };
 }

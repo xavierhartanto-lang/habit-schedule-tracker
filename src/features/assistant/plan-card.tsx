@@ -1,5 +1,6 @@
 "use client";
 
+import { Field, Input, TextArea } from "@/components/ui";
 import { buttonClasses } from "@/components/ui/button";
 import { formatDuration } from "@/lib/scheduling/time";
 import { dateKeyInZone, formatDateKey, formatTimeInZone, timeKeyInZone, zonedToUtc } from "@/lib/scheduling/zoned";
@@ -13,6 +14,7 @@ import {
   CircleAlert,
   Clock,
   ListChecks,
+  Mail,
   Lock,
   Pencil,
   RefreshCw,
@@ -39,6 +41,7 @@ export type PlanCardActions = {
     planId: string;
     itemIds?: string[];
     requestId: string;
+    emailEdits?: Record<string, { to: string; subject: string; body: string }>;
   }) => Promise<PlanActionResult>;
   reject: (input: { planId: string; itemIds?: string[] }) => Promise<PlanActionResult>;
   edit: (input: { planId: string; itemId: string; start: string; end: string }) => Promise<PlanActionResult>;
@@ -65,6 +68,7 @@ const ACTION_LABEL: Record<PlanItemAction, string> = {
   set_life_area: "Life area",
   update_preferences: "Preferences",
   save_fact: "Remember",
+  send_email: "Email",
 };
 
 const DONE_LABEL: Partial<Record<PlanItemAction, string>> = {
@@ -78,6 +82,7 @@ const DONE_LABEL: Partial<Record<PlanItemAction, string>> = {
   complete_task: "Done",
   remove_task: "Deleted",
   save_fact: "Saved",
+  send_email: "Sent",
 };
 
 /** The finished card's badge: "Removed" for a removal, not a blanket "Added". */
@@ -144,6 +149,7 @@ export function PlanCard({
     () => new Set(initialPlan.items.filter(preselected).map((i) => i.id)),
   );
   const [editing, setEditing] = useState<string | null>(null);
+  const [emailDrafts, setEmailDrafts] = useState<Record<string, { to: string; subject: string; body: string }>>({});
   const [busy, start] = useTransition();
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   // One idempotency key per approval attempt, kept if the attempt fails to reach the server.
@@ -181,14 +187,20 @@ export function PlanCard({
     });
   };
 
+  const draftFor = (item: PlanItem) => emailDrafts[item.id] ?? item.email ?? { to: "", subject: item.title, body: "" };
   const approve = (ids: string[]) => {
     if (!ids.length) return;
     const requestId = attempt.current ?? newRequestId();
     attempt.current = requestId;
+    const emailEdits: Record<string, { to: string; subject: string; body: string }> = {};
+    for (const id of ids) {
+      const item = items.find((i) => i.id === id);
+      if (item?.action === "send_email") emailEdits[id] = draftFor(item);
+    }
     // Always name the items: "all" on the server means every pending item, which skips failed ones.
     run(
       "approve",
-      () => actions.approve({ planId: plan.id, itemIds: ids, requestId }),
+      () => actions.approve({ planId: plan.id, itemIds: ids, requestId, emailEdits }),
       () => {
         attempt.current = null;
       },
@@ -211,6 +223,8 @@ export function PlanCard({
 
   const calendarCount = items.filter((i) => i.group === "calendar").length;
   const allChosen = open.length > 0 && chosen.length === open.length;
+  const sending = chosen.length > 0 && chosen.every((i) => i.action === "send_email");
+  const approveLabel = sending ? (chosen.length === 1 ? "Send" : `Send ${chosen.length}`) : allChosen ? "Approve all" : `Approve ${chosen.length}`;
   const visual = choosePlanVisual(items);
   const numberOf = numberTimed(items.filter((i) => i.group === "calendar"));
   const timed = items.filter((i) => i.group === "calendar" && isTimed(i));
@@ -232,7 +246,9 @@ export function PlanCard({
             ? visual === "day"
               ? `Plan for ${dayLabel(timed[0].timing!.start, timeZone)}`
               : "Proposed plan"
-            : "Suggested changes";
+            : items.every((i) => i.action === "send_email")
+              ? "Email to review"
+              : "Suggested changes";
 
   // Step path: the bigger task's open steps, with this plan's sessions slotted in.
   const pathSteps = group?.steps ?? [];
@@ -266,6 +282,12 @@ export function PlanCard({
         onReject={() => run("reject", () => actions.reject({ planId: plan.id, itemIds: [item.id] }))}
         onAlternative={() => run("alternatives", () => actions.alternatives({ planId: plan.id, itemIds: [item.id] }))}
         onUndo={() => run("undo", () => actions.undo({ planId: plan.id, itemId: item.id }))}
+        draft={item.action === "send_email" ? draftFor(item) : undefined}
+        onDraft={
+          item.action === "send_email"
+            ? (next) => setEmailDrafts((d) => ({ ...d, [item.id]: next }))
+            : undefined
+        }
       />
     );
 
@@ -290,6 +312,8 @@ export function PlanCard({
                 <CalendarCheck className="size-3.5" />
               ) : calendarCount > 0 ? (
                 <CalendarClock className="size-3.5" />
+              ) : items.every((i) => i.action === "send_email") ? (
+                <Mail className="size-3.5" />
               ) : (
                 <ListChecks className="size-3.5" />
               )}
@@ -419,7 +443,7 @@ export function PlanCard({
                 className={buttonClasses("primary", "sm")}
               >
                 <Check className="size-3.5" />
-                {busy ? "Working…" : allChosen ? "Approve all" : `Approve ${chosen.length}`}
+                {busy ? "Working…" : approveLabel}
               </button>
             </div>
           </footer>
@@ -487,6 +511,8 @@ function PlanRow({
   onReject,
   onAlternative,
   onUndo,
+  draft,
+  onDraft,
 }: {
   item: PlanItem;
   number?: number;
@@ -499,6 +525,8 @@ function PlanRow({
   onReject: () => void;
   onAlternative: () => void;
   onUndo: () => void;
+  draft?: { to: string; subject: string; body: string };
+  onDraft?: (next: { to: string; subject: string; body: string }) => void;
 }) {
   const open = isOpen(item);
   const t = item.timing;
@@ -572,9 +600,25 @@ function PlanRow({
                 {!t.allDay && <span className={cn(PILL, TONE.plain)}>{formatDuration(t.durationMinutes)}</span>}
               </div>
             ) : (
-              item.detail && <span className="text-[12.5px] text-ink-3">{item.detail}</span>
+              item.detail && !(draft && open) && <span className="text-[12.5px] text-ink-3">{item.detail}</span>
             )}
           </div>
+
+          {draft && onDraft && open && (
+            <div className="mt-2 space-y-2">
+              <Field label="To">
+                <Input value={draft.to} disabled={locked} onChange={(e) => onDraft({ ...draft, to: e.target.value })} className="h-8 text-[13px]" />
+              </Field>
+              <Field label="Subject">
+                <Input value={draft.subject} disabled={locked} onChange={(e) => onDraft({ ...draft, subject: e.target.value })} className="h-8 text-[13px]" />
+              </Field>
+              <Field label="Message">
+                <TextArea value={draft.body} disabled={locked} rows={6} onChange={(e) => onDraft({ ...draft, body: e.target.value })} className="text-[13px]" />
+              </Field>
+              <p className="text-[12px] text-ink-3">Nothing is sent until you press Send.</p>
+            </div>
+          )}
+          {item.email && !open && <p className="mt-1 line-clamp-4 whitespace-pre-wrap text-[13px] text-ink-2">{item.email.body}</p>}
 
           <ChipLine item={item} />
           {item.error && (item.status === "conflict" || item.status === "failed") && (

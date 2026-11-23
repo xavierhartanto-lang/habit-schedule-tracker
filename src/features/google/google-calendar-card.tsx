@@ -39,7 +39,7 @@ export function GoogleCalendarCard({
     <Card id="google-calendar" className="scroll-mt-6">
       <CardHeader
         title="Google Calendar"
-        description="Your Google events, on Whitespace's calendar. Ask Whitespace to move or remove one and it changes in Google too, with Undo."
+        description="Your Google events, on Whitespace's calendar. Ask Whitespace to draft an email and it sends only after you press Send."
         action={connected ? <Badge className="font-normal text-success"><Check className="size-3" /> Connected</Badge> : undefined}
       />
       <CardBody className="space-y-4">
@@ -130,7 +130,16 @@ function Connected({
 
       {!status.canWrite && (
         <div className="flex flex-col gap-2 rounded-xl border border-dashed border-border-strong px-4 py-3 text-[13px] text-ink-2 sm:flex-row sm:items-center sm:justify-between">
-          <span>Whitespace can only read your Google Calendar. Reconnect so it can move and remove events when you ask.</span>
+          <span>Whitespace can only read your Google Calendar. Reconnect so it can change events, and send an email after you approve it.</span>
+          <a href="/api/google/connect" className={buttonClasses("secondary", "sm", "shrink-0")}>
+            Reconnect
+          </a>
+        </div>
+      )}
+
+      {status.canWrite && !status.canSend && (
+        <div className="flex flex-col gap-2 rounded-xl border border-dashed border-border-strong px-4 py-3 text-[13px] text-ink-2 sm:flex-row sm:items-center sm:justify-between">
+          <span>Email isn&apos;t allowed yet. Reconnect Google and allow sending. Whitespace still waits for you to press Send.</span>
           <a href="/api/google/connect" className={buttonClasses("secondary", "sm", "shrink-0")}>
             Reconnect
           </a>

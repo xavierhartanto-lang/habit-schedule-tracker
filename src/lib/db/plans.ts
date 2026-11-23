@@ -192,6 +192,10 @@ export function toPlanView(plan: StoredPlan, now = new Date()): PlanView {
         targetId: i.targetId,
         resultId: i.resultId,
         error: i.error,
+        email:
+          i.action === "send_email" && typeof i.payload.to === "string"
+            ? { to: String(i.payload.to), subject: String(i.payload.subject ?? i.title), body: String(i.payload.body ?? "") }
+            : null,
       }),
     ),
   };
@@ -349,7 +353,7 @@ export async function markAutoApplied(userId: string, itemIds: string[]): Promis
 export async function updateOpenItem(
   userId: string,
   item: { id: string; proposalId: string },
-  patch: { payload?: Record<string, unknown>; display?: ItemDisplay; status?: "pending" | "conflict"; error?: string | null },
+  patch: { payload?: Record<string, unknown>; display?: ItemDisplay; status?: "pending" | "conflict"; error?: string | null; title?: string },
 ): Promise<boolean> {
   const supabase = await requireDb();
   const { data, error } = await supabase
@@ -359,6 +363,7 @@ export async function updateOpenItem(
       ...(patch.display ? { display: patch.display as unknown as Json } : {}),
       ...(patch.status ? { status: patch.status } : {}),
       ...(patch.error !== undefined ? { error: patch.error } : {}),
+      ...(patch.title ? { title: patch.title } : {}),
     })
     .eq("user_id", userId)
     .eq("id", item.id)

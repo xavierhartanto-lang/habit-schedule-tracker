@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import type { PlanItemAction } from "@/features/assistant/plan-types";
 import { isRecurrenceRule } from "@/lib/domain/commitments";
+import { validateOutgoingEmail } from "@/lib/domain/email";
 import { WEEKDAYS, type Weekday } from "@/lib/domain/types";
 import { zDateKey, zTime, zTimeZone, zUuid } from "@/lib/domain/validation";
 
@@ -125,6 +126,14 @@ export const PAYLOAD_SCHEMAS = {
     protectedTime: z
       .object({ label: zText(60), days: z.array(zDay).min(1).max(7), start: zTime, end: zTime })
       .nullable(),
+  }),
+  send_email: z.object({ to: z.string(), subject: z.string(), body: z.string() }).transform((value, ctx) => {
+    const checked = validateOutgoingEmail(value);
+    if (!checked.ok) {
+      ctx.addIssue({ code: "custom", message: checked.error });
+      return z.NEVER;
+    }
+    return checked.value;
   }),
   save_fact: z.object({
     category: z.enum(["activity", "interest", "routine", "working_time", "preference"]),
@@ -336,5 +345,7 @@ export function toOp(item: { id: string; action: PlanItemAction; payload: unknow
     }
     case "update_preferences":
       return { ok: false, error: "Preferences are saved by the app." };
+    case "send_email":
+      return { ok: false, error: "Email is sent by the app." };
   }
 }

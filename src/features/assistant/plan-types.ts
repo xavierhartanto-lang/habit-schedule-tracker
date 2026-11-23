@@ -31,6 +31,7 @@ export const PLAN_ITEM_ACTIONS = [
   "set_life_area",
   "update_preferences",
   "save_fact",
+  "send_email",
 ] as const;
 
 export type PlanItemAction = (typeof PLAN_ITEM_ACTIONS)[number];
@@ -92,6 +93,8 @@ export type PlanItem = {
   targetId: string | null;
   resultId: string | null;
   error: string | null;
+  /** Set on a send_email item: the draft the user reviews before Send. */
+  email?: { to: string; subject: string; body: string } | null;
 };
 
 export type PlanView = {
@@ -117,6 +120,8 @@ export type ClarifyField =
   | "amount"
   | "target"
   | "scope"
+  | "recipient"
+  | "message"
   | "other";
 
 /** The one follow-up question the assistant is asking. */

@@ -275,6 +275,8 @@ export type GoogleConnectionRow = Timestamps & {
   sync_started_at: string | null;
   /** Granted calendar.events (20261202000000). */
   can_write?: boolean;
+  /** Granted gmail.send (20261204000000). Optional until that migration has run. */
+  can_send?: boolean;
 };
 
 export type GoogleCalendarRow = Timestamps & {

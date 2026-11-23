@@ -16,6 +16,7 @@ export async function getGoogleStatus(userId: string): Promise<GoogleStatus> {
       state: "connected",
       email: conn.google_email,
       canWrite: conn.can_write === true,
+      canSend: conn.can_send === true,
       lastSyncedAt: conn.last_synced_at,
       lastError: conn.last_sync_error,
       calendars: calendars.map((c) => ({

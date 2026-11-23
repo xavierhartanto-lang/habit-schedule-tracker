@@ -65,6 +65,7 @@ export async function approvePlanItems(input: {
   planId: string;
   itemIds?: string[];
   edits?: Record<string, { start: string; end: string }>;
+  emailEdits?: Record<string, { to: string; subject: string; body: string }>;
   requestId: string;
 }): Promise<PlanActionResult> {
   if (!isUuid(input?.requestId)) return { ok: false, error: "Missing request id." };
@@ -72,8 +73,11 @@ export async function approvePlanItems(input: {
     input.planId,
     async (userId, planId) => {
       const edits = input.edits && typeof input.edits === "object" ? input.edits : null;
-      if (edits && Object.keys(edits).some((k) => !isUuid(k))) throw new DataValidationError("Unknown items.");
-      return approveItems(userId, planId, { itemIds: ids(input.itemIds), edits, requestId: input.requestId });
+      const emailEdits = input.emailEdits && typeof input.emailEdits === "object" ? input.emailEdits : null;
+      if ((edits && Object.keys(edits).some((k) => !isUuid(k))) || (emailEdits && Object.keys(emailEdits).some((k) => !isUuid(k)))) {
+        throw new DataValidationError("Unknown items.");
+      }
+      return approveItems(userId, planId, { itemIds: ids(input.itemIds), edits, emailEdits, requestId: input.requestId });
     },
     true,
   );

@@ -1,4 +1,5 @@
 import { looksLikeTaskTitle, normalizeText } from "@/lib/ai/extraction";
+import { cleanEmail, emailSubject, validateOutgoingEmail } from "@/lib/domain/email";
 import { isGoogleEvent } from "@/lib/domain/google";
 import type { Clarify, ClarifyField } from "@/features/assistant/plan-types";
 import type { Commitment, ContextAttributes, Goal, Habit, HabitCadence, LifeAreaRecord, Task, TaskRepeat, Weekday } from "@/lib/domain/types";
@@ -186,7 +187,8 @@ export type ActionSpec =
   | { kind: "remove_event"; events: Commitment[]; title: string; /** Google: just this occurrence, not its series. */ oneOccurrence?: boolean }
   | { kind: "finished_early"; task: Task | null; title: string }
   | { kind: "not_enough_time"; window: PlanWindow }
-  | { kind: "remove_duplicates"; window: PlanWindow | null };
+  | { kind: "remove_duplicates"; window: PlanWindow | null }
+  | { kind: "send_email"; to: string; subject: string; body: string };
 
 export type Assessment =
   | { status: "ready"; spec: ActionSpec; intent: Intent }
@@ -1152,6 +1154,17 @@ export function assessIntent(intent: Intent, world: World): Assessment {
 
     case "undo":
       return { status: "skip", intent, reason: "Handled by the action state." };
+
+    case "send_email": {
+      const to = cleanEmail(intent.emailTo);
+      const about = intent.title ?? "Email";
+      if (!to) return needs(intent, "recipient", about, "What's their email address?");
+      const body = (intent.emailBody ?? intent.details ?? "").trim();
+      if (!body) return needs(intent, "message", about, "What should the email say?");
+      const draft = validateOutgoingEmail({ to, subject: emailSubject(intent.title, body), body });
+      if (!draft.ok) return needs(intent, "message", about, draft.error);
+      return { status: "ready", intent, spec: { kind: "send_email", ...draft.value } };
+    }
   }
 }
 
