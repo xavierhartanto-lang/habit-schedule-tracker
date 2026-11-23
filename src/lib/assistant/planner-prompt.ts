@@ -1,4 +1,6 @@
 import { formatFacts, type ChatTurn, type KnownFact, type PromptContext } from "@/lib/ai/prompts";
+import type { AutomationTemplate } from "@/lib/domain/templates";
+import { templateSummary } from "@/lib/domain/templates";
 import type { Commitment, LifeAreaRecord } from "@/lib/domain/types";
 import { repeatLabel } from "@/lib/domain/tasks";
 import { parseRRule, describeRecurrence } from "@/lib/scheduling/recurrence";
@@ -56,6 +58,7 @@ Choosing a type
 - plan_time on one day: "I need 2 hours on Friday for the essay" -> date fr (the work happens that day). deadline is only for "by Friday" / "before Friday".
 - undo: "undo that", "undo", "put it back", "change it back", "wait no, undo" -> one undo intent (explicit true). The server reverses the newest change Whitespace made in this chat.
 - send_email: the user wants an email written and sent ("email my coach that I'll be late to practice", "draft an email to the counselor about my schedule"). email_to is the address only if they stated exactly one. title is a short subject from their words. email_body is the full plain-text email in their voice, using only facts they said or that are already in context. Never invent a grade, a time, a name, or a reason. If they didn't say what it should say, leave email_body empty so the server can ask. You never send it: the server shows a card and waits for Send. This is not a task and not save_fact.
+- save_template: the user wants an automation ("every Friday at 6 email the science bowl team that practice is tonight", "when a tutoring session is booked, email the office to print materials"). template_kind recurring or conditional. Recurring: recurrence weekly, days with that one weekday, start_time. Conditional: template_match is the words the event title must contain ("tutoring"). email_to and email_body are the draft. The body may use {student_name}, {grade}, {event_title}, {date}, and {time} only. Never invent a grade, name, or time. Saving it waits on a card and does not send an email now. Once they approve it, later firings send by themselves with no Send button. cancel_template turns one off: target_name is their words for it, from <automations>. This is not a task and not send_email.
 - Google Calendar events (marked "from Google Calendar" in <current_plan>) can be moved, renamed and removed like any other event: Whitespace changes them in Google too. Emit the same intents as for any event. Google sends a repeating event as one row per occurrence (marked "repeats"): "cancel debate Saturday" is that day only (date sa); "remove debate club" is the whole series; "move debate to 1pm" without a day gets scope only if the user said "every week" or "just this one". Events marked "view only" or "someone else's invite" can't be changed: still emit the intent; the server explains.
 - remove_duplicates: "check my calendar this week for duplicates", "remove the doubled events, keep the Google one", "clean up duplicates". window this_week when they say this week; null for "every duplicate", "on the calendar" or no period. explicit = true. Emit it every time they ask, even if duplicates were removed earlier in the conversation: the server re-checks the calendar. One intent covers the whole cleanup: never emit remove_event per duplicate, and never ask which copy to keep (the server always keeps the Google Calendar copy).
 - cant_make: "I can't study Wednesday anymore" or "no tutoring this Wednesday" (date + title, or target_ref). finished_early: "I finished my coding project early". not_enough_time: "I don't think I'll have enough time this week", "I'm behind", "I'm drowning in work" (window this_week unless they name next week).
@@ -183,6 +186,7 @@ export function buildPlannerUserPrompt(input: {
   recentHistory: ChatTurn[];
   newUserText: string;
   knowledge?: PlannerKnowledge | null;
+  templates?: AutomationTemplate[];
 }): string {
   const history = input.recentHistory.map((t) => `${t.role === "user" ? "User" : "Assistant"}: ${t.content}`).join("\n");
   return [
@@ -191,6 +195,7 @@ export function buildPlannerUserPrompt(input: {
     `<what_whitespace_knows>\n${formatKnowledge(input.knowledge)}\n</what_whitespace_knows>`,
     `<life_areas>\n${input.areas.map((a) => a.name).join(", ") || "None"}\n</life_areas>`,
     `<current_plan>\n${formatRefs(input.refs, input.timeZone)}\n</current_plan>`,
+    `<automations>\n${input.templates?.length ? input.templates.map((t) => `${t.title}${t.active ? "" : " (off)"}: ${templateSummary(t)}`).join("\n") : "None."}\n</automations>`,
     `<active_actions>\n${input.actions.map((a) => actionLine(a, input.savedRefs?.get(a.id))).join("\n") || "None."}\n</active_actions>`,
     `<recent_conversation>\n${history || "None."}\n</recent_conversation>`,
     `<new_user_text>\n${input.newUserText}\n</new_user_text>`,

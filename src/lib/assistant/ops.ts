@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { PlanItemAction } from "@/features/assistant/plan-types";
 import { isRecurrenceRule } from "@/lib/domain/commitments";
 import { validateOutgoingEmail } from "@/lib/domain/email";
+import { validateTemplate, type ScheduleRule, type TemplatePayload, type TemplateType } from "@/lib/domain/templates";
 import { WEEKDAYS, type Weekday } from "@/lib/domain/types";
 import { zDateKey, zTime, zTimeZone, zUuid } from "@/lib/domain/validation";
 
@@ -127,6 +128,25 @@ export const PAYLOAD_SCHEMAS = {
       .object({ label: zText(60), days: z.array(zDay).min(1).max(7), start: zTime, end: zTime })
       .nullable(),
   }),
+  save_template: z
+    .object({
+      templateId: z.string().uuid().nullish(),
+      title: z.string(),
+      templateType: z.enum(["recurring_automation", "conditional_trigger"]),
+      schedule: z.record(z.string(), z.unknown()),
+      payload: z.record(z.string(), z.unknown()),
+    })
+    .transform((value, ctx) => {
+      const schedule = value.schedule as ScheduleRule;
+      const payload = value.payload as TemplatePayload;
+      const checked = validateTemplate({ title: value.title, templateType: value.templateType as TemplateType, schedule, payload });
+      if (!checked.ok) {
+        ctx.addIssue({ code: "custom", message: checked.error });
+        return z.NEVER;
+      }
+      return { templateId: value.templateId ?? null, ...checked.value };
+    }),
+  cancel_template: z.object({ templateId: z.string().uuid(), title: z.string().min(1).max(200) }),
   send_email: z.object({ to: z.string(), subject: z.string(), body: z.string() }).transform((value, ctx) => {
     const checked = validateOutgoingEmail(value);
     if (!checked.ok) {
@@ -347,5 +367,9 @@ export function toOp(item: { id: string; action: PlanItemAction; payload: unknow
       return { ok: false, error: "Preferences are saved by the app." };
     case "send_email":
       return { ok: false, error: "Email is sent by the app." };
+    case "save_template":
+      return { ok: false, error: "Automations are saved by the app." };
+    case "cancel_template":
+      return { ok: false, error: "Automations are saved by the app." };
   }
 }

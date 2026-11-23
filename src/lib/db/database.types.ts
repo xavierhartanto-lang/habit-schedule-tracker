@@ -251,6 +251,25 @@ export type RecommendationRow = Timestamps & {
   resolved_at: string | null;
 };
 
+export type TemplateRow = Timestamps & {
+  id: string;
+  user_id: string;
+  title: string;
+  template_type: "recurring_automation" | "conditional_trigger";
+  schedule_rule: Json;
+  payload: Json;
+  is_active: boolean;
+};
+
+export type TemplateRunRow = {
+  id: string;
+  user_id: string;
+  template_id: string;
+  occurrence_key: string;
+  plan_id: string | null;
+  created_at: string;
+};
+
 export type WeeklyBriefingRow = Timestamps & {
   id: string;
   user_id: string;
@@ -359,6 +378,8 @@ export type Database = {
       recommendations: Table<RecommendationRow, "user_id" | "dedupe_key" | "kind" | "priority" | "title" | "reason" | "message">;
       school_schedules: Table<SchoolScheduleRow, "user_id" | "status">;
       weekly_briefings: Table<WeeklyBriefingRow, "user_id" | "week_start" | "facts_hash">;
+      templates: Table<TemplateRow, "user_id" | "title" | "template_type">;
+      template_runs: Table<TemplateRunRow, "user_id" | "template_id" | "occurrence_key">;
       google_connections: Table<GoogleConnectionRow, "user_id" | "refresh_token">;
       google_calendars: Table<GoogleCalendarRow, "user_id" | "google_calendar_id" | "name">;
     };

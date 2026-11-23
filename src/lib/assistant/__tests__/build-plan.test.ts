@@ -211,6 +211,21 @@ describe("auto-apply rules", () => {
     expect(parsePayload("send_email", plan.items[0].payload).ok).toBe(true);
   });
 
+  it("saving an automation waits on a card and does not send that email now", () => {
+    const saved = intent({
+      type: "save_template",
+      title: "Print Materials",
+      evidence: "when tutoring is booked",
+      template_kind: "conditional",
+      template_match: "tutoring",
+      email_to: "office@school.edu",
+      email_body: "Please print for {event_title}.",
+      explicit: true,
+    });
+    const plan = buildPlan(input({ specs: [specOf(saved)] }));
+    expect(plan.items.map((i) => [i.action, i.autoApply])).toEqual([["save_template", false]]);
+  });
+
   it("command and concur: explicit calendar requests still wait for approval", () => {
     const ev = intent({ type: "create_event", title: "Robotics", evidence: "add robotics", explicit: true, recurrence: "weekly", days: ["th"], start_time: "18:00", duration_minutes: 60 });
     const plan = buildPlan(input({ specs: [specOf(ev)] }));

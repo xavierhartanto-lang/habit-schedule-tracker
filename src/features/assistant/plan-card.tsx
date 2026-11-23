@@ -69,6 +69,8 @@ const ACTION_LABEL: Record<PlanItemAction, string> = {
   update_preferences: "Preferences",
   save_fact: "Remember",
   send_email: "Email",
+  save_template: "Automation",
+  cancel_template: "Turn off",
 };
 
 const DONE_LABEL: Partial<Record<PlanItemAction, string>> = {
@@ -83,6 +85,8 @@ const DONE_LABEL: Partial<Record<PlanItemAction, string>> = {
   remove_task: "Deleted",
   save_fact: "Saved",
   send_email: "Sent",
+  save_template: "Saved",
+  cancel_template: "Off",
 };
 
 /** The finished card's badge: "Removed" for a removal, not a blanket "Added". */
@@ -125,10 +129,12 @@ export function describeResult(result: Extract<PlanActionResult, { ok: true }>, 
     return { tone: "ok", text: "Found other times. Your calendar wasn't changed." };
   if (!result.results.length) return { tone: "warn", text: "Nothing changed." };
   if (blocked || failed) {
+    const only = result.results.find((r) => r.outcome === "failed");
+    const failedText = failed === 1 && only?.message ? only.message : failed ? `${failed} couldn't be saved.` : "";
     const parts = [
       done ? `Approved ${done}.` : "",
       blocked ? `${blocked} no longer fit${blocked === 1 ? "s" : ""} because your schedule changed.` : "",
-      failed ? `${failed} couldn't be saved.` : "",
+      failedText,
     ];
     return { tone: "warn", text: parts.filter(Boolean).join(" ") };
   }
@@ -621,9 +627,7 @@ function PlanRow({
           {item.email && !open && <p className="mt-1 line-clamp-4 whitespace-pre-wrap text-[13px] text-ink-2">{item.email.body}</p>}
 
           <ChipLine item={item} />
-          {item.error && (item.status === "conflict" || item.status === "failed") && (
-            <p className="mt-1 text-[12px] text-danger">{item.error}</p>
-          )}
+          {item.error && open && <p className="mt-1 text-[12px] text-danger">{item.error}</p>}
 
           {expanded && (
             <div className="mt-2 space-y-1.5 rounded-xl bg-surface-2/70 px-3 py-2.5 text-[12px] leading-relaxed text-ink-2">

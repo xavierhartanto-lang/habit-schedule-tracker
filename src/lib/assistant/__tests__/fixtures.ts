@@ -106,6 +106,8 @@ export function wire(overrides: Partial<WireIntent> & Pick<WireIntent, "type" | 
     pref_protected_label: null,
     email_to: null,
     email_body: null,
+    template_kind: null,
+    template_match: null,
     ...overrides,
   };
 }

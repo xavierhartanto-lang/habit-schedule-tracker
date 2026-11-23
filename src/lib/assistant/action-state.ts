@@ -447,6 +447,8 @@ function known(i: Intent): string {
     scope: i.scope,
     email_to: i.emailTo,
     email_body: i.emailBody ? i.emailBody.slice(0, 240) : null,
+    template_kind: i.templateKind,
+    template_match: i.templateMatch,
   })
     .filter(([, v]) => v !== null && v !== undefined)
     .map(([k, v]) => `${k}=${JSON.stringify(v)}`)

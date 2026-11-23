@@ -1,5 +1,6 @@
 import { looksLikeTaskTitle, normalizeText } from "@/lib/ai/extraction";
 import { cleanEmail, emailSubject, validateOutgoingEmail } from "@/lib/domain/email";
+import { validateTemplate, type AutomationTemplate, type TemplateInput } from "@/lib/domain/templates";
 import { isGoogleEvent } from "@/lib/domain/google";
 import type { Clarify, ClarifyField } from "@/features/assistant/plan-types";
 import type { Commitment, ContextAttributes, Goal, Habit, HabitCadence, LifeAreaRecord, Task, TaskRepeat, Weekday } from "@/lib/domain/types";
@@ -45,6 +46,8 @@ export type World = {
   nowTime?: string;
   /** Refs the assistant's last message offered to remove ("…are still on tonight's calendar. Say the word and I'll clear them."). */
   offered?: string[];
+  /** Saved automations, so "turn off the science bowl reminder" can find one. */
+  templates?: AutomationTemplate[];
 };
 
 /** What changes on an existing event. Fields left undefined stay as they are. */
@@ -188,7 +191,9 @@ export type ActionSpec =
   | { kind: "finished_early"; task: Task | null; title: string }
   | { kind: "not_enough_time"; window: PlanWindow }
   | { kind: "remove_duplicates"; window: PlanWindow | null }
-  | { kind: "send_email"; to: string; subject: string; body: string };
+  | { kind: "send_email"; to: string; subject: string; body: string }
+  | ({ kind: "template_save"; id: string | null } & TemplateInput)
+  | { kind: "template_cancel"; id: string; title: string };
 
 export type Assessment =
   | { status: "ready"; spec: ActionSpec; intent: Intent }
@@ -1165,7 +1170,63 @@ export function assessIntent(intent: Intent, world: World): Assessment {
       if (!draft.ok) return needs(intent, "message", about, draft.error);
       return { status: "ready", intent, spec: { kind: "send_email", ...draft.value } };
     }
+
+    case "save_template":
+      return assessTemplate(intent, world);
+
+    case "cancel_template": {
+      const found = findTemplates(world.templates ?? [], intent.targetName ?? intent.title);
+      if (!intent.targetName && !intent.title) return needs(intent, "target", "Automation", "Which automation should I turn off?");
+      if (!found.length) return needs(intent, "target", intent.targetName ?? intent.title ?? "Automation", "I can't find that automation.");
+      if (found.length > 1) return needs(intent, "target", "Automation", "Which automation?", found.map((t) => t.title));
+      return { status: "ready", intent, spec: { kind: "template_cancel", id: found[0].id, title: found[0].title } };
+    }
   }
+}
+
+function findTemplates(templates: AutomationTemplate[], name: string | null): AutomationTemplate[] {
+  const n = normalizeText(name ?? "");
+  if (!n) return [];
+  const exact = templates.filter((t) => normalizeText(t.title) === n);
+  if (exact.length) return exact;
+  return templates.filter((t) => {
+    const title = normalizeText(t.title);
+    return title.includes(n) || n.includes(title);
+  });
+}
+
+function assessTemplate(intent: Intent, world: World): Assessment {
+  const about = intent.title ?? "Automation";
+  if (!intent.title) return needs(intent, "other", "Automation", "What should this automation be called?");
+  if (!intent.templateKind) return needs(intent, "recurrence", intent.title, "Should this go out every week, or when an event is booked?");
+  const to = cleanEmail(intent.emailTo);
+  if (!to) return needs(intent, "recipient", intent.title, "What email address should it go to?");
+  const body = (intent.emailBody ?? "").trim();
+  if (!body) return needs(intent, "message", intent.title, "What should the email say? You can use {student_name}, {grade}, {event_title}, {date}, and {time}.");
+  const schedule = intent.templateKind === "recurring"
+    ? intent.days[0] && intent.startTime
+      ? { kind: "weekly" as const, weekday: intent.days[0], time: intent.startTime }
+      : null
+    : { kind: "event" as const };
+  if (intent.templateKind === "recurring" && !intent.days[0]) return needs(intent, "days", intent.title, "Which day should it go out?");
+  if (intent.templateKind === "recurring" && !intent.startTime) return needs(intent, "time", intent.title, "What time should it go out?");
+  const match = intent.templateKind === "conditional" ? intent.templateMatch : null;
+  if (intent.templateKind === "conditional" && !match) return needs(intent, "target", intent.title, "Which event should this watch? For example, tutoring.");
+  const checked = validateTemplate({
+    title: intent.title,
+    templateType: intent.templateKind === "recurring" ? "recurring_automation" : "conditional_trigger",
+    schedule: schedule ?? { kind: "event" },
+    payload: { to, subject: intent.title, body, match },
+  });
+  if (!checked.ok) return needs(intent, "message", about, checked.error);
+  let id: string | null = null;
+  if (intent.targetName) {
+    const found = findTemplates(world.templates ?? [], intent.targetName);
+    if (!found.length) return needs(intent, "target", intent.targetName, "I can't find that automation.");
+    if (found.length > 1) return needs(intent, "target", "Automation", "Which automation?", found.map((t) => t.title));
+    id = found[0].id;
+  }
+  return { status: "ready", intent, spec: { kind: "template_save", id, ...checked.value } };
 }
 
 /** Events whose title matches: exact first, else containment, else shared words. */

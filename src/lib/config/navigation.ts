@@ -9,6 +9,7 @@ import {
   Sparkles,
   UserRound,
   Target,
+  Workflow,
 } from "lucide-react";
 
 export type NavItem = {
@@ -28,6 +29,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/calendar", label: "Calendar", icon: CalendarDays, mobile: true },
   { href: "/tasks", label: "Tasks", icon: CircleCheck, mobile: true },
   { href: "/habits", label: "Habits & Goals", shortLabel: "Habits", icon: Target, mobile: true },
+  { href: "/automations", label: "Automations", icon: Workflow, mobile: false },
   { href: "/assistant", label: "AI Assistant", shortLabel: "Assistant", icon: Sparkles, mobile: false },
   { href: "/insights", label: "Insights", icon: LineChart, mobile: false },
   { href: "/areas", label: "Life areas", icon: Shapes, mobile: false },

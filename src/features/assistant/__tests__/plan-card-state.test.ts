@@ -35,6 +35,18 @@ describe("plan card state", () => {
       },
       "approve",
     ).text;
-    expect(text).toBe("Approved 2. 1 couldn't be saved.");
+    expect(text).toBe("Approved 2. Task not found");
+  });
+
+  it("shows the reason when the only item fails, such as an email that was not sent", () => {
+    const text = describeResult(
+      {
+        ok: true,
+        plan: null as never,
+        results: [{ itemId: "e", outcome: "failed", message: "Reconnect Google in Settings and allow sending email. Nothing was sent." }],
+      },
+      "approve",
+    ).text;
+    expect(text).toBe("Reconnect Google in Settings and allow sending email. Nothing was sent.");
   });
 });

@@ -33,4 +33,4 @@ export async function runAction(paths: string[], fn: (userId: string) => Promise
 }
 
 /** Pages that show planning data. Revalidated after any planning change. */
-export const PLANNING_PATHS = ["/", "/calendar", "/tasks", "/habits", "/areas", "/about-you"];
+export const PLANNING_PATHS = ["/", "/calendar", "/tasks", "/habits", "/automations", "/areas", "/about-you"];

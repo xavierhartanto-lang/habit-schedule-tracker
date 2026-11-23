@@ -32,6 +32,8 @@ export const PLAN_ITEM_ACTIONS = [
   "update_preferences",
   "save_fact",
   "send_email",
+  "save_template",
+  "cancel_template",
 ] as const;
 
 export type PlanItemAction = (typeof PLAN_ITEM_ACTIONS)[number];

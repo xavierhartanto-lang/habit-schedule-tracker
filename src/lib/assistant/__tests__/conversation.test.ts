@@ -239,6 +239,37 @@ describe("other intents", () => {
     }
   });
 
+  it("a weekly automation asks for a missing day, then a booked-event automation is ready", () => {
+    const missingDay = assessIntent(
+      intent({
+        type: "save_template",
+        title: "Science Bowl Reminder",
+        evidence: "email the team every week",
+        template_kind: "recurring",
+        email_to: "team@school.edu",
+        email_body: "Practice tonight.",
+      }),
+      world(),
+    );
+    expect(missingDay.status).toBe("needs");
+    if (missingDay.status === "needs") expect(missingDay.clarify.field).toBe("days");
+
+    const ready = assessIntent(
+      intent({
+        type: "save_template",
+        title: "Print Materials",
+        evidence: "when tutoring is booked email the office",
+        template_kind: "conditional",
+        template_match: "tutoring",
+        email_to: "office@school.edu",
+        email_body: "Please print for {event_title}.",
+      }),
+      world(),
+    );
+    expect(ready.status).toBe("ready");
+    if (ready.status === "ready") expect(ready.spec).toMatchObject({ kind: "template_save", templateType: "conditional_trigger", payload: { match: "tutoring" } });
+  });
+
   it("habits: 'exercise twice a week'", () => {
     const a = assessIntent(intent({ type: "create_habit", title: "Exercise", evidence: "exercising twice a week", cadence: "weekly", times_per_week: 2 }), world());
     expect(a.status).toBe("ready");

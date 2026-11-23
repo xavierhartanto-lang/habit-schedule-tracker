@@ -9,6 +9,7 @@ import { dateKeyInZone, isDateKey, isValidTimeZone } from "@/lib/scheduling/zone
 import { DEFAULT_PROFILE } from "@/features/settings/defaults";
 import type { ActionResult } from "@/features/shared/action-result";
 import { PLANNING_PATHS, runAction } from "@/features/shared/run-action";
+import { stageForBookedEvent } from "@/features/automations/server/stage";
 import { removeGoogleEvent } from "@/features/google/server/writes";
 
 /**
@@ -43,7 +44,11 @@ export async function saveEvent(args: {
     if (!result.ok) throw new DataValidationError(result.error);
     const write = result.value;
 
-    if (args.id === null) return createEvent(userId, write);
+    if (args.id === null) {
+      const created = await createEvent(userId, write);
+      await stageForBookedEvent(userId, created);
+      return created;
+    }
     if (!isUuid(args.id)) throw new NotFoundError("Event");
     await assertEditable(userId, args.id);
 
@@ -53,6 +58,7 @@ export async function saveEvent(args: {
       const series = await getEvent(userId, args.id);
       if (!series.recurrenceRule) return updateEvent(userId, args.id, write);
       const single = await createEvent(userId, { ...write, recurrenceRule: null });
+      await stageForBookedEvent(userId, single);
       try {
         await skipOccurrence(userId, args.id, date);
       } catch (e) {

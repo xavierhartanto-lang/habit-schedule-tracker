@@ -24,8 +24,10 @@ import { parsePayload, toOp, type Op } from "@/lib/assistant/ops";
 import { buildPlannerUserPrompt, namingContext, plannerResultBlock, type PlannerKnowledge } from "@/lib/assistant/planner-prompt";
 import { applyPreferenceChanges } from "@/lib/assistant/prefs";
 import { sendApprovedEmail } from "@/features/google/server/mail";
-import { DataValidationError } from "@/lib/db/client";
-import { linkSessionsToTask, markPastSessionsDone } from "@/lib/db/events";
+import { DataValidationError, SupabaseNotConfiguredError } from "@/lib/db/client";
+import { getEvent, linkSessionsToTask, markPastSessionsDone } from "@/lib/db/events";
+import { insertTemplate, isMissingTemplates, listTemplates, setTemplateActive, updateTemplate } from "@/lib/db/templates";
+import { stageForBookedEvent } from "@/features/automations/server/stage";
 import { listGoals } from "@/lib/db/goals";
 import { listActiveHabits } from "@/lib/db/habits";
 import { listLifeAreas } from "@/lib/db/life-areas";
@@ -115,9 +117,13 @@ export async function loadWorld(userId: string, now: Date): Promise<LoadedWorld>
   }
   habits.slice(0, 30).forEach((h, i) => refs.habits.set(`h${i + 1}`, h));
   goals.slice(0, 30).forEach((g, i) => refs.goals.set(`g${i + 1}`, g));
+  const templates = await listTemplates(userId).catch((error) => {
+    if (error instanceof SupabaseNotConfiguredError || isMissingTemplates(error)) return [];
+    throw error;
+  });
 
   return {
-    world: { todayKey, timeZone, weekStartsOn, areas, refs, known: knownActivities(base.events, timeZone), nowTime: timeKeyInZone(now, timeZone) },
+    world: { todayKey, timeZone, weekStartsOn, areas, refs, templates, known: knownActivities(base.events, timeZone), nowTime: timeKeyInZone(now, timeZone) },
     events: base.events,
     openTasks: base.openTasks,
     preferences: base.preferences,
@@ -352,6 +358,7 @@ export async function planTurn(input: {
       timeZone: world.timeZone,
       areas: world.areas,
       refs: world.refs,
+      templates: world.templates,
       actions,
       savedRefs,
       recentHistory,
@@ -774,6 +781,48 @@ export async function approveItems(
       continue;
     }
 
+    if (item.action === "cancel_template") {
+      const parsed = parsePayload("cancel_template", item.payload);
+      if (!parsed.ok) {
+        await updateOpenItem(userId, item, { error: parsed.error });
+        results.push({ itemId: item.id, outcome: "failed", message: parsed.error });
+        continue;
+      }
+      try {
+        await setTemplateActive(userId, parsed.value.templateId, false);
+      } catch (e) {
+        const message = e instanceof DataValidationError ? e.message : "The automation wasn't changed. Try again in a moment.";
+        if (!(e instanceof DataValidationError)) console.error("[plan] template cancel failed", e);
+        await updateOpenItem(userId, item, { error: message });
+        results.push({ itemId: item.id, outcome: "failed", message });
+        continue;
+      }
+      ops.push({ item_id: item.id, op: "mark_applied", result_id: null, undo: { op: "none" } });
+      continue;
+    }
+
+    if (item.action === "save_template") {
+      const parsed = parsePayload("save_template", item.payload);
+      if (!parsed.ok) {
+        await updateOpenItem(userId, item, { error: parsed.error });
+        results.push({ itemId: item.id, outcome: "failed", message: parsed.error });
+        continue;
+      }
+      const { templateId, ...input } = parsed.value;
+      try {
+        if (templateId) await updateTemplate(userId, templateId, input);
+        else await insertTemplate(userId, input);
+      } catch (e) {
+        const message = e instanceof DataValidationError ? e.message : "The automation wasn't saved. Try again in a moment.";
+        if (!(e instanceof DataValidationError)) console.error("[plan] template save failed", e);
+        await updateOpenItem(userId, item, { error: message });
+        results.push({ itemId: item.id, outcome: "failed", message });
+        continue;
+      }
+      ops.push({ item_id: item.id, op: "mark_applied", result_id: null, undo: { op: "none" } });
+      continue;
+    }
+
     if (item.action === "update_preferences") {
       const change = parsePayload("update_preferences", item.payload);
       if (!change.ok) {
@@ -826,6 +875,12 @@ export async function approveItems(
     }
   }
   await linkNewTaskSessions(userId, plan).catch((e) => console.error("[plan] sessions not linked to their new task", e));
+  for (const item of plan.items) {
+    if (item.action === "create_event" && appliedIds.has(item.id) && item.resultId) {
+      const event = await getEvent(userId, item.resultId).catch(() => null);
+      if (event) await stageForBookedEvent(userId, event);
+    }
+  }
   return { plan, results };
 }
 

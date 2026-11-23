@@ -1,6 +1,7 @@
 import { Skeleton } from "@/components/ui";
 import { AdaptiveRail } from "@/features/home/adaptive/adaptive-rail";
 import { HomeTop, HomeTopSkeleton } from "@/features/home/home-assistant";
+import { AutomationNotice } from "@/features/automations/automation-notice";
 import { HomeBriefing } from "@/features/insights/home-briefing";
 import { PriorityTasks } from "@/features/home/priority-tasks";
 import { RailSection } from "@/features/home/rail-section";
@@ -53,6 +54,9 @@ export default function HomePage(props: PageProps<"/">) {
         aria-label="What matters today"
         className="grid min-w-0 content-start gap-4 sm:grid-cols-2 lg:gap-5 xl:grid-cols-1"
       >
+        <Suspense fallback={null}>
+          <AutomationNotice />
+        </Suspense>
         <Suspense fallback={null}>
           <HomeBriefing />
         </Suspense>

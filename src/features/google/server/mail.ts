@@ -27,8 +27,16 @@ export async function sendApprovedEmail(userId: string, raw: { to?: unknown; sub
   } catch (e) {
     if (e instanceof GoogleAuthError) throw new DataValidationError("Google access expired. Reconnect in Settings. Nothing was sent.");
     if (e instanceof GoogleForbiddenError) throw new DataValidationError("Google didn't allow sending. Reconnect and allow email. Nothing was sent.");
-    if (e instanceof GoogleApiError) throw new DataValidationError("Gmail didn't accept the email. Nothing was sent.");
+    if (e instanceof GoogleApiError) throw new DataValidationError(gmailFailure(e));
     throw e;
   }
   return email.value;
+}
+
+/** Google's own explanation, kept short enough to show on the card. */
+function gmailFailure(e: GoogleApiError): string {
+  const detail = e.message.replace(/\s+/g, " ").trim();
+  if (!detail || /request failed \(\d+\)$/i.test(detail)) return "Gmail didn't accept the email. Nothing was sent.";
+  const clipped = detail.length > 140 ? `${detail.slice(0, 137)}…` : detail;
+  return `${clipped} Nothing was sent.`;
 }

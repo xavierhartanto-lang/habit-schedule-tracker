@@ -48,6 +48,8 @@ export const INTENT_TYPES = [
   "clear_events", // several at once: "clear tomorrow, I'm sick", "cancel all my study sessions this week"
   "undo", // "undo that", "put it back": reverse the last change Whitespace made in this chat
   "send_email", // draft a new email; the user reviews it on a card and presses Send
+  "save_template", // create or change an automation; it waits on a card and never sends by itself
+  "cancel_template", // turn an automation off; waits on a card
 ] as const;
 export type IntentType = (typeof INTENT_TYPES)[number];
 
@@ -58,6 +60,7 @@ const AMOUNT_KINDS = ["total", "sessions", "single"] as const;
 const CADENCES = ["daily", "weekly", "specific_days"] as const;
 const FACT_CATEGORIES = ["activity", "interest", "routine", "working_time", "preference"] as const;
 const SCOPES = ["one", "all"] as const;
+const TEMPLATE_KINDS = ["recurring", "conditional"] as const;
 export type Scope = (typeof SCOPES)[number];
 
 export type Recurrence = (typeof RECURRENCES)[number];
@@ -125,6 +128,8 @@ const WireIntent = z.object({
   pref_protected_label: z.string().nullable().describe("update_preferences: protected time name, e.g. 'Family dinner'."),
   email_to: z.string().nullish().describe("send_email: the one address the user stated. Null if they didn't."),
   email_body: z.string().nullish().describe("send_email: the full plain-text email, using only facts the user stated or that are already known. Null if they didn't say what it should say."),
+  template_kind: z.enum(TEMPLATE_KINDS).nullable().describe("save_template: recurring = every week, conditional = when an event is booked. Null if not an automation."),
+  template_match: z.string().nullish().describe("save_template conditional: words the event title must contain, such as tutoring."),
 });
 
 export const PlannerWireSchema = z.object({
@@ -207,6 +212,8 @@ const ApiIntent = z.object({
   pref_protected_label: apiText("update_preferences: protected time name, e.g. 'Family dinner'."),
   email_to: apiText("send_email: the one email address the user stated."),
   email_body: apiText("send_email: the full plain-text email. Only facts the user stated or that are already known. Empty if they did not say what it should say."),
+  template_kind: apiEnum(TEMPLATE_KINDS).describe('save_template: "recurring" every week, or "conditional" when an event is booked. "none" otherwise.'),
+  template_match: apiText("save_template conditional: words the event title must contain, such as tutoring."),
 });
 
 export const PlannerApiSchema = z.object({
@@ -310,6 +317,10 @@ export type Intent = {
   emailTo: string | null;
   /** send_email: the draft body. */
   emailBody: string | null;
+  /** save_template: weekly, or when an event is booked. */
+  templateKind: "recurring" | "conditional" | null;
+  /** save_template conditional: words the event title must contain. */
+  templateMatch: string | null;
 };
 
 /** Unfinished intent the assistant is still asking about. Stored on the conversation. */
@@ -409,6 +420,8 @@ export function toIntent(raw: WireIntentT): Intent {
     },
     emailTo: cleanEmail(raw.email_to),
     emailBody: emailText(raw.email_body),
+    templateKind: raw.template_kind ?? null,
+    templateMatch: clean(raw.template_match, 200),
   };
 }
 
@@ -484,6 +497,8 @@ export function mergeIntent(draft: Intent, next: Intent): Intent {
     },
     emailTo: pick(draft.emailTo, next.emailTo),
     emailBody: pick(draft.emailBody, next.emailBody),
+    templateKind: pick(draft.templateKind, next.templateKind),
+    templateMatch: pick(draft.templateMatch, next.templateMatch),
   };
 }
 

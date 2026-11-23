@@ -1297,6 +1297,35 @@ export function buildPlan(input: BuildInput): BuiltPlan {
         });
         break;
       }
+      case "template_save": {
+        ctx.notes.push(`${spec.title} is on a card. Approving it turns the automation on. After that, Whitespace sends those emails itself. Say that. This approval does not send one now.`);
+        ctx.items.push({
+          action: "save_template",
+          title: spec.title,
+          targetId: spec.id,
+          autoApply: false,
+          payload: { templateId: spec.id, title: spec.title, templateType: spec.templateType, schedule: spec.schedule, payload: spec.payload },
+          display: {
+            ...EMPTY_DISPLAY,
+            detail: spec.templateType === "conditional_trigger" ? `When an event contains “${spec.payload.match}”` : "Every week",
+            reason: "After you approve this, matching emails send on their own.",
+            editable: false,
+          },
+        });
+        break;
+      }
+      case "template_cancel": {
+        ctx.notes.push(`${spec.title} stays on until they approve turning it off.`);
+        ctx.items.push({
+          action: "cancel_template",
+          title: spec.title,
+          targetId: spec.id,
+          autoApply: false,
+          payload: { templateId: spec.id, title: spec.title },
+          display: { ...EMPTY_DISPLAY, detail: "Turn off", reason: "It stops preparing drafts. Anything already waiting can still be sent." },
+        });
+        break;
+      }
       case "prefs": {
         const parts = [
           spec.dayStart ? `Start work no earlier than ${clockLabel(spec.dayStart)}` : null,
