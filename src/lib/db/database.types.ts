@@ -255,7 +255,7 @@ export type TemplateRow = Timestamps & {
   id: string;
   user_id: string;
   title: string;
-  template_type: "recurring_automation" | "conditional_trigger";
+  template_type: "recurring_automation" | "conditional_trigger" | "email_template";
   schedule_rule: Json;
   payload: Json;
   is_active: boolean;

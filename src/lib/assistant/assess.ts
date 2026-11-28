@@ -1,12 +1,21 @@
 import { looksLikeTaskTitle, normalizeText } from "@/lib/ai/extraction";
 import { cleanEmail, emailSubject, validateOutgoingEmail } from "@/lib/domain/email";
-import { validateTemplate, type AutomationTemplate, type TemplateInput } from "@/lib/domain/templates";
+import {
+  eventMatches,
+  eventTemplateVars,
+  fillTemplate,
+  templateVariables,
+  unfilledVariables,
+  validateTemplate,
+  type AutomationTemplate,
+  type TemplateInput,
+} from "@/lib/domain/templates";
 import { isGoogleEvent } from "@/lib/domain/google";
 import type { Clarify, ClarifyField } from "@/features/assistant/plan-types";
 import type { Commitment, ContextAttributes, Goal, Habit, HabitCadence, LifeAreaRecord, Task, TaskRepeat, Weekday } from "@/lib/domain/types";
 import { WEEKDAYS } from "@/lib/domain/types";
 import { expandEvent } from "@/lib/scheduling/recurrence";
-import { addDaysToKey, addMonthsToKey, dateKeyInZone, startOfDayInZone, startOfWeekKey, timeKeyInZone } from "@/lib/scheduling/zoned";
+import { addDaysToKey, addMonthsToKey, dateKeyInZone, startOfDayInZone, startOfWeekKey, timeKeyInZone, zonedToUtc } from "@/lib/scheduling/zoned";
 import { addMinutesToTime, clockLabel, firstMatchingDay, hasDateRef, minutesBetweenTimes, resolveDateRef, shortDate, weekdayName, weekdayOf } from "./dates";
 import type { Intent, PlanWindow } from "./intents";
 import { isGenericToken, nameScore, nameTokens, resolveEntity } from "./resolve";
@@ -191,7 +200,14 @@ export type ActionSpec =
   | { kind: "finished_early"; task: Task | null; title: string }
   | { kind: "not_enough_time"; window: PlanWindow }
   | { kind: "remove_duplicates"; window: PlanWindow | null }
-  | { kind: "send_email"; to: string; subject: string; body: string }
+  | {
+      kind: "send_email";
+      to: string;
+      subject: string;
+      body: string;
+      /** Set when a saved email template was filled. `missing` = placeholders still blank. */
+      template?: { title: string; event: string | null; missing: string[] };
+    }
   | ({ kind: "template_save"; id: string | null } & TemplateInput)
   | { kind: "template_cancel"; id: string; title: string };
 
@@ -1161,6 +1177,9 @@ export function assessIntent(intent: Intent, world: World): Assessment {
       return { status: "skip", intent, reason: "Handled by the action state." };
 
     case "send_email": {
+      const picked = pickEmailTemplate(intent, world);
+      if (picked && "choices" in picked) return needs(intent, "target", "Email", "Which template should I use?", picked.choices);
+      if (picked) return assessTemplateEmail(intent, world, picked.template);
       const to = cleanEmail(intent.emailTo);
       const about = intent.title ?? "Email";
       if (!to) return needs(intent, "recipient", about, "What's their email address?");
@@ -1184,6 +1203,75 @@ export function assessIntent(intent: Intent, world: World): Assessment {
   }
 }
 
+/**
+ * The saved email template this request is for, if any. Named templates win.
+ * A template is only used unprompted when the user didn't write the email themselves.
+ */
+function pickEmailTemplate(intent: Intent, world: World): { template: AutomationTemplate } | { choices: string[] } | null {
+  const pool = (world.templates ?? []).filter((t) => t.active && t.templateType === "email_template");
+  if (!pool.length) return null;
+  const pick = (found: AutomationTemplate[]) => (found.length === 1 ? { template: found[0] } : { choices: found.map((t) => t.title) });
+  const named = findTemplates(pool, intent.targetName);
+  if (named.length) return pick(named);
+  if (intent.emailBody) return null;
+  const said = ` ${normalizeText([intent.title, intent.targetName, intent.evidence].filter(Boolean).join(" "))} `;
+  const hits = pool.filter((t) => {
+    if (t.payload.match && said.includes(` ${normalizeText(t.payload.match)} `)) return true;
+    const title = normalizeText(t.title);
+    return title.length > 2 && said.includes(` ${title} `);
+  });
+  return hits.length ? pick(hits) : null;
+}
+
+/** The event a template email is about: the one named, else the next one that matches. */
+function eventForTemplate(intent: Intent, world: World, template: AutomationTemplate): { event: Commitment; startsAt: string | null } | null {
+  const now = zonedToUtc(world.todayKey, world.nowTime ?? "00:00", world.timeZone);
+  const day = resolveDateRef(intent.date, world.todayKey, world.weekStartsOn);
+  const named = intent.targetRef ? world.refs.events.get(intent.targetRef) ?? world.refs.blocks.get(intent.targetRef) ?? null : null;
+  const all = [...world.refs.events.values()];
+  let candidates: Commitment[] = named ? [named] : [];
+  if (!candidates.length && template.payload.match) candidates = all.filter((e) => eventMatches(template.payload.match, e.title));
+  if (!candidates.length && intent.targetName) candidates = matchEvents(all, intent.targetName);
+  if (!candidates.length) return null;
+  const from = day ? startOfDayInZone(day, world.timeZone) : now;
+  const to = new Date(from.getTime() + (day ? 1 : 60) * 86_400_000);
+  let best: { event: Commitment; startsAt: string | null } | null = null;
+  let bestAt = Infinity;
+  for (const event of candidates) {
+    for (const occ of expandEvent(event, from, to, world.timeZone)) {
+      if (!day && occ.end.getTime() < now.getTime()) continue;
+      if (occ.start.getTime() < bestAt) {
+        bestAt = occ.start.getTime();
+        best = { event, startsAt: occ.start.toISOString() };
+      }
+    }
+  }
+  // A named event with no upcoming date still lends its title and notes.
+  return best ?? (named && !day ? { event: named, startsAt: null } : null);
+}
+
+/**
+ * Fills a template from the event and from what the user said. Anything not
+ * found stays as `{name}` on the card, and Send refuses until it is filled.
+ */
+function assessTemplateEmail(intent: Intent, world: World, template: AutomationTemplate): Assessment {
+  const to = cleanEmail(intent.emailTo) ?? template.payload.to;
+  const names = templateVariables(template.payload.subject, template.payload.body);
+  const found = eventForTemplate(intent, world, template);
+  const fromEvent = found ? eventTemplateVars(found.event, found.startsAt, world.timeZone, names) : {};
+  const vars = { ...fromEvent, ...(intent.templateValues ?? {}) };
+  const subject = fillTemplate(template.payload.subject, vars);
+  const body = fillTemplate(template.payload.body, vars);
+  const draft = validateOutgoingEmail({ to, subject, body });
+  if (!draft.ok) return needs(intent, "message", template.title, draft.error);
+  const when = found?.startsAt ? `${found.event.title}, ${String(fromEvent.date ?? "")}`.replace(/, $/, "") : found?.event.title ?? null;
+  return {
+    status: "ready",
+    intent,
+    spec: { kind: "send_email", ...draft.value, template: { title: template.title, event: when, missing: unfilledVariables(draft.value) } },
+  };
+}
+
 function findTemplates(templates: AutomationTemplate[], name: string | null): AutomationTemplate[] {
   const n = normalizeText(name ?? "");
   if (!n) return [];
@@ -1198,23 +1286,28 @@ function findTemplates(templates: AutomationTemplate[], name: string | null): Au
 function assessTemplate(intent: Intent, world: World): Assessment {
   const about = intent.title ?? "Automation";
   if (!intent.title) return needs(intent, "other", "Automation", "What should this automation be called?");
-  if (!intent.templateKind) return needs(intent, "recurrence", intent.title, "Should this go out every week, or when an event is booked?");
+  if (!intent.templateKind) return needs(intent, "recurrence", intent.title, "Should this go out every week, when an event is booked, or only when you ask for it?");
   const to = cleanEmail(intent.emailTo);
   if (!to) return needs(intent, "recipient", intent.title, "What email address should it go to?");
   const body = (intent.emailBody ?? "").trim();
-  if (!body) return needs(intent, "message", intent.title, "What should the email say? You can use {student_name}, {grade}, {event_title}, {date}, and {time}.");
+  if (!body) {
+    const vars = intent.templateKind === "template" ? "{student_name}, {grade}, {materials}, or any {name} written in the event notes" : "{student_name}, {grade}, {event_title}, {date}, and {time}";
+    return needs(intent, "message", intent.title, `What should the email say? You can use ${vars}.`);
+  }
   const schedule = intent.templateKind === "recurring"
     ? intent.days[0] && intent.startTime
       ? { kind: "weekly" as const, weekday: intent.days[0], time: intent.startTime }
       : null
-    : { kind: "event" as const };
+    : intent.templateKind === "template"
+      ? { kind: "manual" as const }
+      : { kind: "event" as const };
   if (intent.templateKind === "recurring" && !intent.days[0]) return needs(intent, "days", intent.title, "Which day should it go out?");
   if (intent.templateKind === "recurring" && !intent.startTime) return needs(intent, "time", intent.title, "What time should it go out?");
-  const match = intent.templateKind === "conditional" ? intent.templateMatch : null;
+  const match = intent.templateKind === "recurring" ? null : intent.templateMatch;
   if (intent.templateKind === "conditional" && !match) return needs(intent, "target", intent.title, "Which event should this watch? For example, tutoring.");
   const checked = validateTemplate({
     title: intent.title,
-    templateType: intent.templateKind === "recurring" ? "recurring_automation" : "conditional_trigger",
+    templateType: intent.templateKind === "recurring" ? "recurring_automation" : intent.templateKind === "template" ? "email_template" : "conditional_trigger",
     schedule: schedule ?? { kind: "event" },
     payload: { to, subject: intent.title, body, match },
   });

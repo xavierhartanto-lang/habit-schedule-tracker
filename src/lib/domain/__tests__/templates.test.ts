@@ -71,3 +71,37 @@ describe("template drafts", () => {
     });
   });
 });
+
+describe("email template placeholders", () => {
+  it("fills any custom placeholder and lists what is still blank", async () => {
+    const { fillTemplate: fill, unfilledVariables, templateVariables } = await import("../templates");
+    expect(fill("Room {room}, {materials}", { room: "12" })).toBe("Room 12, {materials}");
+    expect(templateVariables("{a} {b}", "{a} {c_d}")).toEqual(["a", "b", "c_d"]);
+    expect(unfilledVariables({ subject: "Hi", body: "{grade} and {x}" })).toEqual(["grade", "x"]);
+    expect(fill("{constructor} {toString}", {})).toBe("{constructor} {toString}");
+  });
+
+  it("reads Label: value notes, with aliases and bullets, and nothing else", async () => {
+    const { extractNoteValues } = await import("../templates");
+    const notes = "- Student: Maya\n• Grade level: 7\nPrint: worksheet 4, ruler\nRemember snacks";
+    expect(extractNoteValues(notes, ["student_name", "grade", "materials", "teacher"])).toEqual({
+      student_name: "Maya",
+      grade: "7",
+      materials: "worksheet 4, ruler",
+    });
+    expect(extractNoteValues("Name: Leo; Room: B2", ["student_name", "room"])).toEqual({ student_name: "Leo", room: "B2" });
+    expect(extractNoteValues("Bus parent pickup at 4:30", ["student_name"])).toEqual({});
+    expect(extractNoteValues(null, ["grade"])).toEqual({});
+  });
+
+  it("saves an email template with no schedule and an optional event match", async () => {
+    const { validateTemplate: check } = await import("../templates");
+    const ok = check({
+      title: "Office print",
+      templateType: "email_template",
+      schedule: { kind: "event" },
+      payload: { to: "office@school.edu", subject: "Print {materials}", body: "For {student_name}", match: " " },
+    });
+    expect(ok).toMatchObject({ ok: true, value: { schedule: { kind: "manual" }, payload: { match: null } } });
+  });
+});

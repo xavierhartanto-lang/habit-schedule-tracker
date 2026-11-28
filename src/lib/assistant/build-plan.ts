@@ -1280,7 +1280,17 @@ export function buildPlan(input: BuildInput): BuiltPlan {
         break;
       }
       case "send_email": {
+        const tpl = spec.template;
+        const blanks = tpl?.missing.map((n) => `{${n}}`) ?? [];
         ctx.notes.push(`${spec.subject} is on a card for ${spec.to}. It is not sent until they press Send. Say that, and don't claim it went out.`);
+        if (tpl) {
+          ctx.notes.push(
+            tpl.event
+              ? `It uses their “${tpl.title}” template, filled from ${tpl.event}. Only facts from that event or their message were used.`
+              : `It uses their “${tpl.title}” template. No matching event was found, so nothing was filled from the calendar.`,
+          );
+          if (blanks.length) ctx.notes.push(`${blanks.join(", ")} ${blanks.length === 1 ? "is" : "are"} still blank. Ask them to fill it in on the card or tell you. Never suggest a value.`);
+        }
         ctx.items.push({
           action: "send_email",
           title: spec.subject,
@@ -1290,15 +1300,21 @@ export function buildPlan(input: BuildInput): BuiltPlan {
           payload: { to: spec.to, subject: spec.subject, body: spec.body },
           display: {
             ...EMPTY_DISPLAY,
-            detail: `To ${spec.to}`,
-            reason: "Nothing is sent until you press Send. You can edit it first.",
+            detail: tpl ? `To ${spec.to} · ${tpl.title}${tpl.event ? ` · From ${tpl.event}` : ""}` : `To ${spec.to}`,
+            reason: blanks.length
+              ? `Fill in ${blanks.join(", ")} first. ${blanks.length === 1 ? "It wasn't" : "They weren't"} in the event notes or your message. Nothing is sent until you press Send.`
+              : "Nothing is sent until you press Send. You can edit it first.",
             editable: true,
           },
         });
         break;
       }
       case "template_save": {
-        ctx.notes.push(`${spec.title} is on a card. Approving it turns the automation on. After that, Whitespace sends those emails itself. Say that. This approval does not send one now.`);
+        ctx.notes.push(
+          spec.templateType === "email_template"
+            ? `${spec.title} is on a card. Approving it saves the template. It never sends by itself: when they ask, Whitespace fills it from the calendar and shows a card that waits for Send. Say that.`
+            : `${spec.title} is on a card. Approving it turns the automation on. After that, Whitespace sends those emails itself. Say that. This approval does not send one now.`,
+        );
         ctx.items.push({
           action: "save_template",
           title: spec.title,
@@ -1307,8 +1323,16 @@ export function buildPlan(input: BuildInput): BuiltPlan {
           payload: { templateId: spec.id, title: spec.title, templateType: spec.templateType, schedule: spec.schedule, payload: spec.payload },
           display: {
             ...EMPTY_DISPLAY,
-            detail: spec.templateType === "conditional_trigger" ? `When an event contains “${spec.payload.match}”` : "Every week",
-            reason: "After you approve this, matching emails send on their own.",
+            detail:
+              spec.templateType === "email_template"
+                ? `Template · To ${spec.payload.to}`
+                : spec.templateType === "conditional_trigger"
+                  ? `When an event contains “${spec.payload.match}”`
+                  : "Every week",
+            reason:
+              spec.templateType === "email_template"
+                ? "Saved for later. It never sends by itself. Each use waits for Send."
+                : "After you approve this, matching emails send on their own.",
             editable: false,
           },
         });

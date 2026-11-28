@@ -27,6 +27,7 @@ import { sendApprovedEmail } from "@/features/google/server/mail";
 import { DataValidationError, SupabaseNotConfiguredError } from "@/lib/db/client";
 import { getEvent, linkSessionsToTask, markPastSessionsDone } from "@/lib/db/events";
 import { insertTemplate, isMissingTemplates, listTemplates, setTemplateActive, updateTemplate } from "@/lib/db/templates";
+import { unfilledVariables } from "@/lib/domain/templates";
 import { stageForBookedEvent } from "@/features/automations/server/stage";
 import { listGoals } from "@/lib/db/goals";
 import { listActiveHabits } from "@/lib/db/habits";
@@ -760,6 +761,14 @@ export async function approveItems(
       if (!parsed.ok) {
         await updateOpenItem(userId, item, { error: parsed.error });
         results.push({ itemId: item.id, outcome: "failed", message: parsed.error });
+        continue;
+      }
+      // A template placeholder left blank is never sent as "{grade}".
+      const blanks = unfilledVariables(parsed.value);
+      if (blanks.length) {
+        const message = `Fill in ${blanks.map((n) => `{${n}}`).join(", ")} before sending. Nothing was sent.`;
+        await updateOpenItem(userId, item, { payload: parsed.value, error: message });
+        results.push({ itemId: item.id, outcome: "failed", message });
         continue;
       }
       try {

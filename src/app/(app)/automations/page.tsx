@@ -10,7 +10,7 @@ export default function AutomationsPage() {
     <div className="mx-auto w-full max-w-2xl space-y-8">
       <PageHeader
         title="Automations"
-        description="Weekly reminders and emails when something is booked. Whitespace sends them for you."
+        description="Automations send by themselves until you turn them off. Email templates are filled from your calendar when you ask in chat, and always wait for Send."
       />
       <Suspense fallback={<Skeleton className="h-72 rounded-2xl" />}>
         <AutomationsContent />
