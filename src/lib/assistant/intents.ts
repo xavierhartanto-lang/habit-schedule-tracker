@@ -60,7 +60,7 @@ const AMOUNT_KINDS = ["total", "sessions", "single"] as const;
 const CADENCES = ["daily", "weekly", "specific_days"] as const;
 const FACT_CATEGORIES = ["activity", "interest", "routine", "working_time", "preference"] as const;
 const SCOPES = ["one", "all"] as const;
-const TEMPLATE_KINDS = ["recurring", "conditional"] as const;
+const TEMPLATE_KINDS = ["recurring", "conditional", "template"] as const;
 export type Scope = (typeof SCOPES)[number];
 
 export type Recurrence = (typeof RECURRENCES)[number];
@@ -128,8 +128,9 @@ const WireIntent = z.object({
   pref_protected_label: z.string().nullable().describe("update_preferences: protected time name, e.g. 'Family dinner'."),
   email_to: z.string().nullish().describe("send_email: the one address the user stated. Null if they didn't."),
   email_body: z.string().nullish().describe("send_email: the full plain-text email, using only facts the user stated or that are already known. Null if they didn't say what it should say."),
-  template_kind: z.enum(TEMPLATE_KINDS).nullable().describe("save_template: recurring = every week, conditional = when an event is booked. Null if not an automation."),
+  template_kind: z.enum(TEMPLATE_KINDS).nullable().describe("save_template: recurring = every week, conditional = when an event is booked, template = a saved email used only when asked in chat. Null otherwise."),
   template_match: z.string().nullish().describe("save_template conditional: words the event title must contain, such as tutoring."),
+  template_values: z.array(z.string()).nullish().describe('send_email from a template: "name=value" for each placeholder value the user stated in this message, e.g. "grade=7". Never a guess.'),
 });
 
 export const PlannerWireSchema = z.object({
@@ -212,8 +213,11 @@ const ApiIntent = z.object({
   pref_protected_label: apiText("update_preferences: protected time name, e.g. 'Family dinner'."),
   email_to: apiText("send_email: the one email address the user stated."),
   email_body: apiText("send_email: the full plain-text email. Only facts the user stated or that are already known. Empty if they did not say what it should say."),
-  template_kind: apiEnum(TEMPLATE_KINDS).describe('save_template: "recurring" every week, or "conditional" when an event is booked. "none" otherwise.'),
+  template_kind: apiEnum(TEMPLATE_KINDS).describe('save_template: "recurring" every week, "conditional" when an event is booked, "template" a saved email used only when asked in chat. "none" otherwise.'),
   template_match: apiText("save_template conditional: words the event title must contain, such as tutoring."),
+  template_values: z
+    .array(z.string())
+    .describe('send_email from a template: "name=value" for each placeholder value the user stated in this message ("grade=7", "materials=worksheet 4"). Empty if they stated none. Never a guess.'),
 });
 
 export const PlannerApiSchema = z.object({
@@ -223,7 +227,7 @@ export const PlannerApiSchema = z.object({
 export type PlannerApi = z.infer<typeof PlannerApiSchema>;
 
 /** Keys whose values are never "not stated" markers. */
-const KEEP_AS_IS = new Set(["type", "evidence", "explicit", "days", "make_room"]);
+const KEEP_AS_IS = new Set(["type", "evidence", "explicit", "days", "make_room", "template_values"]);
 const DATE_KEYS = new Set(["date", "deadline", "target_date"]);
 
 function unmark(value: unknown): unknown {
@@ -318,9 +322,11 @@ export type Intent = {
   /** send_email: the draft body. */
   emailBody: string | null;
   /** save_template: weekly, or when an event is booked. */
-  templateKind: "recurring" | "conditional" | null;
+  templateKind: "recurring" | "conditional" | "template" | null;
   /** save_template conditional: words the event title must contain. */
   templateMatch: string | null;
+  /** send_email from a template: placeholder values the user stated, already checked against their words. */
+  templateValues: Record<string, string>;
 };
 
 /** Unfinished intent the assistant is still asking about. Stored on the conversation. */
@@ -422,7 +428,34 @@ export function toIntent(raw: WireIntentT): Intent {
     emailBody: emailText(raw.email_body),
     templateKind: raw.template_kind ?? null,
     templateMatch: clean(raw.template_match, 200),
+    templateValues: templateValues(raw.template_values),
   };
+}
+
+const VALUE_NAME_RE = /^[a-z][a-z0-9_]{0,39}$/;
+
+/** "grade=7" pairs into a map. Bad names and blank values are dropped. */
+function templateValues(raw: string[] | null | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const pair of (raw ?? []).slice(0, 12)) {
+    const at = pair.indexOf("=");
+    if (at < 1) continue;
+    const name = pair.slice(0, at).trim().toLowerCase().replace(/[\s-]+/g, "_");
+    const value = clean(pair.slice(at + 1), 200);
+    if (VALUE_NAME_RE.test(name) && value) out[name] = value;
+  }
+  return out;
+}
+
+/** Keeps only values the user actually typed, so a grade or name is never made up. */
+export function groundTemplateValues(values: Record<string, string>, userText: string): Record<string, string> {
+  const said = ` ${normalizeText(userText)} `;
+  return Object.fromEntries(
+    Object.entries(values).filter(([, value]) => {
+      const v = normalizeText(value);
+      return v.length > 0 && said.includes(` ${v} `);
+    }),
+  );
 }
 
 /**
@@ -499,6 +532,7 @@ export function mergeIntent(draft: Intent, next: Intent): Intent {
     emailBody: pick(draft.emailBody, next.emailBody),
     templateKind: pick(draft.templateKind, next.templateKind),
     templateMatch: pick(draft.templateMatch, next.templateMatch),
+    templateValues: { ...draft.templateValues, ...next.templateValues },
   };
 }
 
@@ -571,6 +605,7 @@ export function validatePlannerOutput(
   for (const raw of wire.intents) {
     const label = clean(raw.title, 80) ?? raw.type;
     let intent = toIntent(raw);
+    intent = { ...intent, templateValues: groundTemplateValues(intent.templateValues, input.userText) };
 
     if (intent.type === "confirm_action") {
       // Approval in words. Grounded like anything else, so a model can't approve on its own.

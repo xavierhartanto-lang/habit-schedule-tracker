@@ -56,7 +56,13 @@ export async function insertTemplate(userId: string, input: Omit<AutomationTempl
   if (error) throw dbError(error);
 }
 
-export async function updateTemplate(userId: string, id: string, input: Omit<AutomationTemplate, "id" | "active">): Promise<void> {
+/** Saves changes. Turns it on unless `keepActive` (an edit on the Automations page leaves on/off as it was). */
+export async function updateTemplate(
+  userId: string,
+  id: string,
+  input: Omit<AutomationTemplate, "id" | "active">,
+  options: { keepActive?: boolean } = {},
+): Promise<void> {
   const supabase = await requireDb();
   const { data, error } = await supabase
     .from("templates")
@@ -65,7 +71,7 @@ export async function updateTemplate(userId: string, id: string, input: Omit<Aut
       template_type: input.templateType,
       schedule_rule: input.schedule as unknown as Json,
       payload: input.payload as unknown as Json,
-      is_active: true,
+      ...(options.keepActive ? {} : { is_active: true }),
     })
     .eq("user_id", userId)
     .eq("id", id)

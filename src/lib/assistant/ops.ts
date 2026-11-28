@@ -132,7 +132,7 @@ export const PAYLOAD_SCHEMAS = {
     .object({
       templateId: z.string().uuid().nullish(),
       title: z.string(),
-      templateType: z.enum(["recurring_automation", "conditional_trigger"]),
+      templateType: z.enum(["recurring_automation", "conditional_trigger", "email_template"]),
       schedule: z.record(z.string(), z.unknown()),
       payload: z.record(z.string(), z.unknown()),
     })

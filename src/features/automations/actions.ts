@@ -3,7 +3,7 @@
 import { isUuid } from "@/lib/domain/context-items";
 import { isWeekday, validateTemplate, type TemplateType } from "@/lib/domain/templates";
 import { DataValidationError, NotFoundError } from "@/lib/db/client";
-import { deleteTemplate, insertTemplate, setTemplateActive } from "@/lib/db/templates";
+import { deleteTemplate, insertTemplate, setTemplateActive, updateTemplate } from "@/lib/db/templates";
 import type { ActionResult } from "@/features/shared/action-result";
 import { runAction } from "@/features/shared/run-action";
 
@@ -13,23 +13,29 @@ export async function saveAutomation(form: unknown): Promise<ActionResult> {
   return runAction(PATHS, async (userId) => {
     if (!form || typeof form !== "object") throw new DataValidationError("That automation is incomplete.");
     const raw = form as Record<string, unknown>;
-    const templateType: TemplateType = raw.templateType === "conditional_trigger" ? "conditional_trigger" : "recurring_automation";
+    const templateType: TemplateType =
+      raw.templateType === "conditional_trigger" || raw.templateType === "email_template" ? raw.templateType : "recurring_automation";
+    const id = typeof raw.id === "string" && raw.id ? raw.id : null;
+    if (id && !isUuid(id)) throw new NotFoundError("Automation");
     const checked = validateTemplate({
       title: String(raw.title ?? ""),
       templateType,
       schedule:
         templateType === "recurring_automation"
           ? { kind: "weekly", weekday: isWeekday(raw.weekday) ? raw.weekday : "fr", time: String(raw.time ?? "") }
-          : { kind: "event" },
+          : templateType === "email_template"
+            ? { kind: "manual" }
+            : { kind: "event" },
       payload: {
         to: String(raw.to ?? ""),
         subject: String(raw.subject ?? raw.title ?? ""),
         body: String(raw.body ?? ""),
-        match: templateType === "conditional_trigger" ? String(raw.match ?? "") : null,
+        match: templateType === "recurring_automation" ? null : String(raw.match ?? ""),
       },
     });
     if (!checked.ok) throw new DataValidationError(checked.error);
-    await insertTemplate(userId, checked.value);
+    if (id) await updateTemplate(userId, id, checked.value, { keepActive: true });
+    else await insertTemplate(userId, checked.value);
   });
 }
 
